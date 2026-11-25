@@ -257,6 +257,8 @@ export class AcpToolRunner implements AcpToolHost {
   private failed = false;
   /** The agent's announced tool calls, by id, with their titles. */
   private readonly announced = new Map<string, string>();
+  /** Calls a subagent announced, by id, with its child session. */
+  private readonly childCalls = new Map<string, string>();
   /** Ids already given to a call this session; an agent may not reuse one. */
   private readonly claimed = new Set<string>();
   /** What each call recorded, so a resumed step replays it (spec 27 § Resuming a step). */
@@ -335,6 +337,30 @@ export class AcpToolRunner implements AcpToolHost {
     this.announced.set(update.toolCallId, update.title);
   }
 
+  /**
+   * Note a subagent's `tool_call`: a bridged call it makes is its nested
+   * agent's — its events go there, and it stays out of the step's items.
+   */
+  observeChild(sessionId: string, update: SessionUpdate): void {
+    if (update.sessionUpdate !== 'tool_call') {
+      return;
+    }
+    this.announced.set(update.toolCallId, update.title);
+    this.childCalls.set(update.toolCallId, sessionId);
+  }
+
+  /** The binding a call reports through: its subagent's nested agent, or the step's. */
+  private bindingFor(binding: AcpToolBinding, callId: string): AcpToolBinding {
+    const sessionId = this.childCalls.get(callId);
+    const events = sessionId === undefined ? undefined : binding.events.childBridge(sessionId);
+    return events
+      ? {
+          ...binding,
+          events,
+        }
+      : binding;
+  }
+
   /** The calls finished since the last take, in the order they ran. */
   takeFinished(): BridgedCall[] {
     const finished = this.finished;
@@ -373,7 +399,7 @@ export class AcpToolRunner implements AcpToolHost {
       };
     }
     try {
-      return await this.runInRound(binding, call, callId);
+      return await this.runInRound(this.bindingFor(binding, callId), call, callId);
     } catch (e) {
       this.failed = true;
       if (this.binding === binding) {
@@ -612,11 +638,14 @@ export class AcpToolRunner implements AcpToolHost {
       result: result.result,
       error: result.error,
     });
-    this.finished.push({
-      wireName: call.name,
-      callItem,
-      outputItem,
-    });
+    // A subagent's call is its own: never in the step's items.
+    if (!this.childCalls.has(callId)) {
+      this.finished.push({
+        wireName: call.name,
+        callItem,
+        outputItem,
+      });
+    }
     binding.events.itemAppended(outputItem);
     binding.events.toolEvent('tool_call_completed', {
       name: call.name,

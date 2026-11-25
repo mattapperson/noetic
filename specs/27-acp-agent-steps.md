@@ -305,7 +305,10 @@ live only to the host that holds the root, held while no host does, kept in
 the one ordered record of the root's turn, and sent again with the root's
 waiting requests when a host takes the turn with `_noetic/keeper/turn`. Each
 line is sent as the agent wrote it, so session ids are preserved, and the
-host's answers reach the agent by request id. Updates for a session the
+host's answers reach the agent by request id. A host that takes the root —
+by `_noetic/keeper/turn` or by prompting it — is first sent the announcement
+of each child the keeper knows under it, parents first, so a child an earlier
+turn started is placed before its traffic arrives. Updates for a session the
 keeper cannot place yet are held — a bounded number per session and a bounded
 number of sessions — and placed in order once the session is announced or
 becomes known; they are dropped if it never is. A request from a session the
@@ -313,7 +316,9 @@ keeper cannot place is asked of every host that attaches until it is
 answered, and moves to its root's waiting requests if the session is
 announced later, so the agent never waits on a host that was not asked. The
 keeper remembers at most a thousand descendants; past that it forgets the
-oldest, never one with a request still waiting.
+oldest, never one with a request still waiting — those may keep it over the
+cap until their requests are answered, and are trimmed then. A child's
+waiting requests become its root's before anything is trimmed.
 
 ### The remote runner
 
@@ -688,8 +693,9 @@ stop reason said so, else `completed`). A child announced by a child is
 nested under it (`parentId`). Updates for a session the connection does not
 know are dropped; an update that arrives before the connection knows whose
 it is — the agent's first updates for a session it creates, sent before its
-`session/new` answer — is held (at most 1000) until the session is known,
-then routed again in order, so a child announced early is still a child. A
+`session/new` answer, or a child's sent before its announcement — is held (at
+most 1000) until the session is known, then routed again in order: a child
+announced early is still a child, and its early updates are its own. A
 failed `session/load` forgets the session and every child it announced.
 While a session is loaded, its children's replayed updates are history and
 are not shown.

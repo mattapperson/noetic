@@ -1185,6 +1185,9 @@ async function runAcpStep<TContext, I, O>(params: {
       if (reloading) {
         return;
       }
+      if (!update.announcement) {
+        tools?.observeChild(update.sessionId, update.update);
+      }
       events.forwardChild(update);
     },
     onActivity: (activity: AcpClientActivity) => {

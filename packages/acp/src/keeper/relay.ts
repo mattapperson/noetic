@@ -193,6 +193,8 @@ export class AcpRelay {
   private readonly unscoped = new Map<Id, Pending>();
   /** Each descendant session, by id, to the root session it belongs to. */
   private readonly owners = new Map<string, string>();
+  /** The last line that announced each descendant, to tell a fresh host of it. */
+  private readonly announcements = new Map<string, string>();
   /** Updates for sessions not placed yet, held until one is announced. */
   private readonly provisional = new Map<string, string[]>();
   private initialized?: unknown;
@@ -267,7 +269,7 @@ export class AcpRelay {
     const sessionId = sessionIdOf(params);
     if (sessionId && (method === 'session/prompt' || method === 'session/load')) {
       const session = this.session(sessionId);
-      this.claim(session, false);
+      this.claim(sessionId, session, false);
       if (method === 'session/prompt') {
         session.turn = keeperId;
         session.finished = undefined;
@@ -316,7 +318,7 @@ export class AcpRelay {
       });
       return;
     }
-    this.claim(session, true);
+    this.claim(sessionId, session, true);
     if (session.finished) {
       const finished = session.finished;
       session.finished = undefined;
@@ -341,12 +343,21 @@ export class AcpRelay {
    * The current attachment takes the session: what it missed (the whole turn
    * when resuming one, else the backlog) and the agent's waiting requests.
    */
-  private claim(session: SessionState, replayTurn: boolean): void {
+  private claim(sessionId: string | undefined, session: SessionState, replayTurn: boolean): void {
     if (session.claimedBy === this.epoch) {
       return;
     }
     session.claimedBy = this.epoch;
     const missed = replayTurn ? session.journal : session.backlog;
+    // A host that never saw the root's children announced — they were started
+    // by an earlier turn — is told of them first, so it can place their
+    // traffic. Parents come before the children they announced.
+    const already = new Set(missed);
+    for (const announcement of this.ancestryOf(sessionId)) {
+      if (!already.has(announcement)) {
+        this.send.toHost(announcement);
+      }
+    }
     for (const update of missed) {
       this.send.toHost(update);
     }
@@ -370,6 +381,8 @@ export class AcpRelay {
     }
     for (const session of this.sessions.values()) {
       if (session.pending.delete(agentId)) {
+        // A child kept past the cap only while waited on can go now.
+        this.trimOwners();
         return;
       }
     }
@@ -541,7 +554,7 @@ export class AcpRelay {
     this.deliver(session, raw);
     const child = announcedChild(params);
     if (child) {
-      this.adoptChild(child, rootId);
+      this.adoptChild(child, rootId, raw);
     }
   }
 
@@ -584,15 +597,38 @@ export class AcpRelay {
   //#region Subagents
 
   /** A child session, announced under `rootId`'s tree, now belongs to that root. */
-  private adoptChild(child: string, rootId: string): void {
+  private adoptChild(child: string, rootId: string, announcement: string): void {
     if (child === rootId || this.sessions.has(child)) {
       return;
     }
     // Re-set so a re-announced child counts as the newest.
     this.owners.delete(child);
     this.owners.set(child, rootId);
+    if (!this.announcements.has(child)) {
+      this.announcements.set(child, announcement);
+    }
+    // Its waiting requests become its root's before anything is trimmed, so
+    // a child with a request pending is never the one forgotten.
+    this.adoptRequests(child, this.session(rootId));
     this.trimOwners();
     this.adopt(child);
+  }
+
+  /**
+   * The announcements of `rootId`'s descendants, each the first that named it,
+   * in the order they were first announced: a parent before its children.
+   */
+  private ancestryOf(rootId: string | undefined): string[] {
+    if (rootId === undefined) {
+      return [];
+    }
+    const lines: string[] = [];
+    for (const [child, announcement] of this.announcements) {
+      if (this.owners.get(child) === rootId) {
+        lines.push(announcement);
+      }
+    }
+    return lines;
   }
 
   /** Forget the oldest descendants past the cap, never one with a request pending. */
@@ -603,6 +639,7 @@ export class AcpRelay {
       }
       if (!this.isWaitedOn(child, rootId)) {
         this.owners.delete(child);
+        this.announcements.delete(child);
       }
     }
   }

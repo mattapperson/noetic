@@ -154,6 +154,10 @@ export class AcpEventBridge {
   private toolNameOf: (title: string) => string | undefined = () => undefined;
   /** The turn's subagents by child session id (spec 08 § Nested agents). */
   private readonly children = new Map<string, ChildAgent>();
+  /** Set when the turn ended: no nested agent opens after that. */
+  private childrenClosed = false;
+  /** A nested agent's own tool calls by id, named as it announced them. */
+  private readonly ownToolNames = new Map<string, string>();
   private readonly step: Pick<StepAcpAgent, 'id' | 'emit'>;
   private readonly ctx: Context<ContextData>;
   /** Prefix of the scope ids of this turn's subagents: the step's dispatch path. */
@@ -173,8 +177,10 @@ export class AcpEventBridge {
     this.emitOption = step.emit;
     this.step = step;
     this.ctx = ctx;
-    this.scopeBase =
-      (ctx instanceof ContextImpl ? ctx.currentDispatch()?.path : undefined) ?? step.id;
+    // One turn's subagents are not another's, even when a steering retry runs
+    // the same dispatch path and the agent reuses a child session id.
+    const path = (ctx instanceof ContextImpl ? ctx.currentDispatch()?.path : undefined) ?? step.id;
+    this.scopeBase = `${path}/turn:${crypto.randomUUID().slice(0, 8)}`;
   }
 
   /**
@@ -183,7 +189,9 @@ export class AcpEventBridge {
    * step's.
    */
   forwardChild(child: AcpChildUpdate): void {
-    if (!this.broadcaster) {
+    // Once the turn is over its nested agents are closed: a late update opens
+    // nothing it could never complete.
+    if (!this.broadcaster || this.childrenClosed) {
       return;
     }
     const agent = this.children.get(child.sessionId) ?? this.openChild(child);
@@ -195,9 +203,9 @@ export class AcpEventBridge {
       return;
     }
     const { status, stopReason } = announcedState(child.update);
-    if (stopReason !== undefined) {
-      agent.stopReason = stopReason;
-    }
+    // Running again clears an earlier stop: a recovered child does not end
+    // with its old failure.
+    agent.stopReason = status === 'running' ? undefined : (stopReason ?? agent.stopReason);
     if (status !== undefined) {
       agent.bridge.framework('agent_status', {
         status,
@@ -253,6 +261,7 @@ export class AcpEventBridge {
 
   /** The turn is over: every subagent's bracket closes, and it is reported ended. */
   private closeChildren(fallback: AgentEnd): void {
+    this.childrenClosed = true;
     for (const agent of this.children.values()) {
       const end = agent.stopReason === undefined ? fallback : endOf(agent.stopReason);
       agent.bridge.end(agent.stopReason ?? (end === 'completed' ? 'end_turn' : end));
@@ -290,9 +299,21 @@ export class AcpEventBridge {
    * actually asked us to do, refusals included.
    */
   forwardActivity(activity: AcpClientActivity): void {
+    // A subagent's own file and terminal calls are its nested agent's.
+    const child =
+      activity.sessionId === undefined ? undefined : this.children.get(activity.sessionId);
+    if (child) {
+      child.bridge.forwardActivity(activity);
+      return;
+    }
     this.framework('acp_client_activity', {
       ...activity,
     });
+  }
+
+  /** The event bridge of the subagent in child session `sessionId`, when the turn has one. */
+  childBridge(sessionId: string): AcpEventBridge | undefined {
+    return this.children.get(sessionId)?.bridge;
   }
 
   /**
@@ -442,6 +463,29 @@ export class AcpEventBridge {
     this.completed = true;
   }
 
+  /**
+   * A nested agent's tool call that finished, as the generic tool event: its
+   * own tools are not bridged, so nothing else reports it.
+   */
+  private childToolSettled(
+    update: Extract<
+      SessionUpdate,
+      {
+        sessionUpdate: 'tool_call_update';
+      }
+    >,
+  ): void {
+    if (update.status !== 'completed' && update.status !== 'failed') {
+      return;
+    }
+    this.framework('tool_call_completed', {
+      name: this.ownToolNames.get(update.toolCallId) ?? update.title ?? update.toolCallId,
+      callId: update.toolCallId,
+      error: update.status === 'failed',
+    });
+    this.ownToolNames.delete(update.toolCallId);
+  }
+
   //#region internals
 
   /**
@@ -453,11 +497,17 @@ export class AcpEventBridge {
     if (!this.broadcaster) {
       return;
     }
-    const data = {
-      stepId: this.stepId,
-      agentId: this.agentId,
-      ...payload,
-    };
+    // A nested agent is named by its scope alone; the adapter's id is the step's.
+    const data = this.scope
+      ? {
+          stepId: this.stepId,
+          ...payload,
+        }
+      : {
+          stepId: this.stepId,
+          agentId: this.agentId,
+          ...payload,
+        };
     if (!shouldEmit(this.emitOption, eventType, data)) {
       return;
     }
@@ -572,6 +622,16 @@ export class AcpEventBridge {
   }
 
   private translate(update: SessionUpdate): void {
+    if (this.scope && update.sessionUpdate === 'tool_call') {
+      this.ownToolNames.set(update.toolCallId, update.title);
+      this.framework('tool_call_started', {
+        name: update.title,
+        callId: update.toolCallId,
+      });
+    }
+    if (this.scope && update.sessionUpdate === 'tool_call_update') {
+      this.childToolSettled(update);
+    }
     if (update.sessionUpdate === 'agent_message_chunk') {
       this.openMessage();
       this.sdk(

@@ -74,6 +74,10 @@ export async function* streamToChatChunks(
   let parked = false;
 
   for await (const event of events) {
+    // A nested agent's output is not the reply (spec 08 § Nested agents).
+    if (event.scope) {
+      continue;
+    }
     if (!claimed) {
       const claim = matchClaim(event, options.messageId);
       if (claim.kind === 'foreign' || claim.kind === 'dropped') {

@@ -132,6 +132,49 @@ function reattachAndResume(r: Rig): Message[] {
 }
 
 describe('AcpRelay subagents', () => {
+  it("tells a fresh host of a child an earlier turn started, before that child's traffic", () => {
+    const r = rig();
+    const first = openTurn(r);
+    r.agent(announce('s1', 'c1'));
+    r.agent(update('c1', 'first turn'));
+    r.agent({
+      jsonrpc: '2.0',
+      id: first,
+      result: {
+        stopReason: 'end_turn',
+      },
+    });
+    // A second prompt: its journal starts empty, but the child is reused.
+    r.host({
+      jsonrpc: '2.0',
+      id: 'p2',
+      method: 'session/prompt',
+      params: {
+        sessionId: 's1',
+        prompt: [],
+      },
+    });
+    r.relay.detach();
+    r.agent(update('c1', 'second turn'));
+    expect(reattachAndResume(r)).toEqual([
+      announce('s1', 'c1'),
+      update('c1', 'second turn'),
+    ]);
+  });
+
+  it('never forgets a child whose request is pending, and trims it once answered', () => {
+    const r = rig();
+    openTurn(r);
+    r.agent(request(90, 'elicitation/create', 'early'));
+    r.agent(announce('s1', 'early'));
+    for (let i = 0; i < 1001; i += 1) {
+      r.agent(announce('s1', `c${i}`));
+    }
+    // Still placed: its later updates reach the host, not a provisional buffer.
+    r.agent(update('early', 'still here'));
+    expect(r.toHost.at(-1)).toEqual(update('early', 'still here'));
+  });
+
   it('delivers a child session live while its root is held', () => {
     const r = rig();
     openTurn(r);

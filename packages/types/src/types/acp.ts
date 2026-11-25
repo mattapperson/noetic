@@ -373,6 +373,8 @@ export type AcpClientMethod =
 export interface AcpClientActivity {
   /** The ACP client method invoked, e.g. `fs/read_text_file`. */
   method: AcpClientMethod;
+  /** The session that made the call: the step's own, or a subagent's. */
+  sessionId?: string;
   /** Path involved, for the `fs/*` family and `terminal/create`'s cwd. */
   path?: string;
   /** Command line, for `terminal/create`. */

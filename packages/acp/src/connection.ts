@@ -595,6 +595,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         update: notification.update,
         announcement: true,
       });
+      this.drainChild(child);
     }
     const parent = this.children.get(owner);
     if (parent !== undefined) {
@@ -628,7 +629,18 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     if (this.children.size > CHILD_LIMIT && oldest !== undefined) {
       this.children.delete(oldest);
     }
-    this.early = this.early.filter((held) => held.sessionId !== child);
+  }
+
+  /** A child's updates held before it was announced, routed now as its own, in order. */
+  private drainChild(child: string): void {
+    const held = this.early.filter((notification) => notification.sessionId === child);
+    if (held.length === 0) {
+      return;
+    }
+    this.early = this.early.filter((notification) => notification.sessionId !== child);
+    for (const notification of held) {
+      this.route(notification);
+    }
   }
 
   /** The sink the client hands every `session/update` notification. */

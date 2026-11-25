@@ -726,6 +726,13 @@ show one.
   `getReasoningStream()` and `getItemStream()` — and the display output a
   session persists, which folds the same way — leave scoped events out:
   a nested agent's answer is never the run's. `getFullStream()` keeps them.
+  Every flat transcript built from the full stream does the same: a chat
+  reply (`29-chat-platform-integration`) and a served session's updates to its
+  editor (`31-acp-server`) carry the run's own output only.
+- **Everything a nested agent does is its own.** Its tool calls are the
+  generic `tool_call_started` / `tool_call_completed` (scoped); a call it
+  makes through the step's tool bridge reports on its scope and never joins
+  the step's items; its file and terminal calls are reported on its scope.
 - **Each nested agent brackets its own output** with `response.created` /
   `response.completed`, and its output indexes are its own, so a consumer
   folding one scope never collides with another.
@@ -733,10 +740,14 @@ show one.
   (`{ title?, description? }`), `agent_status` (`{ status: 'running' | 'idle'
   | 'waiting' | 'unknown', stopReason? }`) as the agent reports it, and
   `agent_completed` (`{ status: 'completed' | 'failed' | 'cancelled' }`) when
-  the turn that ran it ends.
-- **Ids.** A nested agent's `id` is the step's dispatch path and the
-  subagent's own id (`<path>/agent:<id>`); `parentId` names the nested agent
-  that started it, absent when the step's own agent did.
+  the turn that ran it ends — from its last stop reason; running again clears
+  an earlier one. Once that turn has ended nothing more of it is shown: an
+  update that arrives late opens no new nested agent.
+- **Ids.** `scope.id` is the nested agent's identity — scoped events carry no
+  adapter id. It is the step's dispatch path, the turn, and the subagent's own
+  id (`<path>/turn:<turn>/agent:<id>`), so a steering retry or a later prompt
+  that reuses a child id is another nested agent; `parentId` names the nested
+  agent that started it, absent when the step's own agent did.
 - **Usage.** A nested agent's spend is the step's: the agent reports its turn's
   usage with its subagents' included, and nothing is charged twice.
 

@@ -520,6 +520,56 @@ describe("subagents' own sessions", () => {
     await rig.close();
   });
 
+  test("a child's update sent before its announcement is the child's once it is announced", async () => {
+    const children: Array<
+      [
+        string,
+        boolean,
+        string,
+      ]
+    > = [];
+    const rig = await createAcpTestRig({
+      onChildUpdate: (child) => {
+        children.push([
+          child.sessionId,
+          child.announcement,
+          child.update.sessionUpdate,
+        ]);
+      },
+      script: {
+        onPrompt: async (conn, params) => {
+          await conn.sessionUpdate(textChunk('kid', 'too early'));
+          await conn.sessionUpdate(subagentAnnounce(params.sessionId, 'kid'));
+          await conn.sessionUpdate(textChunk('kid', 'after'));
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+    expect(children).toEqual([
+      [
+        'kid',
+        true,
+        'subagent_update',
+      ],
+      [
+        'kid',
+        false,
+        'agent_message_chunk',
+      ],
+      [
+        'kid',
+        false,
+        'agent_message_chunk',
+      ],
+    ]);
+    await rig.close();
+  });
+
   test("a child's update sent before its announcement never reaches the step", async () => {
     const rig = await createAcpTestRig({
       script: {

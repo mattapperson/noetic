@@ -294,6 +294,8 @@ for await (const event of harness.getFullStream()) {
 }
 ```
 
+A chat reply built with `@noetic-tools/chat-sdk` and a session served over ACP to an editor show the run's own output the same way. A nested agent's tool calls, its calls to your tools and its file and terminal calls are all reported on its scope, never as the run's. `scope.id` identifies it; its events carry no adapter id.
+
 `spawn` is not a nested agent: it gives the same agent a fresh context window, and its output is the run's.
 
 ### Stream Idle Timeout
