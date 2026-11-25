@@ -153,47 +153,6 @@ function readFunctionCallArgs(event: StreamEvent): {
   };
 }
 
-/**
- * Prefix applied to a nested sub-agent's tool-call ids so they can never
- * collide with a first-party call's id in the same session.
- */
-const NESTED_ID_PREFIX = 'sub:';
-
-/**
- * A nested `step.acpAgent` turn re-emits its protocol traffic as
- * `acp.<sessionUpdate>` sdk events carrying the raw update — the proxy path.
- * Only call-shaped updates are forwarded (message chunks already surface
- * through the model-stream events and would double otherwise), each is
- * shape-checked before it can reach the wire, and tool-call ids are
- * namespaced into the sub-agent's own id space.
- */
-function readNestedUpdate(event: StreamEvent): ServeSessionUpdate | null {
-  if (!event.type.startsWith('acp.')) {
-    return null;
-  }
-  const update = event.data.update;
-  if (typeof update !== 'object' || update === null) {
-    return null;
-  }
-  const record = frameworkCast<Record<string, unknown>>(update);
-  if (record.sessionUpdate === 'plan') {
-    return Array.isArray(record.entries) ? frameworkCast<ServeSessionUpdate>(update) : null;
-  }
-  if (record.sessionUpdate !== 'tool_call' && record.sessionUpdate !== 'tool_call_update') {
-    return null;
-  }
-  if (typeof record.toolCallId !== 'string') {
-    return null;
-  }
-  if (record.sessionUpdate === 'tool_call' && typeof record.title !== 'string') {
-    return null;
-  }
-  return frameworkCast<ServeSessionUpdate>({
-    ...record,
-    toolCallId: `${NESTED_ID_PREFIX}${record.toolCallId}`,
-  });
-}
-
 //#endregion
 
 //#region Pump
@@ -280,11 +239,6 @@ async function handleSdkEvent(state: TurnState, event: StreamEvent): Promise<voi
   const fc = readFunctionCallArgs(event);
   if (fc) {
     state.argsByCallId.set(fc.callId, fc.args);
-    return;
-  }
-  const nested = readNestedUpdate(event);
-  if (nested) {
-    await notifyIfPrimary(params, primary, nested);
   }
 }
 
@@ -382,9 +336,12 @@ async function handleFrameworkEvent(
   }
   if (hasEventName(event, 'turn_completed') && matchesTurn(event, state.turnId)) {
     await flushOpenCalls(state, 'completed');
+    // The turn's last step decides: one that stopped at a cap says so.
+    const stopReason = event.data.stopReason;
     return {
       kind: 'stop',
-      stopReason: 'end_turn',
+      stopReason:
+        stopReason === 'max_tokens' || stopReason === 'max_turn_requests' ? stopReason : 'end_turn',
     };
   }
   if (hasEventName(event, 'turn_aborted') && matchesTurn(event, state.turnId)) {

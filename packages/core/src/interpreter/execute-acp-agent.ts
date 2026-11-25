@@ -17,7 +17,6 @@ import type {
   AcpContentBlock,
   AcpCreateElicitationRequest,
   AcpKeepAlive,
-  AcpLiveSession,
   AcpNewSessionOptions,
   AcpPermissionOutcome,
   AcpPermissionSteerer,
@@ -29,9 +28,9 @@ import type {
   Context,
   ContextData,
   ContextLayer,
-  FunctionCallItem,
   Item,
   LLMResponse,
+  RoundUsage,
   StepAcpAgent,
   StepMeta,
 } from '@noetic-tools/types';
@@ -47,7 +46,8 @@ import {
 } from '@noetic-tools/types';
 import { assertAgentTakesTools } from '../builders/acp-agent-checks';
 import { runtimeOf } from '../connections/model-tools';
-import type { AcpSessionStore } from '../runtime/acp-session-store';
+import type { AcpLiveSession, AcpSessionStore } from '../runtime/acp-session-store';
+import { acpSessionsOf } from '../runtime/acp-session-store';
 import { awaitApproval } from '../runtime/tool-approval';
 import { isRpcError, RpcFailure } from '../util/error-message';
 import { AcpEventBridge } from './acp-events';
@@ -70,9 +70,7 @@ import { isContextImpl, isFunctionCall, isMutableContext } from './typeguards';
  * `layerStateStore`.
  */
 function sessionStore(ctx: Context<ContextData>): AcpSessionStore {
-  return frameworkCast<{
-    acpSessions: AcpSessionStore;
-  }>(ctx.harness).acpSessions;
+  return acpSessionsOf(ctx.harness);
 }
 
 /**
@@ -127,36 +125,81 @@ function buildContent(opts: {
   return content;
 }
 
+/**
+ * The turn's tokens as a model round reports them, from the adapter. What the
+ * agent's `session/prompt` answer reports is the session's running total, not
+ * the turn's, so it is never charged.
+ */
+function turnUsage(result: AcpTurnResult): RoundUsage | undefined {
+  if (!result.usage) {
+    return undefined;
+  }
+  return {
+    inputTokens: result.usage.input,
+    outputTokens: result.usage.output,
+    cachedTokens: result.usage.cached,
+  };
+}
+
+/** The turn as a model call's response, for usage accounting and `afterModelCall` layers. */
 function toLlmResponse(result: AcpTurnResult): LLMResponse {
   return {
     items: result.items,
-    usage: {
-      inputTokens: result.usage?.input ?? 0,
-      outputTokens: result.usage?.output ?? 0,
-      cachedTokens: result.usage?.cached,
+    usage: turnUsage(result) ?? {
+      inputTokens: 0,
+      outputTokens: 0,
     },
     cost: result.cost,
   };
 }
 
+/**
+ * The model the session runs with: its `model` config option's current value —
+ * found as the session finds it to set it, by category, else by id — else the
+ * model the step selected.
+ */
+function currentModel(session: AcpSession, selected: string | undefined): string | undefined {
+  const selects = (session.configOptions ?? []).filter((option) => option.type === 'select');
+  const option =
+    selects.find((candidate) => candidate.category === 'model') ??
+    selects.find((candidate) => candidate.id === 'model');
+  return option?.type === 'select' ? option.currentValue : selected;
+}
+
+/** Record a turn's items and charge its spend: every attempt, as every model call is. */
 function applyTurnResult(ctx: Context<ContextData>, result: AcpTurnResult): void {
-  const toolCalls: FunctionCallItem[] = [];
   for (const item of result.items) {
     ctx.itemLog.append(item);
-    if (isFunctionCall(item)) {
-      toolCalls.push(item);
-    }
   }
+  trackUsage(ctx, toLlmResponse(result));
+}
 
-  const llmResponse = toLlmResponse(result);
-  trackUsage(ctx, llmResponse);
-
+/** Publish the accepted turn's metadata, as a `callModel` step does once its outcome is settled. */
+function publishStepMeta(
+  ctx: Context<ContextData>,
+  result: AcpTurnResult,
+  model: string | undefined,
+): void {
+  const toolCalls = result.items.filter(isFunctionCall);
+  const stopReason = result.stopReason;
   const meta: StepMeta = {
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-    usage: result.usage ? llmResponse.usage : undefined,
+    usage: turnUsage(result),
     cost: result.cost,
     responseItems: result.items,
-    acpStopReason: result.stopReason,
+    // Only a turn that returned is accepted: a refusal or a cancellation fails the step.
+    ...(stopReason === 'end_turn' ||
+    stopReason === 'max_tokens' ||
+    stopReason === 'max_turn_requests'
+      ? {
+          stopReason,
+        }
+      : {}),
+    ...(model === undefined
+      ? {}
+      : {
+          model,
+        }),
   };
   if (isMutableContext(ctx)) {
     ctx.lastStepMeta = meta;
@@ -527,7 +570,7 @@ function assertReuseIsKeptAlive<TContext, I, O>(step: StepAcpAgent<TContext, I, 
   throw new NoeticConfigError({
     code: 'ACP_REUSE_WITHOUT_KEEPALIVE',
     message: `step.acpAgent(${JSON.stringify(step.id)}) sets session.reuse '${policy.reuse}' but leaves keepAlive at 'step', so the connection closes before any other step can share it.`,
-    hint: "Add `keepAlive: 'run'` to share the connection for the rest of the run, or `keepAlive: 'harness'` to keep it past the run and close it yourself with `harness.closeAcpSessions()`.",
+    hint: "Add `keepAlive: 'run'` to share the connection for the rest of the run, or `keepAlive: 'harness'` to keep it past the run and close it yourself with `harness.close()`.",
   });
 }
 
@@ -902,7 +945,7 @@ async function applySessionSelection<TContext, I, O>(
   ctx: Context<TContext>,
   resolution: SessionResolution,
   baseCtx: Context<ContextData>,
-): Promise<void> {
+): Promise<string | undefined> {
   try {
     const mode = await resolveLazy(step.mode, ctx);
     if (mode) {
@@ -912,6 +955,7 @@ async function applySessionSelection<TContext, I, O>(
     if (model) {
       await resolution.live.session.setModel(model);
     }
+    return model || undefined;
   } catch (e) {
     await discardIfFresh(resolution, baseCtx);
     throw e;
@@ -1056,7 +1100,6 @@ async function runTurn<TContext, I, O>(params: {
   }
   if (tools) {
     const merged = mergeBridgedItems(result.items, tools.takeFinished());
-    bridge.adoptToolCalls(merged.adopted);
     result = {
       ...result,
       items: merged.items,
@@ -1180,7 +1223,7 @@ async function runAcpStep<TContext, I, O>(params: {
   // marked `replay: true`, and never the text, reasoning or item streams.
   let reloading = false;
 
-  let bridge = new AcpEventBridge(step, agent.agentId, baseCtx);
+  let bridge = new AcpEventBridge(step, baseCtx);
   // A tool pipeline error fails the step, as it does in `callModel`: it is
   // kept, the agent's turn is cancelled, and the error is thrown once the
   // turn has unwound.
@@ -1192,8 +1235,8 @@ async function runAcpStep<TContext, I, O>(params: {
     agentId: agent.agentId,
     layers,
     onUpdate: (notification) => {
+      // A loaded session's history is not this turn's output.
       if (reloading) {
-        events.forwardReplay(notification);
         return;
       }
       tools?.observe(notification.update);
@@ -1264,9 +1307,11 @@ async function runAcpStep<TContext, I, O>(params: {
     });
   }
 
-  await applySessionSelection(step, ctx, resolution, baseCtx).catch((cause: unknown) => {
-    throw stepFailure(step, cause, baseCtx);
-  });
+  const selectedModel = await applySessionSelection(step, ctx, resolution, baseCtx).catch(
+    (cause: unknown) => {
+      throw stepFailure(step, cause, baseCtx);
+    },
+  );
   turnError.cancel = () => resolution.live.session.cancel();
 
   // History seeds only a freshly opened session; a reused one already owns
@@ -1339,10 +1384,11 @@ async function runAcpStep<TContext, I, O>(params: {
       turnPrompt = guidance;
       turnBlocks = undefined;
       retries += 1;
-      bridge = new AcpEventBridge(step, agent.agentId, baseCtx);
+      bridge = new AcpEventBridge(step, baseCtx);
       bindHostToStep(resolution.live.host, bindingFor(bridge));
       continue;
     }
+    publishStepMeta(baseCtx, result, currentModel(resolution.live.session, selectedModel));
     if (layers && layers.length > 0) {
       await baseCtx.harness.storeLayers(layers, response, baseCtx);
     }

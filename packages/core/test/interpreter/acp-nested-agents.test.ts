@@ -53,7 +53,6 @@ function bridge(): {
       {
         id: 'step',
       },
-      'claude-code',
       ctx,
     ),
   };
@@ -334,7 +333,13 @@ describe('nested agents on the event bridge', () => {
       allowed: true,
       sessionId: 'root',
     });
-    const activity = events.filter((e) => e.type.endsWith(':acp_client_activity'));
+    const activity = events.filter((e) => e.type.endsWith(':workspace_access'));
+    expect(activity[0]?.data).toMatchObject({
+      operation: 'read_file',
+      path: '/w/a.ts',
+      allowed: true,
+    });
+    expect(activity[0]?.data).not.toHaveProperty('method');
     expect(
       activity.map((e) => [
         e.data.path,
@@ -758,6 +763,31 @@ describe("a subagent's bridged tool call", () => {
     );
     expect(appended.length).toBe(1);
     expect(appended[0]?.scope?.title).toBe('Explore');
+    // Its item and its whole lifecycle are the subagent's too, never the step's.
+    const call = events.filter(
+      (e) =>
+        (/tool_call_(started|completed)$/.test(e.type) && e.data.callId === 'child-call') ||
+        (e.type === 'response.output_item.done' && JSON.stringify(e.data).includes('child-call')),
+    );
+    expect(
+      call.map((e) => [
+        e.type.replace(/^.*:/, ''),
+        e.scope?.title,
+      ]),
+    ).toEqual([
+      [
+        'response.output_item.done',
+        'Explore',
+      ],
+      [
+        'tool_call_started',
+        'Explore',
+      ],
+      [
+        'tool_call_completed',
+        'Explore',
+      ],
+    ]);
   }, 10e3);
 });
 

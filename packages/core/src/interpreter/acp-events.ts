@@ -2,12 +2,12 @@
  * Maps an ACP turn's `session/update` notifications onto the harness's
  * observable event surface.
  *
- * Every one of the protocol's eight update variants is translated into the same
- * `source: 'sdk'` broadcaster events the model-call path emits, so a coding
- * agent's text, reasoning, and tool calls flow through `getTextStream()` /
+ * A coding agent's text, reasoning, and tool calls are translated into the same
+ * events the model-call path emits, so they flow through `getTextStream()` /
  * `getReasoningStream()` / `getItemStream()` / `getFullStream()` exactly like an
- * LLM step's output. Each notification is *also* re-emitted raw as an
- * `acp_event` framework event for consumers that want the protocol payload.
+ * LLM step's output. Nothing on the stream names the protocol: session state
+ * (modes, commands, config options, plans, context occupancy) is tracked on the
+ * live session, never emitted.
  *
  * `finalize()` guarantees a turn always emits its output: if an agent returns a
  * stop reason without streaming any text or tool calls, the result's content is
@@ -18,11 +18,15 @@ import type {
   AcpChildInfo,
   AcpChildUpdate,
   AcpClientActivity,
+  AcpClientMethod,
   AcpSessionNotification,
+  AcpToolCallContent,
   AcpTurnResult,
   AgentScope,
   Context,
   ContextData,
+  FunctionCallItem,
+  FunctionCallOutputItem,
   Item,
   StepAcpAgent,
 } from '@noetic-tools/types';
@@ -124,6 +128,74 @@ function announcedState(update: AcpChildUpdate['update']): {
 
 type SessionUpdate = AcpSessionNotification['update'];
 
+/** The output of a call the agent never reported finished before its turn ended. */
+const UNFINISHED_OUTPUT = 'The agent ended its turn before this call finished.';
+
+/** The output of a call to one of the step's tools that never reached the tool. */
+const NEVER_RAN_OUTPUT = 'The call never reached the tool.';
+
+/**
+ * One of the turn's tool calls, by the id its item and its lifecycle carry.
+ * The agent reports its own calls; the step's tool bridge reports calls to the
+ * step's tools, once it runs them.
+ */
+interface TurnCall {
+  readonly name: string;
+  readonly via: 'own' | 'bridged';
+  /** The stream that carries it: the step's, or a nested agent's. */
+  readonly bridge: AcpEventBridge;
+  /**
+   * `announced`: an agent named a call to one of the step's tools, and the
+   * bridge has not run it yet. `open`: started, not completed. `closed`: done.
+   */
+  state: 'announced' | 'open' | 'closed';
+  /** What the announcement gave as the call's input. */
+  readonly input?: unknown;
+}
+
+/** Every tool call of one turn, shared by the step's agent and its nested agents. */
+class TurnCalls {
+  readonly byId = new Map<string, TurnCall>();
+  /** Calls the bridge ran under an id no announcement had, in order: tool and input. */
+  readonly unannounced: Array<{
+    readonly name: string;
+    readonly input: string;
+  }> = [];
+}
+
+/** A call's input as a comparable key. */
+function inputKey(input: unknown): string {
+  if (typeof input === 'string') {
+    return input;
+  }
+  return JSON.stringify(input ?? {});
+}
+
+/** The text a tool call's content carries, when it carries any. */
+function contentText(
+  content: ReadonlyArray<AcpToolCallContent> | null | undefined,
+): string | undefined {
+  const texts = (content ?? []).flatMap((entry) =>
+    entry.type === 'content' && entry.content.type === 'text'
+      ? [
+          entry.content.text,
+        ]
+      : [],
+  );
+  return texts.length > 0 ? texts.join('\n') : undefined;
+}
+
+/** What a step did through the host's fs or shell adapters, as `workspace_access` names it. */
+const OPERATION_OF: Readonly<Record<AcpClientMethod, string>> = {
+  'fs/read_text_file': 'read_file',
+  'fs/write_text_file': 'write_file',
+  'terminal/create': 'run_command',
+  'terminal/output': 'read_output',
+  'terminal/wait_for_exit': 'wait',
+  'terminal/kill': 'kill',
+  'terminal/release': 'release',
+};
+
 /** Flatten an ACP content block for the text event surface. */
 function blockText(
   block: Extract<
@@ -149,15 +221,15 @@ export class AcpEventBridge {
   private readonly broadcaster?: EventBroadcaster;
   private readonly agentName: string;
   private readonly stepId: string;
-  private readonly agentId: string;
   private readonly emitOption: EmitOption | undefined;
   private started = false;
   private completed = false;
   private nextOutputIndex = 0;
   private messageOutputIndex: number | null = null;
+  /** The open message's id and its text so far. */
+  private messageId = '';
+  private messageText = '';
   private sawText = false;
-  /** Tool call ids already announced, so a `tool_call_update` never re-opens one. */
-  private readonly announcedToolCalls = new Set<string>();
   /** Maps an agent's title for a bridged tool call to the tool's wire name. */
   toolNameOf: (title: string) => string | undefined = () => undefined;
   /** The turn's subagents by child session id (spec 08 § Nested agents). */
@@ -168,8 +240,6 @@ export class AcpEventBridge {
   private readonly lineages = new Map<string, ReadonlyArray<AcpChildInfo>>();
   /** Each announced child's status, shown once it is. */
   private readonly statuses = new Map<string, ChildStatus>();
-  /** A nested agent's own tool calls by id, named as it announced them. */
-  private readonly ownToolNames = new Map<string, string>();
   private readonly step: Pick<StepAcpAgent, 'id' | 'emit'>;
   private readonly ctx: Context<ContextData>;
   /** Prefix of the scope ids of this turn's subagents: the step's dispatch path. */
@@ -177,15 +247,15 @@ export class AcpEventBridge {
 
   constructor(
     step: Pick<StepAcpAgent, 'id' | 'emit'>,
-    agentId: string,
     ctx: Context<ContextData>,
     /** The nested agent this bridge speaks for; absent for the step's own agent. */
     private readonly scope?: AgentScope,
+    /** The turn's tool calls, shared with the bridge of the agent that started this one. */
+    private readonly calls: TurnCalls = new TurnCalls(),
   ) {
     this.broadcaster = getBroadcaster(ctx);
     this.agentName = ctx.harness.config.name;
     this.stepId = step.id;
-    this.agentId = agentId;
     this.emitOption = step.emit;
     this.step = step;
     this.ctx = ctx;
@@ -286,7 +356,7 @@ export class AcpEventBridge {
     };
     const agent: ChildAgent = {
       scope,
-      bridge: new AcpEventBridge(this.step, this.agentId, this.ctx, scope),
+      bridge: new AcpEventBridge(this.step, this.ctx, scope, this.calls),
     };
     agent.bridge.toolNameOf = this.toolNameOf;
     this.children.set(info.sessionId, agent);
@@ -330,6 +400,7 @@ export class AcpEventBridge {
       return;
     }
     this.closeMessage();
+    this.settleOpenCalls();
     this.start();
     this.sdk('response.completed', {
       stopReason,
@@ -359,8 +430,10 @@ export class AcpEventBridge {
       child.bridge.forwardActivity(activity);
       return;
     }
-    this.framework('acp_client_activity', {
-      ...activity,
+    const { method, sessionId: _session, ...access } = activity;
+    this.framework('workspace_access', {
+      operation: OPERATION_OF[method],
+      ...access,
     });
   }
 
@@ -378,14 +451,42 @@ export class AcpEventBridge {
   }
 
   /**
-   * Treat these call ids as announced: each is a bridged call standing in the
-   * turn's items where the agent's own record was, already on the stream
-   * under the agent's id.
+   * The tool bridge is running a call to one of the step's tools: its item —
+   * with the arguments it runs with — then `tool_call_started`, under the id
+   * the bridge runs it under. An announcement of the same id is this call.
    */
-  adoptToolCalls(callIds: ReadonlyArray<string>): void {
-    for (const callId of callIds) {
-      this.announcedToolCalls.add(callId);
+  bridgedCallStarted(callId: string, name: string, args: unknown): void {
+    const announced = this.calls.byId.get(callId);
+    if (announced?.state !== 'announced') {
+      this.calls.unannounced.push({
+        name,
+        input: inputKey(args),
+      });
     }
+    this.calls.byId.set(callId, {
+      name,
+      via: 'bridged',
+      bridge: this,
+      state: 'open',
+    });
+    this.closeMessage();
+    this.emitToolCall(callId, name, args ?? announced?.input);
+    this.toolEvent('tool_call_started', {
+      name,
+      callId,
+    });
+  }
+
+  /** The tool bridge finished a call: its `tool_call_completed`. */
+  bridgedCallCompleted(callId: string, data: Record<string, unknown>): void {
+    const call = this.calls.byId.get(callId);
+    if (call) {
+      call.state = 'closed';
+    }
+    this.toolEvent('tool_call_completed', {
+      ...data,
+      callId,
+    });
   }
 
   /**
@@ -425,33 +526,12 @@ export class AcpEventBridge {
     });
   }
 
-  /** Forward one notification: a structured framework event + the mapped sdk events. */
+  /** Forward one notification of the turn as the events a model call emits. */
   forward(notification: AcpSessionNotification): void {
     if (!this.broadcaster) {
       return;
     }
-    this.framework('acp_event', {
-      sessionId: notification.sessionId,
-      update: notification.update,
-    });
     this.translate(notification.update);
-  }
-
-  /**
-   * Forward one update `session/load` replayed: the loaded session's history,
-   * not this turn's output. It reaches raw-event consumers as an `acp_event`
-   * marked `replay: true` (same step, agent and session attribution) and is
-   * never translated into text, reasoning or function-call events.
-   */
-  forwardReplay(notification: AcpSessionNotification): void {
-    if (!this.broadcaster) {
-      return;
-    }
-    this.framework('acp_event', {
-      sessionId: notification.sessionId,
-      update: notification.update,
-      replay: true,
-    });
   }
 
   /**
@@ -462,36 +542,25 @@ export class AcpEventBridge {
     if (!this.broadcaster) {
       return;
     }
+    this.settleUnstartedCalls();
     this.closeChildren(result.stopReason === 'cancelled' ? 'cancelled' : 'completed');
     if (!this.sawText && result.text.length > 0) {
-      this.openMessage();
-      this.sdk(
-        'response.output_text.delta',
-        {
-          delta: result.text,
-        },
-        this.messageOutputIndex ?? 0,
-      );
-      this.sawText = true;
+      this.messageDelta(result.text);
     }
     // Close the message before synthesizing tool calls, so output items finish
     // in index order. Emitting them first left item 0 closing after items 1..n,
     // which reads as interleaved output to a consumer tracking `outputIndex`.
     this.closeMessage();
     for (const item of result.items) {
-      if (isFunctionCall(item) && !this.announcedToolCalls.has(item.callId)) {
-        this.emitToolCall(item.callId, item.name, item.arguments);
+      if (isFunctionCall(item) && !this.calls.byId.has(item.callId)) {
+        this.synthesizeToolCall(item, result.items);
       }
     }
+    this.settleOpenCalls();
     if (!this.completed) {
       this.start();
       this.sdk('response.completed', {
         stopReason: result.stopReason,
-        ...(result.reportedUsage
-          ? {
-              reportedUsage: result.reportedUsage,
-            }
-          : {}),
       });
       this.completed = true;
     }
@@ -506,8 +575,10 @@ export class AcpEventBridge {
     if (!this.broadcaster || this.completed) {
       return;
     }
+    this.settleUnstartedCalls();
     this.closeChildren('cancelled');
     this.closeMessage();
+    this.settleOpenCalls();
     this.start();
     this.sdk('response.completed', {
       stopReason: 'error',
@@ -517,10 +588,10 @@ export class AcpEventBridge {
   }
 
   /**
-   * A nested agent's tool call that finished, as the generic tool event: its
-   * own tools are not bridged, so nothing else reports it.
+   * One of the agent's own tool calls that finished, as the generic tool
+   * event: its own tools are not bridged, so nothing else reports it.
    */
-  private childToolSettled(
+  private ownToolSettled(
     update: Extract<
       SessionUpdate,
       {
@@ -531,16 +602,182 @@ export class AcpEventBridge {
     if (update.status !== 'completed' && update.status !== 'failed') {
       return;
     }
-    // Not one of its own announced calls: a bridged one, reported by the bridge.
-    if (!this.ownToolNames.has(update.toolCallId)) {
+    const call = this.calls.byId.get(update.toolCallId);
+    // Only an own call still open: a bridged one is the bridge's to report.
+    if (call?.via !== 'own' || call.state !== 'open') {
       return;
     }
-    this.framework('tool_call_completed', {
-      name: this.ownToolNames.get(update.toolCallId) ?? update.title ?? update.toolCallId,
+    call.state = 'closed';
+    const output = contentText(update.content);
+    this.toolEvent('tool_call_completed', {
+      name: call.name,
       callId: update.toolCallId,
       error: update.status === 'failed',
+      ...(output === undefined
+        ? {}
+        : {
+            output,
+          }),
     });
-    this.ownToolNames.delete(update.toolCallId);
+  }
+
+  /**
+   * The turn is over: a call started on this stream and never reported
+   * finished — the agent's own, or one whose pipeline threw — is settled
+   * failed, so no consumer is left with a call that started and never ended.
+   */
+  private settleOpenCalls(): void {
+    for (const [callId, call] of this.calls.byId) {
+      if (call.bridge !== this || call.state !== 'open') {
+        continue;
+      }
+      call.state = 'closed';
+      this.toolEvent('tool_call_completed', {
+        name: call.name,
+        callId,
+        error: true,
+        output: UNFINISHED_OUTPUT,
+      });
+    }
+  }
+
+  /**
+   * The turn is over: a call an agent announced to one of the step's tools
+   * that the bridge never ran under that id either ran under another (the
+   * bridge ran that tool under an id no announcement had) or never ran at all,
+   * which is reported as a failed call on the announcing agent's stream.
+   */
+  private settleUnstartedCalls(): void {
+    const left: Array<
+      [
+        string,
+        TurnCall,
+      ]
+    > = [];
+    const runs = [
+      ...this.calls.unannounced,
+    ];
+    // The same tool with the same input first: that is the call, run under another id.
+    for (const [callId, call] of this.calls.byId) {
+      if (call.state !== 'announced') {
+        continue;
+      }
+      call.state = 'closed';
+      const at = runs.findIndex(
+        (run) => run.name === call.name && run.input === inputKey(call.input),
+      );
+      if (at >= 0) {
+        runs.splice(at, 1);
+        continue;
+      }
+      left.push([
+        callId,
+        call,
+      ]);
+    }
+    // Then by tool alone. With no run of the tool left, none of them ran; with
+    // as many runs as announcements, all did; with fewer, which ones did is
+    // unknown, so none is reported failed on a guess.
+    for (const name of new Set(left.map(([, call]) => call.name))) {
+      const unmatched = runs.filter((run) => run.name === name).length;
+      if (unmatched > 0) {
+        continue;
+      }
+      for (const [callId, call] of left) {
+        if (call.name === name) {
+          call.bridge.reportUnran(callId, call);
+        }
+      }
+    }
+  }
+
+  private reportUnran(callId: string, call: TurnCall): void {
+    this.closeMessage();
+    this.emitToolCall(callId, call.name, call.input);
+    this.toolEvent('tool_call_started', {
+      name: call.name,
+      callId,
+    });
+    this.toolEvent('tool_call_completed', {
+      name: call.name,
+      callId,
+      error: true,
+      output: NEVER_RAN_OUTPUT,
+    });
+  }
+
+  /**
+   * A call the agent reported only in its result: its item, then the
+   * lifecycle the stream never saw, with the output the result recorded.
+   */
+  private synthesizeToolCall(item: FunctionCallItem, items: ReadonlyArray<Item>): void {
+    this.calls.byId.set(item.callId, {
+      name: item.name,
+      via: 'own',
+      bridge: this,
+      state: 'closed',
+    });
+    this.emitToolCall(item.callId, item.name, item.arguments);
+    const output = items.find(
+      (candidate): candidate is FunctionCallOutputItem =>
+        candidate.type === 'function_call_output' && candidate.callId === item.callId,
+    );
+    this.toolEvent('tool_call_started', {
+      name: item.name,
+      callId: item.callId,
+    });
+    // As its result recorded it: a call with no result never finished.
+    this.toolEvent('tool_call_completed', {
+      name: item.name,
+      callId: item.callId,
+      error: output === undefined || output.status === 'failed' || output.status === 'incomplete',
+      output: output?.output ?? UNFINISHED_OUTPUT,
+    });
+  }
+
+  /**
+   * One update announcing a tool call. The agent's own call is its item, then
+   * `tool_call_started`, as the `callModel` tool loop reports one; a call to
+   * one of the step's tools waits for the bridge to run it. An id already
+   * known is the same call again.
+   */
+  private toolCallAnnounced(
+    update: Extract<
+      SessionUpdate,
+      {
+        sessionUpdate: 'tool_call';
+      }
+    >,
+  ): void {
+    const callId = update.toolCallId;
+    if (this.calls.byId.has(callId)) {
+      return;
+    }
+    const wireName = this.toolNameOf(update.title);
+    if (wireName) {
+      this.calls.byId.set(callId, {
+        name: wireName,
+        via: 'bridged',
+        bridge: this,
+        state: 'announced',
+        input: update.rawInput,
+      });
+      return;
+    }
+    this.calls.byId.set(callId, {
+      name: update.title,
+      via: 'own',
+      bridge: this,
+      state: 'open',
+    });
+    this.closeMessage();
+    this.emitToolCall(callId, update.title, update.rawInput);
+    this.toolEvent('tool_call_started', {
+      name: update.title,
+      callId,
+    });
+    // A call reported already finished is settled at once.
+    this.ownToolSettled(update);
   }
 
   //#region internals
@@ -554,17 +791,12 @@ export class AcpEventBridge {
     if (!this.broadcaster) {
       return;
     }
-    // A nested agent is named by its scope alone; the adapter's id is the step's.
-    const data = this.scope
-      ? {
-          stepId: this.stepId,
-          ...payload,
-        }
-      : {
-          stepId: this.stepId,
-          agentId: this.agentId,
-          ...payload,
-        };
+    // Named by its step (and a nested agent by its scope): which adapter runs
+    // the agent is the workflow's business, not the host's.
+    const data = {
+      stepId: this.stepId,
+      ...payload,
+    };
     if (!shouldEmit(this.emitOption, eventType, data)) {
       return;
     }
@@ -605,12 +837,28 @@ export class AcpEventBridge {
     this.sdk('response.created', {});
   }
 
+  /** Stream text into the open assistant message, opening one first if none is. */
+  private messageDelta(delta: string): void {
+    this.openMessage();
+    this.messageText += delta;
+    this.sdk(
+      'response.output_text.delta',
+      {
+        delta,
+      },
+      this.messageOutputIndex ?? 0,
+    );
+    this.sawText = true;
+  }
+
   private openMessage(): void {
     if (this.messageOutputIndex !== null) {
       return;
     }
     this.start();
     const id = `acp-msg-${crypto.randomUUID()}`;
+    this.messageId = id;
+    this.messageText = '';
     this.messageOutputIndex = this.nextOutputIndex++;
     this.sdk(
       'response.output_item.added',
@@ -637,8 +885,32 @@ export class AcpEventBridge {
       return;
     }
     const index = this.messageOutputIndex;
-    this.sdk('response.output_text.done', {}, index);
-    this.sdk('response.output_item.done', {}, index);
+    // The finished message, as a model's stream ends one.
+    this.sdk(
+      'response.output_text.done',
+      {
+        text: this.messageText,
+      },
+      index,
+    );
+    this.sdk(
+      'response.output_item.done',
+      {
+        item: {
+          id: this.messageId,
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [
+            {
+              type: 'output_text',
+              text: this.messageText,
+            },
+          ],
+        },
+      },
+      index,
+    );
     this.messageOutputIndex = null;
   }
 
@@ -674,35 +946,31 @@ export class AcpEventBridge {
       },
       index,
     );
-    this.sdk('response.output_item.done', {}, index);
-    this.announcedToolCalls.add(toolCallId);
+    // The finished call item, as a model's stream ends one: what a consumer
+    // reads the call's arguments from.
+    this.sdk(
+      'response.output_item.done',
+      {
+        item: {
+          id: toolCallId,
+          type: 'function_call',
+          status: 'completed',
+          callId: toolCallId,
+          name,
+          arguments: args,
+        },
+      },
+      index,
+    );
   }
 
   private translate(update: SessionUpdate): void {
-    // A nested agent's own tools have no other reporter; a call to one of the
-    // step's bridged tools is reported by the bridge, once.
-    if (this.scope && update.sessionUpdate === 'tool_call' && !this.toolNameOf(update.title)) {
-      this.ownToolNames.set(update.toolCallId, update.title);
-      this.framework('tool_call_started', {
-        name: update.title,
-        callId: update.toolCallId,
-      });
-      // A call reported already finished is settled at once.
-      this.childToolSettled(update);
-    }
-    if (this.scope && update.sessionUpdate === 'tool_call_update') {
-      this.childToolSettled(update);
+    if (update.sessionUpdate === 'tool_call_update') {
+      this.ownToolSettled(update);
+      return;
     }
     if (update.sessionUpdate === 'agent_message_chunk') {
-      this.openMessage();
-      this.sdk(
-        'response.output_text.delta',
-        {
-          delta: blockText(update.content),
-        },
-        this.messageOutputIndex ?? 0,
-      );
-      this.sawText = true;
+      this.messageDelta(blockText(update.content));
       return;
     }
     if (update.sessionUpdate === 'agent_thought_chunk') {
@@ -713,20 +981,11 @@ export class AcpEventBridge {
       return;
     }
     if (update.sessionUpdate === 'tool_call') {
-      this.closeMessage();
-      this.emitToolCall(
-        update.toolCallId,
-        this.toolNameOf(update.title) ?? update.title,
-        update.rawInput,
-      );
+      this.toolCallAnnounced(update);
       return;
     }
-    // `user_message_chunk` (replayed history), `tool_call_update`, `plan`,
-    // `available_commands_update`, and `current_mode_update` have no model-stream
-    // analogue; they surface on the full stream under their protocol names.
-    this.sdk(`acp.${update.sessionUpdate}`, {
-      update,
-    });
+    // Every other update is session state (modes, commands, config options,
+    // plans, context occupancy) or replayed history: not output.
   }
 
   //#endregion

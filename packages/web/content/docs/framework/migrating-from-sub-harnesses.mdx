@@ -65,7 +65,7 @@ step.acpAgent({
 | `SubHarness*` types | `Acp*` types, re-exported from core |
 | `HydrationContext.subHarnesses` | `HydrationContext.acpAgents`, keyed by free-form `agentId` |
 | `UNKNOWN_SUB_HARNESS_REFERENCE` | `UNKNOWN_ACP_AGENT_REFERENCE` |
-| `sub_harness_event` framework event | `acp_event`, plus `acp_client_activity` |
+| `sub_harness_event` framework event | the generic text, reasoning and `tool_call_*` events a `callModel` step emits, plus `workspace_access` |
 | JSON node `{ "kind": "claude-code" }` | `{ "kind": "acp-agent", "agent": "claude-code" }` |
 
 ### Session lifetime is now opt-in
@@ -74,7 +74,7 @@ step.acpAgent({
 
 ```ts validate=none
 session: { reuse: 'bugfix', keepAlive: 'run' }         // shared for the rest of the run
-session: { reuse: 'assistant', keepAlive: 'harness' }  // survives runs; you call closeAcpSessions()
+session: { reuse: 'assistant', keepAlive: 'harness' }  // survives runs; you call harness.close()
 ```
 
 A `reuse` key without a `keepAlive` scope throws `ACP_REUSE_WITHOUT_KEEPALIVE` rather than silently extending the lifetime.
@@ -99,8 +99,8 @@ Capabilities the old adapters had no way to express:
 
 - **Permission requests**, answerable by policy, steering, or [a human over a channel](/docs/framework/acp-agents#letting-a-human-decide).
 - **Path confinement** on `fs/*`, on by default.
-- **An audit trail** — every file and command the agent touched, allowed or refused, as `acp_client_activity`.
-- **Plans, session modes, and slash commands**, surfaced on the event stream and via `listAcpSessions()`.
+- **An audit trail** — every file and command the agent touched, allowed or refused, as `workspace_access`.
+- **Session modes and models**, chosen per step with `mode` and `model`.
 - **MCP server passthrough**, and multimodal prompts gated on what the agent advertised.
 - **Model-driven delegation** via [`acpAgentTool()`](/docs/framework/acp-agents#letting-the-model-delegate).
 - **An open agent set** — supporting a new agent needs a registry entry, not a framework change.

@@ -196,7 +196,6 @@ The translation is the client direction's `AcpEventBridge` table (spec 27,
 | `tool_call_started` (framework, carries `callId`) | `tool_call` — `toolCallId` = `callId`, presentation from the tool's `acp` declaration (below), status `pending` while gated, `in_progress` once running |
 | `tool_call_completed` | `tool_call_update` — `completed` with the output as content, or `failed` carrying the error |
 | plan-layer state changes | `plan` |
-| `acp.*` passthrough events from a nested `step.acpAgent` | re-emitted as `tool_call` / `tool_call_update` under the delegating call (below) |
 
 Notifications the harness has no source for are simply never sent — ACP treats
 absence as unsupported.
@@ -207,15 +206,11 @@ as fallback for aborts that carry none):
 
 | Turn outcome | `stopReason` |
 |---|---|
-| `turn_completed` | `end_turn` |
+| `turn_completed` | its `stopReason` when that is a cap (`max_tokens`, `max_turn_requests`), else `end_turn` — read from the turn's outcome, never from events a step's `emit` filter may drop |
 | `turn_aborted` with `errorKind: 'cancelled'` (or after `session/cancel`) | `cancelled` |
 | `turn_aborted` with `errorKind: 'model_refused'` | `refusal` |
 | `turn_aborted` with `errorKind: 'budget_exceeded'` | `max_tokens` |
 | any other turn error | JSON-RPC error on the `session/prompt` request |
-
-The wire's `max_turn_requests` has no core analogue to map from — core has no
-turn-request-limit error kind — so it stays unproduced (see Future
-Considerations).
 
 **A turn always closes its bracket**, same rule as the client direction: every
 accepted prompt eventually resolves or rejects, including when the harness
@@ -434,12 +429,12 @@ registering their id, so the finalized copy is the one persisted. Without
 A served harness whose graph contains `step.acpAgent` (or `acpAgentTool()`) is
 an ACP **proxy**: the client drives Noetic, and Noetic drives Claude Code,
 Codex, or another served Noetic harness underneath. The client direction
-already emits every nested notification as `acp.*` passthrough events; the
-server forwards the sub-agent's `tool_call` / `tool_call_update` / `plan`
-traffic to the editor, shape-validated before it can reach the wire (a
-malformed nested update is dropped, never sent) and with its tool-call ids
-namespaced under a `sub:` prefix so they can never collide with a first-party
-call's id. The editor watches file edits happen three layers down. Permission
+reports the sub-agent's text, reasoning and tool calls as the same events a
+`callModel` step emits (spec 27 § Output → harness events), so the server
+forwards them through the table above with nothing agent-specific: the
+editor watches the sub-agent's tool calls as `tool_call` / `tool_call_update`
+like any other. The sub-agent's own subagents are nested agents, scoped, and
+stay off the wire like every scoped event. Permission
 requests raised by the *sub-agent* are answered by the step's own three-tier
 resolver as spec 27 defines; routing them onward to a person is
 `askUserForPermission()` on the step plus the full harness's spec-27
@@ -458,10 +453,6 @@ usage accounting, the event stream, and durability. If the server needs a
 capability, the harness contract grows it publicly first.
 
 ## Future Considerations
-
-- **`max_turn_requests`** — the wire defines it, but core has no
-  turn-request-limit error kind to map from; when one exists, the pump's
-  errorKind table grows a row.
 
 - **Protocol v2 / library bump.** Upstream's draft second revision restructures
   the turn (`session/prompt` acks immediately; completion flows through

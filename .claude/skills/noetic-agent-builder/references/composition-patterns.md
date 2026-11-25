@@ -1333,7 +1333,7 @@ await harness.execute('Add input validation to the signup endpoint.');
 
 Key points:
 
-- The agent's file reads/writes and shell commands are served by `ctx.fs` and `ctx.shell`, so its workspace access is sandboxed and audited like a first-party step. It forwards its protocol notifications as `acp_event` framework events and charges `ctx.tokens`/`ctx.cost` like any `callModel` step.
+- The agent's file reads/writes and shell commands are served by `ctx.fs` and `ctx.shell`, so its workspace access is sandboxed and audited like a first-party step. Its output streams as the same text, reasoning and `tool_call_*` events a `callModel` step emits, its file and shell calls as `workspace_access`, and it charges `ctx.tokens`/`ctx.cost` like any `callModel` step.
 - `permissions` governs what the agent may do. The default is **deny**: a step that grants nothing lets the agent do nothing but talk. Grant by ACP tool `kind` (`read`, `edit`, `execute`, …) or `title`.
 - Add `output: SomeSchema` to parse the agent's final text into a typed object, exactly like `callModel`.
 - A fresh session is seeded with the conversation so far, so the agent understands what earlier steps established.
@@ -1362,7 +1362,7 @@ const fix = step.acpAgent({
 ```
 
 - `reuse` keys a connection + session stored on the `AgentHarness`; the same key resolves to the same live session across steps.
-- `keepAlive` is the opt-in that makes sharing possible, and it defaults to `'step'` (closed with the step). `'run'` keeps the connection for the rest of the root run and the harness collects it — so the two steps must be part of ONE run (nested `ctx.harness.run` calls, a `sequence`, a `loop`), not two `harness.execute()` calls. `'harness'` keeps it past the run for a warm agent across turns; nothing closes that one for you, so pair it with `await harness.closeAcpSessions()`. A `reuse` key without a `keepAlive` scope throws `ACP_REUSE_WITHOUT_KEEPALIVE`.
+- `keepAlive` is the opt-in that makes sharing possible, and it defaults to `'step'` (closed with the step). `'run'` keeps the connection for the rest of the root run and the harness collects it — so the two steps must be part of ONE run (nested `ctx.harness.run` calls, a `sequence`, a `loop`), not two `harness.execute()` calls. `'harness'` keeps it past the run for a warm agent across turns; nothing closes that one for you, so pair it with `await harness.close()`. A `reuse` key without a `keepAlive` scope throws `ACP_REUSE_WITHOUT_KEEPALIVE`.
 - Each step gets its own `permissions`: the host is rebound per turn, so `fix`'s broader policy really does apply even though `investigate` opened the connection.
 - The agent and `clientCapabilities` are fixed per connection; a step joining the session with different ones throws `ACP_SESSION_AGENT_CONFLICT` / `ACP_SESSION_CAPABILITY_CONFLICT`.
 - `session.load` resumes an ACP session id from an earlier run, for agents that advertise `loadSession`.

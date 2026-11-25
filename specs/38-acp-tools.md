@@ -91,7 +91,9 @@ the `callModel` loop does. For each call:
    per turn.
 4. Open a `tool.call` span under the step span (`tool.name`,
    `tool.needs_approval`, `tool.approval`).
-5. Emit `tool_call_started { name, callId }`.
+5. Report the call on the stream of the agent that owns it (spec 27 § One
+   record per call): its `function_call` item with the arguments it runs with,
+   then `tool_call_started { name, callId }`.
 6. `executeToolCall` with the step's `ctx`, harness, and layers.
 7. Build the `function_call` and the `function_call_output`
    (`createToolResultItem`, validated against the harness's item schemas
@@ -343,7 +345,7 @@ instead.
 ## Sessions
 
 The agent reads its tool list once, so the session's list is fixed when it is
-created (`AcpLiveSession.tools`). A step reusing the session may serve any part
+created. A step reusing the session may serve any part
 of that list — a call to a listed tool outside its part answers as an unknown
 tool, as on `callModel` — but a tool the list lacks, or lists differently, is
 `ACP_SESSION_SETTING_CONFLICT`, naming the tools. A step that serves no tools

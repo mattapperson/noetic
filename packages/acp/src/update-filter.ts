@@ -81,7 +81,7 @@ export function newerSessionUpdate(line: string): AcpSessionNotification | undef
     return undefined;
   }
   // A variant from a newer protocol revision: the host's handlers treat an
-  // unknown `sessionUpdate` as opaque (the event bridge's `acp.<name>` event).
+  // unknown `sessionUpdate` as opaque: it emits nothing.
   return frameworkCast<AcpSessionNotification>(params);
 }
 

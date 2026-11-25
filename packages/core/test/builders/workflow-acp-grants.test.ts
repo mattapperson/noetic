@@ -88,6 +88,7 @@ function expectAccepted(fields: Partial<AcpAgentNode>, grants?: AcpAllowlist): v
 interface AgentRecord {
   agent: AcpAgent;
   connects: number;
+  closes: number;
   capabilities: Array<AcpClientCapabilityConfig | undefined>;
   permissions: Array<AcpPermissionPolicy | undefined>;
   loads: string[];
@@ -149,12 +150,13 @@ function recordingAgent(): AgentRecord {
             return session;
           },
           async close() {
-            // Nothing to release.
+            record.closes += 1;
           },
         };
       },
     },
     connects: 0,
+    closes: 0,
     capabilities: [],
     permissions: [],
     loads: [],
@@ -980,10 +982,10 @@ describe('parseAndRunWorkflow — ACP agent grants', () => {
     // The document opened its own connection rather than taking the host's,
     // and its session ended with its run.
     expect(record.connects).toBe(2);
-    expect(harness.listAcpSessions().map((s) => s.reuseKey)).toEqual([
-      'main',
-    ]);
-    await harness.closeAcpSessions();
+    expect(record.closes).toBe(1);
+    // The host's own kept session is still held, until the harness closes.
+    await harness.close();
+    expect(record.closes).toBe(2);
   });
 
   it('still shares one session between two nodes of the same document', async () => {

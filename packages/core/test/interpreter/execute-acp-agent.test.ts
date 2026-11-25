@@ -63,6 +63,10 @@ interface FakeAgentOpts {
   throwOnSetMode?: unknown;
   /** Notifications `session/load` replays before it answers. */
   replayOnLoad?: AcpSessionNotification[];
+  /** The usage the prompt answer reports. */
+  reportedUsage?: AcpTurnResult['reportedUsage'];
+  /** Config options the session advertises. */
+  configOptions?: AcpSession['configOptions'];
 }
 
 /** What the fake's sessions are opened with: their cwd and instructions. */
@@ -91,6 +95,7 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
               fingerprint,
             }),
         modes: opts.modes,
+        configOptions: opts.configOptions,
         availableCommands: [],
         async prompt(prompt): Promise<AcpTurnResult> {
           opts.onPrompt?.(prompt);
@@ -115,6 +120,7 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
                     total: 15,
                   }),
             cost: opts.cost,
+            reportedUsage: opts.reportedUsage,
           };
         },
         async cancel() {
@@ -232,6 +238,99 @@ describe('executeAcpAgent', () => {
     assert(ctx.lastStepMeta);
     assert(ctx.lastStepMeta.usage);
     expect(ctx.lastStepMeta.usage.inputTokens).toBe(10);
+  });
+
+  it('records the stop reason and model a callModel step records', async () => {
+    const { ctx } = harnessCtx();
+    await execute(
+      step.acpAgent({
+        id: 'capped',
+        agent: fakeAgent({
+          stopReason: 'max_tokens',
+          configOptions: [
+            {
+              id: 'model',
+              name: 'Model',
+              category: 'model',
+              type: 'select',
+              currentValue: 'opus',
+              options: [
+                {
+                  value: 'opus',
+                  name: 'Opus',
+                },
+              ],
+            },
+          ],
+        }),
+        prompt: 'go',
+      }),
+      undefined,
+      ctx,
+    );
+    assert(ctx.lastStepMeta);
+    expect(ctx.lastStepMeta.stopReason).toBe('max_tokens');
+    expect(ctx.lastStepMeta.model).toBe('opus');
+  });
+
+  it('never charges the session totals an agent reports with its answer', async () => {
+    const { ctx } = harnessCtx();
+    await execute(
+      step.acpAgent({
+        id: 'reported',
+        agent: fakeAgent({
+          usage: null,
+          reportedUsage: {
+            inputTokens: 7,
+            outputTokens: 3,
+            totalTokens: 12,
+          },
+        }),
+        prompt: 'go',
+      }),
+      undefined,
+      ctx,
+    );
+    assert(ctx.lastStepMeta);
+    expect(ctx.lastStepMeta.usage).toBeUndefined();
+    expect(ctx.tokens.total).toBe(0);
+  });
+
+  it('records no step metadata for a refused turn', async () => {
+    const { ctx } = harnessCtx();
+    const error = await execute(
+      step.acpAgent({
+        id: 'refused',
+        agent: fakeAgent({
+          stopReason: 'refusal',
+        }),
+        prompt: 'go',
+      }),
+      undefined,
+      ctx,
+    ).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeDefined();
+    expect(ctx.lastStepMeta?.stopReason).toBeUndefined();
+    // Its spend is charged all the same, as a model call's is.
+    expect(ctx.tokens.total).toBe(15);
+  });
+
+  it('records the model the step selected when the agent has no model option', async () => {
+    const { ctx } = harnessCtx();
+    await execute(
+      step.acpAgent({
+        id: 'picked',
+        agent: fakeAgent(),
+        prompt: 'go',
+        model: 'sonnet',
+      }),
+      undefined,
+      ctx,
+    );
+    expect(ctx.lastStepMeta?.model).toBe('sonnet');
   });
 
   it('parses structured output through the step schema', async () => {
@@ -488,11 +587,9 @@ describe('executeAcpAgent — session lifecycle', () => {
 
     await harness.run(acpStep, undefined, harness.createContext());
     expect(closes).toBe(0);
-    expect(harness.listAcpSessions().length).toBe(1);
 
-    await harness.closeAcpSessions();
+    await harness.close();
     expect(closes).toBe(1);
-    expect(harness.listAcpSessions().length).toBe(0);
   });
 
   it('closeAcpSessions is idempotent', async () => {
@@ -513,8 +610,8 @@ describe('executeAcpAgent — session lifecycle', () => {
     });
 
     await harness.run(acpStep, undefined, harness.createContext());
-    await harness.closeAcpSessions();
-    await harness.closeAcpSessions();
+    await harness.close();
+    await harness.close();
 
     expect(closes).toBe(1);
   });
@@ -810,101 +907,55 @@ describe('executeAcpAgent — a session shared across steps', () => {
   });
 });
 
-describe('AgentHarness — live ACP session control surface', () => {
-  it('lists what is running, with the mode and commands a UI needs', async () => {
+describe('AgentHarness — the agents it holds', () => {
+  it('shares a kept session under its reuse key and closes it with the harness', async () => {
     const { harness } = harnessCtx();
-    const acpStep = step.acpAgent({
-      id: 'live',
-      agent: fakeAgent({
-        agentId: 'claude-code',
-        modes: {
-          currentModeId: 'plan',
-          availableModes: [
-            {
-              id: 'plan',
-              name: 'Plan',
-              description: null,
-            },
-            {
-              id: 'code',
-              name: 'Code',
-              description: null,
-            },
-          ],
-        },
-      }),
-      prompt: 'go',
-      session: {
-        reuse: 'live-key',
-        keepAlive: 'harness',
+    let connects = 0;
+    let closes = 0;
+    const agent = fakeAgent({
+      onConnect: () => {
+        connects++;
+      },
+      onClose: () => {
+        closes++;
       },
     });
+    const mk = (id: string) =>
+      step.acpAgent({
+        id,
+        agent,
+        prompt: 'go',
+        session: {
+          reuse: 'live-key',
+          keepAlive: 'harness',
+        },
+      });
 
-    await harness.run(acpStep, undefined, harness.createContext());
+    await harness.run(mk('first'), undefined, harness.createContext());
+    await harness.run(mk('second'), undefined, harness.createContext());
+    expect(connects).toBe(1);
+    expect(closes).toBe(0);
 
-    const sessions = harness.listAcpSessions();
-    expect(sessions).toHaveLength(1);
-    const info = sessions[0];
-    assert(info);
-    // `key` is an opaque handle (scoped so concurrent runs cannot collide);
-    // the step's own key is reported separately.
-    expect(info.reuseKey).toBe('live-key');
-    expect(info.key).toContain('live-key');
-    expect(harness.getAcpSession(info.key)).toBeDefined();
-    // Looking up by the step's reuse key still works, for convenience.
-    expect(harness.getAcpSession('live-key')).toBeDefined();
-    expect(info.agentId).toBe('claude-code');
-    expect(info.keepAlive).toBe('harness');
-    expect(info.currentModeId).toBe('plan');
-    expect(info.availableModes).toHaveLength(2);
-
-    await harness.closeAcpSessions();
+    await harness.close();
+    expect(closes).toBe(1);
   });
 
-  it('reports nothing once sessions are collected', async () => {
+  it('closes a step-scoped session with its step', async () => {
     const { harness } = harnessCtx();
+    let closes = 0;
     const acpStep = step.acpAgent({
       id: 'ephemeral',
-      agent: fakeAgent(),
-      prompt: 'go',
-    });
-
-    await harness.run(acpStep, undefined, harness.createContext());
-
-    expect(harness.listAcpSessions()).toHaveLength(0);
-    expect(harness.getAcpSession('anything')).toBeUndefined();
-  });
-
-  it('cancels a live session through the protocol', async () => {
-    const { harness } = harnessCtx();
-    let cancels = 0;
-    const acpStep = step.acpAgent({
-      id: 'live',
       agent: fakeAgent({
-        onCancel: () => {
-          cancels++;
+        onClose: () => {
+          closes++;
         },
       }),
       prompt: 'go',
-      session: {
-        reuse: 'live-key',
-        keepAlive: 'harness',
-      },
     });
 
     await harness.run(acpStep, undefined, harness.createContext());
 
-    expect(await harness.cancelAcpSession('live-key')).toBe(true);
-    expect(cancels).toBe(1);
-    // The connection stays open — cancel interrupts the turn, it does not close.
-    expect(harness.listAcpSessions()).toHaveLength(1);
-
-    await harness.closeAcpSessions();
-  });
-
-  it('cancelling an unknown key reports false rather than throwing', async () => {
-    const { harness } = harnessCtx();
-    expect(await harness.cancelAcpSession('nope')).toBe(false);
+    expect(closes).toBe(1);
   });
 });
 
@@ -912,7 +963,7 @@ describe('executeAcpAgent — session store correctness', () => {
   // Regression (F2): registration used to happen only when the step named a
   // `reuse` key, so a session kept past its step with no key was held by
   // nobody — not swept at the end of the run, and out of reach of
-  // `closeAcpSessions()`. With stdio that is a child process that keeps the
+  // `harness.close()`. With stdio that is a child process that keeps the
   // host alive forever.
   it.each([
     'run',
@@ -941,8 +992,8 @@ describe('executeAcpAgent — session store correctness', () => {
       return;
     }
     // Held for the owner — but reachable, which is the whole point.
-    expect(harness.listAcpSessions()).toHaveLength(1);
-    await harness.closeAcpSessions();
+    expect(closes).toBe(0);
+    await harness.close();
     expect(closes).toBe(1);
   });
 
@@ -1027,7 +1078,6 @@ describe('executeAcpAgent — session store correctness', () => {
 
     expect(connects).toBe(1);
     expect(closes).toBe(1);
-    expect(harness.listAcpSessions()).toHaveLength(0);
   });
 });
 
@@ -1376,7 +1426,7 @@ describe('executeAcpAgent — session/load replay (#100)', () => {
     },
   ];
 
-  it('streams loaded history only as raw acp_events marked replay, never as new output', async () => {
+  it('streams none of the loaded history, only the new turn', async () => {
     const { ctx, events } = capturingCtx();
     const acpStep = step.acpAgent({
       id: 'follow-up',
@@ -1404,17 +1454,7 @@ describe('executeAcpAgent — session/load replay (#100)', () => {
 
     expect(await execute(acpStep, undefined, ctx)).toBe('new answer');
 
-    const raw = events.filter((e) => e.type.endsWith(':acp_event'));
-    const replays = raw.filter((e) => e.data.replay === true);
-    expect(replays.map((e) => e.data.update)).toEqual(replayed.map((n) => n.update));
-    for (const event of replays) {
-      expect(event.data).toMatchObject({
-        stepId: 'follow-up',
-        agentId: 'claude-code',
-        sessionId: 'session-from-yesterday',
-      });
-    }
-    expect(raw.filter((e) => e.data.replay !== true)).toHaveLength(1);
+    expect(JSON.stringify(events)).not.toContain('what I answered yesterday');
     // Only the new turn reaches the text and item streams.
     const deltas = events.filter((e) => e.type === 'response.output_text.delta');
     expect(deltas.map((e) => e.data.delta)).toEqual([
@@ -1427,7 +1467,7 @@ describe('executeAcpAgent — session/load replay (#100)', () => {
     expect(messageTexts(ctx)).not.toContain('what I answered yesterday');
   });
 
-  it('keeps replay marked even when the follow-up then fails selecting its mode', async () => {
+  it('streams none of the loaded history even when the follow-up then fails selecting its mode', async () => {
     const { ctx, events } = capturingCtx();
     const acpStep = step.acpAgent({
       id: 'follow-up-mode',
@@ -1451,9 +1491,8 @@ describe('executeAcpAgent — session/load replay (#100)', () => {
 
     expect(error).toBeDefined();
     expect(events.filter((e) => e.type === 'response.output_text.delta')).toHaveLength(0);
-    const raw = events.filter((e) => e.type.endsWith(':acp_event'));
-    expect(raw).toHaveLength(2);
-    expect(raw.every((e) => e.data.replay === true)).toBe(true);
+    expect(JSON.stringify(events)).not.toContain('what I answered yesterday');
+    expect(JSON.stringify(events)).not.toContain('old-call');
   });
 });
 
@@ -1709,7 +1748,7 @@ describe('executeAcpAgent host features', () => {
       undefined,
       ctx,
     ).catch((e: unknown) => e);
-    await harness.closeAcpSessions();
+    await harness.close();
     assert(isNoeticConfigError(error));
     expect(error.code).toBe('ACP_SESSION_SETTING_CONFLICT');
   });
@@ -1742,7 +1781,7 @@ describe('executeAcpAgent host features', () => {
       undefined,
       ctx,
     );
-    await harness.closeAcpSessions();
+    await harness.close();
     expect(output).toBe('done');
   });
 });

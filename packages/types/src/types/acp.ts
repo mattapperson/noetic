@@ -626,10 +626,10 @@ export interface AcpTurnResult {
   usage?: TokenUsage;
   cost?: number;
   /**
-   * The `usage` the agent's `session/prompt` answer reported, verbatim. Kept
-   * apart from `usage` because an agent may report session totals rather than
-   * this turn's delta. Context-window occupancy (`usage_update`) is not here:
-   * it reaches the host as a raw `acp_event`.
+   * The `usage` the agent's `session/prompt` answer reported, verbatim: the
+   * session's running total, not this turn's, so the runtime never charges it
+   * (an adapter that knows its agent's figures supplies `usage`).
+   * Context-window occupancy (`usage_update`) is not here.
    */
   reportedUsage?: acp.Usage;
   /** Plan entries reported via `plan` updates, latest snapshot wins. */
@@ -766,37 +766,6 @@ export interface AcpResumeTurnOptions {
   signal?: AbortSignal;
 }
 
-/**
- * A live connection plus the session running on it. The runtime keeps these
- * keyed by {@link AcpSessionPolicy.reuse} so a session can span several steps.
- * @public
- */
-export interface AcpLiveSession {
-  connection: AcpAgentConnection;
-  session: AcpSession;
-  /**
-   * The host this connection was opened with. The runtime rebinds its
-   * per-turn fields before every turn, so a session shared by several steps
-   * honours each step's own permissions, steering, and event stream.
-   */
-  host: AcpClientHost;
-  /** `agentId` of the adapter that opened this connection, for reuse conflict checks. */
-  agentId: string;
-  /** How long this connection is kept alive; decides who closes it and when. */
-  keepAlive: AcpKeepAlive;
-  /** Working directory the session was created in — fixed for its lifetime. */
-  cwd: string;
-  /** MCP servers attached at creation — also fixed for its lifetime. */
-  mcpServers?: ReadonlyArray<acp.McpServer>;
-  /** Noetic tools served to the agent at creation — also fixed for its lifetime. */
-  tools?: ReadonlyArray<AcpTool>;
-  /**
-   * What the session was opened with ({@link AcpSession.fingerprint}); for a
-   * reattached session, the one stored when it was opened.
-   */
-  fingerprint?: string;
-}
-
 /** @public Options handed to {@link AcpAgent.connect}. */
 export interface AcpConnectOptions {
   /** The runtime surface backing client-side ACP methods. */
@@ -885,7 +854,7 @@ export const AcpKeepAlive = {
   Step: 'step',
   /** Kept for the rest of the root run, then closed by the harness. */
   Run: 'run',
-  /** Kept until {@link AcpSessionDisposer.closeAcpSessions} is called. Nothing closes it for you. */
+  /** Kept until `harness.close()`. Nothing closes it for you. */
   Harness: 'harness',
 } as const;
 
@@ -911,7 +880,7 @@ export interface AcpSessionPolicy {
    *
    * `'harness'` hands ownership to the caller — the runtime will not close it,
    * and an undisposed connection keeps the host process from exiting. Call
-   * `harness.closeAcpSessions()` when the work is done.
+   * `harness.close()` when the work is done.
    */
   keepAlive?: AcpKeepAlive;
   /**
@@ -919,42 +888,6 @@ export interface AcpSessionPolicy {
    * Requires the agent's `loadSession` capability.
    */
   load?: string;
-}
-
-/**
- * A snapshot of one live ACP sub-agent — what a UI needs to show it and offer
- * actions on it, without handing out the connection itself.
- * @public
- */
-export interface AcpSessionInfo {
-  /** Opaque handle for this session — pass it back to `getAcpSession`/`cancelAcpSession`. */
-  key: string;
-  /** The `session.reuse` key the step named, when it named one. */
-  reuseKey?: string;
-  /** `agentId` of the adapter driving it. */
-  agentId: string;
-  /** The agent's own session id. */
-  sessionId: string;
-  keepAlive: AcpKeepAlive;
-  /** Current mode, when the agent supports modes. */
-  currentModeId?: string;
-  /** Modes the agent offers, for a mode switcher. */
-  availableModes: ReadonlyArray<acp.SessionMode>;
-  /** Config options the agent currently advertises (model, effort, …). */
-  configOptions?: ReadonlyArray<acp.SessionConfigOption>;
-  /** Slash commands the agent currently advertises. */
-  availableCommands: ReadonlyArray<acp.AvailableCommand>;
-}
-
-/**
- * The disposal surface for connections kept past their run. Implemented by
- * `AgentHarness`; declared here so callers can hold the capability without
- * depending on the concrete runtime.
- * @public
- */
-export interface AcpSessionDisposer {
-  /** Close every ACP connection this harness still holds. Idempotent. */
-  closeAcpSessions(): Promise<void>;
 }
 
 //#endregion

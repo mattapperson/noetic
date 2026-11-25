@@ -713,6 +713,10 @@ function recordTurnOutcome(params: {
     billedCost: response.billedCost,
     serviceTier: response.serviceTier,
     responseItems: response.items,
+    // A model call returns only once its response completed: any other status
+    // is recovered or thrown before it gets here.
+    stopReason: 'end_turn',
+    model: params.resolvedModel,
   };
 
   if (isMutableContext(ctx)) {

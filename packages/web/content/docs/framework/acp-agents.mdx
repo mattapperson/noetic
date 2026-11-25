@@ -144,7 +144,7 @@ Set `allowAnyPath: true` to lift it entirely, when you genuinely want an unconfi
 
 ### Seeing what the agent touched
 
-Every `fs/*` and `terminal/*` call the agent makes is emitted as an `acp_client_activity` framework event — allowed and refused alike:
+Every file read or write and every command the agent runs through your adapters is emitted as a `workspace_access` framework event — allowed and refused alike. `operation` is one of `read_file`, `write_file`, `run_command`, `read_output`, `wait`, `kill` or `release`:
 
 ```ts
 import type { AgentHarness } from '@noetic-tools/core';
@@ -152,8 +152,8 @@ import type { AgentHarness } from '@noetic-tools/core';
 declare const harness: AgentHarness;
 
 for await (const ev of harness.getFullStream()) {
-  if (ev.source === 'framework' && ev.type.endsWith(':acp_client_activity')) {
-    console.log(ev.data.allowed ? 'ok ' : 'REFUSED', ev.data.method, ev.data.path ?? ev.data.command);
+  if (ev.source === 'framework' && ev.type.endsWith(':workspace_access')) {
+    console.log(ev.data.allowed ? 'ok ' : 'REFUSED', ev.data.operation, ev.data.path ?? ev.data.command);
   }
 }
 ```
@@ -402,7 +402,7 @@ A connection owns a live agent process, so **keeping one is never inferred**. `s
 |---|---|
 | `'step'` (default) | closed when the step finishes |
 | `'run'` | kept for the rest of the root run, then closed for you |
-| `'harness'` | kept until you call `harness.closeAcpSessions()` — nothing closes it for you |
+| `'harness'` | kept until you call `harness.close()` — nothing closes it for you |
 
 `session.reuse` shares a kept connection under an id, so later steps take their turns against the same agent:
 
@@ -452,7 +452,7 @@ const assistant = step.acpAgent({
 try {
   // …many harness.execute() calls later:
 } finally {
-  await harness.closeAcpSessions();
+  await harness.close();
 }
 ```
 
@@ -505,14 +505,17 @@ for await (const chunk of harness.getTextStream()) {
 |---|---|
 | `agent_message_chunk` | `getTextStream()`, `getFullStream()` |
 | `agent_thought_chunk` | `getReasoningStream()` |
-| `tool_call` | `getItemStream()` as a function call |
-| every other update — `plan`, `available_commands_update`, `current_mode_update`, `tool_call_update`, `config_option_update`, `session_info_update`, `usage_update`, … | `getFullStream()` as `acp.<update>` |
+| `tool_call` | `getItemStream()` as a function call, and `tool_call_started` for the agent's own tools |
+| `tool_call_update` that finishes a call | `tool_call_completed` `{ name, callId, error }` |
+| every other update — `plan`, `available_commands_update`, `current_mode_update`, `config_option_update`, `session_info_update`, `usage_update`, … | nothing: session state, not output |
 
-Every notification is *also* emitted raw as an `acp_event` framework event, `{ stepId, agentId, sessionId, update }`. An update type newer than noetic's protocol library still arrives this way instead of being rejected.
+These are the same events a `callModel` step emits, so nothing you consume names the protocol. A call to one of the step's own `tools` is reported once, by the tool bridge.
 
-**Usage.** A `usage_update` (Codex sends `{ used, size }`) is how full the agent's context window is, not tokens you were billed for, so it stays on the event stream and never becomes token usage or cost. The usage an agent reports with its answer is kept as `reportedUsage` on the turn result and on `response.completed`.
+Every call that starts also completes before the turn closes — a call the agent never reported finished completes failed.
 
-**Loaded history.** When a step loads a session — `session.load`, or a resume after the host died — the agent replays the old conversation first. Those updates reach only the raw `acp_event` stream, marked `replay: true`; they never appear as new text, reasoning, or tool calls. Filter on `replay` if you want to show the history.
+**Turn metadata.** Like a `callModel` step, the turn a step accepts records `ctx.lastStepMeta.stopReason` (`end_turn`, `max_tokens` or `max_turn_requests`), `usage` (when the adapter supplies it) and `model` (the agent's current `model` option, else the one the step selected). A token or turn cap returns normally; `stopReason` is how you tell a truncated turn from a complete one. The usage an agent reports with its answer is the session's running total, so it is never charged. A `usage_update` (Codex sends `{ used, size }`) is how full the agent's context window is, not tokens you were billed for, so it never becomes usage or cost.
+
+**Loaded history.** When a step loads a session — `session.load`, or a resume after the host died — the agent replays the old conversation first. None of it reaches the event stream; it never appears as new text, reasoning, or tool calls.
 
 A turn always closes its bracket: `response.created` on the way in, `response.completed` on the way out — with the stop reason on success, an `error` reason when the turn throws. An agent that returns a result without streaming has its output synthesized rather than silently swallowed. `emit: false` on the step suppresses all of it.
 
@@ -614,23 +617,9 @@ The prompt carries what a reviewer needs: `agentId`, `stepId`, `threadId`, the t
 
 Subscribe **once** — requests are a queue, so a second subscriber would steal them. Decisions are a topic, broadcast to every waiting handler, each filtering for its own `requestId`. A prompt waits until it is answered or the turn is cancelled. Set a deadline with `askUserForPermission({ timeout, onTimeout })`: when it passes the prompt is denied, because waiting must never become approval, unless `onTimeout` says otherwise.
 
-## Inspecting and steering live sub-agents
+## Interrupting and releasing live agents
 
-The harness exposes the connections it is holding, so a UI can show what is running and act on it:
-
-```ts
-import type { AgentHarness } from '@noetic-tools/core';
-
-declare const harness: AgentHarness;
-declare const key: string;
-
-harness.listAcpSessions();  // key, agentId, sessionId, mode, commands, keepAlive
-harness.getAcpSession(key);
-await harness.cancelAcpSession(key);  // session/cancel — the connection stays open
-await harness.closeAcpSessions();     // release everything held
-```
-
-This is read-and-interrupt only, on purpose. Turns are driven by steps, so nothing here starts work behind the runtime's back — a turn run outside a step would bypass the item log, usage accounting, and the event bridge. Send a follow-up with a step sharing the same `session.reuse` key.
+You never handle an agent's connection. Interrupt a running turn like any other, with `harness.abort()` — the agent is sent `session/cancel` and the step ends `cancelled` — and release every connection the harness still holds with `harness.close()`. Send a follow-up with a step sharing the same `session.reuse` key, so every turn lands in the item log, usage accounting, and the event stream.
 
 ## JSON workflows
 
@@ -869,9 +858,5 @@ For embedding an ACP connection outside a Noetic step — a custom runtime, a br
 |---|---|
 | `step.acpAgent(opts)` | The step. |
 | `acpAgentTool(opts)` | The same agent as a tool a model can call. |
-| `harness.listAcpSessions()` | Live sub-agents: handle, agent, session, mode, commands, keep-alive. |
-| `harness.getAcpSession(key)` | One live connection + session. |
-| `harness.cancelAcpSession(key)` | `session/cancel` — the connection stays open. |
-| `harness.closeAcpSessions()` | Release everything held. Idempotent. |
 
 The contract types (`AcpAgent`, `AcpSession`, `AcpClientHost`, `AcpTransport`, the permission and protocol types) live in `@noetic-tools/types` and are re-exported from core.

@@ -211,41 +211,17 @@ describe('pumpTurnEvents', () => {
     expect(outcome.message).toBe('exploded');
   });
 
-  it('forwards valid nested updates with namespaced ids and drops malformed ones', async () => {
+  it("forwards a delegated agent's tool calls as any tool call, from the generic events", async () => {
     const { updates } = await pump([
       START,
-      sdk('acp.tool_call', {
-        update: {
-          sessionUpdate: 'tool_call',
-          toolCallId: 'nested-1',
-          title: 'sub-agent edit',
-          status: 'in_progress',
-        },
+      fw('tool_call_started', {
+        name: 'Edit',
+        callId: 'nested-1',
       }),
-      sdk('acp.tool_call_update', {
-        update: {
-          sessionUpdate: 'tool_call_update',
-          toolCallId: 'nested-1',
-          status: 'completed',
-        },
-      }),
-      // Malformed: no toolCallId — must never reach the wire.
-      sdk('acp.tool_call', {
-        update: {
-          sessionUpdate: 'tool_call',
-          title: 'broken',
-        },
-      }),
-      // Message chunks from the sub-agent surface via the model stream; the
-      // raw update variant is not re-forwarded.
-      sdk('acp.user_message_chunk', {
-        update: {
-          sessionUpdate: 'user_message_chunk',
-          content: {
-            type: 'text',
-            text: 'hi',
-          },
-        },
+      fw('tool_call_completed', {
+        name: 'Edit',
+        callId: 'nested-1',
+        error: false,
       }),
       fw('turn_completed', {
         turnId: 't1',
@@ -253,15 +229,55 @@ describe('pumpTurnEvents', () => {
       }),
     ]);
 
-    const toolCalls = updates.filter(
-      (u) => u.sessionUpdate === 'tool_call' || u.sessionUpdate === 'tool_call_update',
-    );
-    expect(toolCalls).toHaveLength(2);
-    for (const update of toolCalls) {
-      assert('toolCallId' in update);
-      expect(update.toolCallId).toBe('sub:nested-1');
-    }
-    expect(updates.some((u) => u.sessionUpdate === 'user_message_chunk')).toBe(false);
+    expect(
+      updates
+        .filter((u) => u.sessionUpdate === 'tool_call' || u.sessionUpdate === 'tool_call_update')
+        .map((u) => [
+          u.sessionUpdate,
+          'toolCallId' in u ? u.toolCallId : undefined,
+        ]),
+    ).toEqual([
+      [
+        'tool_call',
+        'nested-1',
+      ],
+      [
+        'tool_call_update',
+        'nested-1',
+      ],
+    ]);
+  });
+});
+
+describe('capped turns', () => {
+  it('ends a turn whose last step stopped at a cap with that cap, whatever its events showed', async () => {
+    const { outcome } = await pump([
+      START,
+      fw('turn_completed', {
+        turnId: 't1',
+        durationMs: 1,
+        stopReason: 'max_turn_requests',
+      }),
+    ]);
+    expect(outcome).toEqual({
+      kind: 'stop',
+      stopReason: 'max_turn_requests',
+    });
+  });
+
+  it('a turn whose last step answered in full ends end_turn', async () => {
+    const { outcome } = await pump([
+      START,
+      fw('turn_completed', {
+        turnId: 't1',
+        durationMs: 1,
+        stopReason: 'end_turn',
+      }),
+    ]);
+    expect(outcome).toEqual({
+      kind: 'stop',
+      stopReason: 'end_turn',
+    });
   });
 });
 
@@ -417,30 +433,5 @@ describe('remaining translation rows', () => {
     assert(call && call.sessionUpdate === 'tool_call');
     expect(call.toolCallId).toBe('c1');
     expect(call.rawInput).toBeUndefined();
-  });
-
-  it('forwards a nested plan update untouched', async () => {
-    const { updates } = await pump([
-      START,
-      sdk('acp.plan', {
-        update: {
-          sessionUpdate: 'plan',
-          entries: [
-            {
-              content: 'first step',
-              priority: 'high',
-              status: 'pending',
-            },
-          ],
-        },
-      }),
-      fw('turn_completed', {
-        turnId: 't1',
-        durationMs: 1,
-      }),
-    ]);
-    const plan = updates.find((u) => u.sessionUpdate === 'plan');
-    assert(plan && plan.sessionUpdate === 'plan');
-    expect(plan.entries).toHaveLength(1);
   });
 });

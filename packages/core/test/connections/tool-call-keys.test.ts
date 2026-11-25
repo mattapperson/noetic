@@ -81,7 +81,6 @@ describe('connection tool idempotency keys', () => {
           frameworkCast({
             id: 'agent',
           }),
-          'fake',
           frameworkCast<Context<ContextData>>(ctx),
         ),
         fail: (error) => {
@@ -197,7 +196,6 @@ function bindingFor(ctx: Context): AcpToolBinding {
       frameworkCast({
         id: 'agent',
       }),
-      'fake',
       stepCtx,
     ),
     fail: (error) => {

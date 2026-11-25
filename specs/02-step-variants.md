@@ -257,8 +257,16 @@ interface StepMeta {
   cost?: number;
   serviceTier?: string;   // tier the provider served a callModel step on; undefined if unreported
   responseItems?: ReadonlyArray<Item>;
+  /** Why the model or agent stopped, on a step that returned. A callModel step stopped `end_turn`. */
+  stopReason?: 'end_turn' | 'max_tokens' | 'max_turn_requests';
+  /** The model the step ran with: callModel's resolved model, or an agent's current one. */
+  model?: string;
 }
 ```
+
+An agent step (`27-acp-agent-steps`) records the same fields: a token or turn
+cap (`max_tokens`, `max_turn_requests`) returns normally, so `stopReason` is how
+a caller tells a truncated turn from a complete one.
 
 ---
 

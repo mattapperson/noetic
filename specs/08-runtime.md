@@ -745,11 +745,12 @@ show one.
   for good the moment it finishes, and its result item joins the step's items
   and item stream at once. Once a subagent has spoken in the turn, the call
   first waits a moment for its announcement, and if it is still unannounced:
-  it is never dropped, its `tool_call_started` / `tool_call_completed` are
-  reported on the step as it runs, and its result item waits for the turn's
-  end — whether the turn finishes or fails — when, with every announcement
-  in, a subagent that announced it by then takes it (the item goes to that
-  nested agent) and otherwise it joins the step's items and item stream. A
+  it is never dropped, and its call item, `tool_call_started`,
+  `tool_call_completed` and result item all wait for the turn's end — whether
+  the turn finishes or fails — when, with every announcement in, a subagent
+  that announced it by then takes all of it (onto that nested agent's stream)
+  and otherwise all of it joins the step's items and item stream: one call is
+  never split across two streams. A
   step result that finishes after a waiting one waits behind it, so the step's
   item stream keeps the order calls finished. A call the agent gives up on
   while its owner is being settled never runs. When the step's items are
@@ -805,7 +806,7 @@ window for the same agent — and its child's output is the run's output, as a
 | `{name}:turn_started` | Emitted when the session runner starts a turn. Data: `{ turnId, messageIds }` |
 | `{name}:item_appended` | Emitted whenever a framework-authored item enters the session log — turn input messages (after `turn_started`), between-rounds inbox injections, tool result items, and the items a step with `emitItems` adds when it finishes, or streams again on replay under `emitItemsOnReplay` (`01-step-type` § Emitting items). Data: `{ item }`. Backs `getItemStream` for everything the SDK stream cannot carry, so it is emitted unconditionally — never filtered by `step.emit`. |
 | `{name}:custom_item_event` | One event of a declared custom item, as a step yields it (`34-custom-items`). Data: `{ id, type, event }`; `id` is the one its final item takes. Emitted unconditionally, like `item_appended`. |
-| `{name}:turn_completed` | Emitted when a turn completes. Data: `{ turnId, durationMs }` |
+| `{name}:turn_completed` | Emitted when a turn completes. Data: `{ turnId, durationMs, stopReason? }` — `stopReason` is the turn's last step's `lastStepMeta.stopReason` (`end_turn`, `max_tokens`, `max_turn_requests`), when it recorded one |
 | `{name}:tool_call_held` | Emitted when a tool call is held for a person (§ Held tool calls). Never scoped. Data: the `HeldCall`: `{ callId, name, args, argsHash, reason, dueAt?, onDue?, request?, question?, scope? }` — `scope` names the nested agent asking |
 | `{name}:tool_call_settled` | Emitted when a call this process announced held stops being held (§ Held tool calls). Data: the `HeldCallSettled`: `{ callId, name, argsHash, reason, by }` |
 | `{name}:turn_replayed` | Emitted when a message delivered again is answered from its finished turn's record (`23a-step-level-resume` § Sessions). Data: `{ messageIds, text }`, `text` being the recorded answer |
@@ -835,6 +836,7 @@ window for the same agent — and its child's output is the run's output, as a
 | `{name}:agent_started` | A nested agent started (§ Nested agents). Scoped. Data: `{ stepId, title?, description? }` |
 | `{name}:agent_status` | A nested agent reported its status. Scoped. Data: `{ stepId, status, stopReason? }` |
 | `{name}:agent_completed` | The turn that ran a nested agent ended. Scoped. Data: `{ stepId, status }` |
+| `{name}:workspace_access` | A step read or wrote a file or ran a command through the host's fs or shell adapters on an agent's behalf — served or refused (spec 27 § Observing client-side activity). Data: `{ stepId, operation: 'read_file' \| 'write_file' \| 'run_command' \| 'read_output' \| 'wait' \| 'kill' \| 'release', path?, command?, terminalId?, allowed, reason? }` |
 | `{name}:drain_started` | Emitted when a graceful stop begins (see Graceful Stop). Data: `{ executionId, deadline, inFlight }` |
 | `{name}:drain_finished` | Emitted when a graceful stop ends, just before the cancel. Data: `{ executionId, reason, durationMs, finished, cutOff }` |
 
