@@ -269,6 +269,20 @@ export interface StoredTurn {
   };
 }
 
+/**
+ * @public
+ * What a thread's stored record holds (spec 23a § Sessions): what
+ * `AgentHarness.getStoredThread` resolves, so a host decides whether to seed
+ * history without reading storage keys.
+ */
+export interface StoredThread {
+  readonly threadId: string;
+  /** The record holds history, from a finished turn or `seedSessionHistory`. */
+  readonly hasHistory: boolean;
+  /** The turn in flight, cut off or parked, as `turnOptions` sees it. */
+  readonly turn?: StoredTurn;
+}
+
 /** @public A turn that stopped rather than redo a recorded effect (spec 23 § Versions). */
 export interface StuckTurn {
   readonly threadId: string;
