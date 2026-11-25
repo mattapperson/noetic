@@ -6,10 +6,10 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type * as acp from '@agentclientprotocol/sdk';
 import { AgentHarness, execute, step, tool } from '@noetic-tools/core';
 import type { AcpAgent, AcpMachine, AcpMachineFactory, SpawnCommand } from '@noetic-tools/types';
 import { isNoeticConfigError } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
 import { z } from 'zod';
 import { gemini } from '../src/agents';
 import { defineAcpAgent } from '../src/define';

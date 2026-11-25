@@ -7,6 +7,8 @@
  * rather than a hand-rolled stand-in.
  */
 
+import type * as acp from '@agentclientprotocol/sdk';
+import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk';
 import type {
   AcpAgentConnection,
   AcpBoundPermissionHandler,
@@ -22,8 +24,6 @@ import type {
   ShellExecResult,
 } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
-import { AgentSideConnection, ndJsonStream } from '@zed-industries/agent-client-protocol';
 import { openAcpConnection } from '../src/connection';
 import { createAcpLoopbackPair } from '../src/transport-loopback';
 
@@ -185,7 +185,12 @@ export interface FakeAgentScript {
   authMethods?: acp.AuthMethod[];
   /** Mode state returned from `session/new`. */
   modes?: acp.SessionModeState;
-  models?: acp.SessionModelState;
+  /** Config options returned from `session/new` (model, effort, …). */
+  configOptions?: acp.SessionConfigOption[];
+  /** The `session/load` answer. Defaults to `{}`. */
+  loadResponse?: acp.LoadSessionResponse;
+  /** The `usage` the `session/prompt` answer reports. */
+  usage?: acp.Usage;
   /** Stop reason returned from `session/prompt`. Defaults to `end_turn`. */
   stopReason?: acp.PromptResponse['stopReason'];
   /**
@@ -207,7 +212,7 @@ export interface FakeAgentCalls {
   prompt: acp.PromptRequest[];
   cancel: acp.CancelNotification[];
   setMode: acp.SetSessionModeRequest[];
-  setModel: acp.SetSessionModelRequest[];
+  setConfigOption: acp.SetSessionConfigOptionRequest[];
   authenticate: acp.AuthenticateRequest[];
 }
 
@@ -219,7 +224,7 @@ function emptyCalls(): FakeAgentCalls {
     prompt: [],
     cancel: [],
     setMode: [],
-    setModel: [],
+    setConfigOption: [],
     authenticate: [],
   };
 }
@@ -287,12 +292,12 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
         return {
           sessionId: `session-${sessionCounter}`,
           modes: script.modes,
-          models: script.models,
+          configOptions: script.configOptions,
         };
       },
       async loadSession(params) {
         calls.loadSession.push(params);
-        return {};
+        return script.loadResponse ?? {};
       },
       async authenticate(params) {
         calls.authenticate.push(params);
@@ -302,15 +307,32 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
         calls.setMode.push(params);
         return {};
       },
-      async setSessionModel(params) {
-        calls.setModel.push(params);
-        return {};
+      async setSessionConfigOption(params) {
+        calls.setConfigOption.push(params);
+        const configOptions = (script.configOptions ?? []).map((option) =>
+          option.id === params.configId &&
+          option.type === 'select' &&
+          typeof params.value === 'string'
+            ? {
+                ...option,
+                currentValue: params.value,
+              }
+            : option,
+        );
+        return {
+          configOptions,
+        };
       },
       async prompt(params) {
         calls.prompt.push(params);
         const stopReason = await script.onPrompt?.(conn, params);
         return {
           stopReason: stopReason ?? script.stopReason ?? 'end_turn',
+          ...(script.usage
+            ? {
+                usage: script.usage,
+              }
+            : {}),
         };
       },
       async cancel(params) {

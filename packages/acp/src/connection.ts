@@ -15,6 +15,8 @@
  *    stop reason the specification requires.
  */
 
+import type * as acp from '@agentclientprotocol/sdk';
+import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import type {
   AcpAgentConnection,
   AcpClientHost,
@@ -28,12 +30,6 @@ import type {
   AcpTurnResult,
 } from '@noetic-tools/types';
 import { AcpCapabilityError, AcpConnectError } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
-import {
-  ClientSideConnection,
-  ndJsonStream,
-  PROTOCOL_VERSION,
-} from '@zed-industries/agent-client-protocol';
 import { clientCapabilitiesFor, NoeticAcpClient } from './client';
 import type { WatchedTransport } from './liveness';
 import { watchTransport } from './liveness';
@@ -113,8 +109,8 @@ class AcpSessionImpl implements AcpSession {
     private readonly agentId: string,
     private readonly agent: acp.Agent,
     readonly sessionId: string,
-    readonly modes: acp.SessionModeState | undefined,
-    private readonly models: acp.SessionModelState | undefined,
+    private modeState: acp.SessionModeState | undefined,
+    private options: acp.SessionConfigOption[] | undefined,
     private commands: acp.AvailableCommand[],
     /** Rejects if the agent dies, so a request cannot outlive it. */
     private readonly death: Promise<never>,
@@ -122,8 +118,30 @@ class AcpSessionImpl implements AcpSession {
     private readonly promptCapabilities: acp.PromptCapabilities | undefined,
   ) {}
 
+  get modes(): acp.SessionModeState | undefined {
+    return this.modeState;
+  }
+
+  get configOptions(): ReadonlyArray<acp.SessionConfigOption> {
+    return this.options ?? [];
+  }
+
   get availableCommands(): ReadonlyArray<acp.AvailableCommand> {
     return this.commands;
+  }
+
+  /**
+   * Take the modes and config options a `session/load` answer advertises. The
+   * session is registered before the load (so replayed updates reach it), so
+   * these arrive after construction.
+   */
+  applySettings(settings: Pick<acp.LoadSessionResponse, 'modes' | 'configOptions'>): void {
+    if (settings.modes) {
+      this.modeState = settings.modes;
+    }
+    if (settings.configOptions) {
+      this.options = settings.configOptions;
+    }
   }
 
   /** Feed a notification to the running turn, if any. */
@@ -133,6 +151,15 @@ class AcpSessionImpl implements AcpSession {
       this.commands = [
         ...update.availableCommands,
       ];
+    }
+    if (update.sessionUpdate === 'current_mode_update' && this.modeState) {
+      this.modeState = {
+        ...this.modeState,
+        currentModeId: update.currentModeId,
+      };
+    }
+    if (update.sessionUpdate === 'config_option_update') {
+      this.options = update.configOptions;
     }
     this.activeTurn?.push(notification);
   }
@@ -177,6 +204,7 @@ class AcpSessionImpl implements AcpSession {
       ]);
       return accumulator.result({
         stopReason: response.stopReason,
+        reportedUsage: response.usage ?? undefined,
       });
     } finally {
       opts.signal?.removeEventListener('abort', onAbort);
@@ -191,7 +219,7 @@ class AcpSessionImpl implements AcpSession {
   }
 
   async setMode(modeId: string): Promise<void> {
-    if (!this.modes || !this.agent.setSessionMode) {
+    if (!this.modeState || !this.agent.setSessionMode) {
       throw new AcpCapabilityError({
         agentId: this.agentId,
         capability: 'session/set_mode',
@@ -207,19 +235,24 @@ class AcpSessionImpl implements AcpSession {
   }
 
   async setModel(modelId: string): Promise<void> {
-    if (!this.models || !this.agent.setSessionModel) {
+    const model = this.options?.find(
+      (option) => option.category === 'model' && option.type === 'select',
+    );
+    if (!model || !this.agent.setSessionConfigOption) {
       throw new AcpCapabilityError({
         agentId: this.agentId,
-        capability: 'session/set_model',
+        capability: 'session/set_config_option:model',
       });
     }
-    await Promise.race([
-      this.agent.setSessionModel({
+    const response = await Promise.race([
+      this.agent.setSessionConfigOption({
         sessionId: this.sessionId,
-        modelId,
+        configId: model.id,
+        value: modelId,
       }),
       this.death,
     ]);
+    this.options = response.configOptions;
   }
 }
 
@@ -272,7 +305,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         this.agent,
         response.sessionId,
         response.modes ?? undefined,
-        response.models ?? undefined,
+        response.configOptions ?? undefined,
         [],
         this.watch.death,
         this.agentCapabilities.promptCapabilities,
@@ -301,7 +334,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         this.agentCapabilities.promptCapabilities,
       ),
     );
-    await Promise.race([
+    const response = await Promise.race([
       this.agent.loadSession({
         sessionId: opts.sessionId,
         cwd: opts.cwd,
@@ -309,6 +342,9 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
       }),
       this.watch.death,
     ]);
+    if (response) {
+      session.applySettings(response);
+    }
     return session;
   }
 

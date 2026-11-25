@@ -51,8 +51,11 @@ interface FakeAgentOpts {
   onSetMode?: (modeId: string) => void;
   onCancel?: () => void;
   throwOnTurn?: Error;
-  throwOnNewSession?: Error;
-  throwOnSetMode?: Error;
+  /** Thrown as given: an Error, or a JSON-RPC error object as a peer rejects with. */
+  throwOnNewSession?: unknown;
+  throwOnSetMode?: unknown;
+  /** Notifications `session/load` replays before it answers. */
+  replayOnLoad?: AcpSessionNotification[];
 }
 
 function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
@@ -99,7 +102,7 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
         },
         async setMode(modeId) {
           opts.onSetMode?.(modeId);
-          if (opts.throwOnSetMode) {
+          if (opts.throwOnSetMode !== undefined) {
             throw opts.throwOnSetMode;
           }
         },
@@ -119,13 +122,16 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
         },
         async newSession(newSession) {
           opts.onNewSession?.(newSession);
-          if (opts.throwOnNewSession) {
+          if (opts.throwOnNewSession !== undefined) {
             throw opts.throwOnNewSession;
           }
           sessionCounter += 1;
           return makeSession(`session-${sessionCounter}`);
         },
         async loadSession(load) {
+          for (const update of opts.replayOnLoad ?? []) {
+            connect.host.onSessionUpdate(update);
+          }
           return makeSession(load.sessionId);
         },
         async close() {
@@ -144,6 +150,33 @@ function harnessCtx() {
   return {
     harness,
     ctx: harness.createContext(),
+  };
+}
+
+interface CapturedEvent {
+  source: string;
+  type: string;
+  data: Record<string, unknown>;
+}
+
+/** A harness context whose broadcaster records every event, as `getFullStream` would see them. */
+function capturingCtx() {
+  const { harness, ctx } = harnessCtx();
+  const events: CapturedEvent[] = [];
+  const withBroadcaster = frameworkCast<
+    typeof ctx & {
+      _broadcaster: unknown;
+    }
+  >(ctx);
+  withBroadcaster._broadcaster = {
+    emit(event: CapturedEvent) {
+      events.push(event);
+    },
+  };
+  return {
+    harness,
+    ctx,
+    events,
   };
 }
 
@@ -1196,5 +1229,70 @@ describe('step.acpAgent builder validation', () => {
       assert(isNoeticConfigError(e));
       expect(e.code).toBe('MISSING_PROMPT');
     }
+  });
+});
+
+describe('executeAcpAgent — readable agent errors (#96)', () => {
+  it('fails the step with the message of a JSON-RPC error object from session/new', async () => {
+    const { ctx } = harnessCtx();
+    const acpStep = step.acpAgent({
+      id: 'unauthenticated',
+      agent: fakeAgent({
+        throwOnNewSession: {
+          code: -32000,
+          message: 'Authentication required',
+        },
+      }),
+      prompt: 'go',
+    });
+
+    const error = await execute(acpStep, undefined, ctx).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('step_failed');
+    expect(String(error)).not.toContain('[object Object]');
+    assert(error.noeticError.kind === 'step_failed');
+    expect(error.noeticError.cause.message).toBe('Authentication required (-32000)');
+  });
+
+  it("keeps an Error-shaped JSON-RPC rejection's data detail when mode selection fails", async () => {
+    const { ctx } = harnessCtx();
+    const rejection = Object.assign(new Error('Internal error'), {
+      code: -32603,
+      data: {
+        message: 'mode read-only is not available',
+      },
+    });
+    const acpStep = step.acpAgent({
+      id: 'bad-mode-rpc',
+      agent: fakeAgent({
+        modes: {
+          currentModeId: 'auto',
+          availableModes: [
+            {
+              id: 'auto',
+              name: 'Auto',
+            },
+          ],
+        },
+        throwOnSetMode: rejection,
+      }),
+      prompt: 'go',
+      mode: 'read-only',
+    });
+
+    const error = await execute(acpStep, undefined, ctx).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    assert(isNoeticError(error));
+    assert(error.noeticError.kind === 'step_failed');
+    expect(error.noeticError.cause.message).toBe(
+      'Internal error: mode read-only is not available (-32603)',
+    );
   });
 });

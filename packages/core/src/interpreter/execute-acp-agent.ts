@@ -41,6 +41,7 @@ import {
 import { assertAgentTakesTools } from '../builders/acp-agent-checks';
 import { runtimeOf } from '../connections/model-tools';
 import type { AcpSessionStore } from '../runtime/acp-session-store';
+import { errorMessage, isRpcError } from '../util/error-message';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
 import { renderLayerContext } from './acp-layers';
@@ -697,20 +698,36 @@ function turnFailure(
   return new NoeticErrorImpl({
     kind: 'step_failed',
     stepId: step.id,
-    cause: cause instanceof Error ? cause : new Error(describeCause(cause)),
+    // A JSON-RPC rejection keeps its detail (`data`) in the message, so a
+    // failure reads "Internal error: Authentication required (-32603)", never
+    // "[object Object]" or a bare "Internal error".
+    cause:
+      cause instanceof Error && !isRpcError(cause)
+        ? cause
+        : new Error(errorMessage(cause), {
+            cause,
+          }),
     retriesExhausted: false,
   });
 }
 
-/** A readable message for a thrown non-Error, such as a JSON-RPC error object. */
-function describeCause(cause: unknown): string {
-  if (typeof cause !== 'object' || cause === null) {
-    return String(cause);
+/**
+ * A failure while opening the session or applying its mode/model. Typed
+ * errors (capability, connect, config) pass through; a JSON-RPC rejection from
+ * the agent — or anything thrown that is not an Error — becomes the step's
+ * `step_failed` error with a readable message.
+ */
+function setupFailure(
+  step: {
+    id: string;
+  },
+  cause: unknown,
+  baseCtx: Context<ContextData>,
+): unknown {
+  if (cause instanceof Error && !isRpcError(cause)) {
+    return cause;
   }
-  const message = Reflect.get(cause, 'message');
-  const data = Reflect.get(cause, 'data');
-  const head = typeof message === 'string' ? message : JSON.stringify(cause);
-  return data === undefined ? head : `${head}: ${JSON.stringify(data)}`;
+  return turnFailure(step, cause, baseCtx);
 }
 
 //#region Turn
@@ -924,9 +941,13 @@ export async function executeAcpAgent<TContext, I, O>(
     binding: bindingFor(bridge),
     tools,
     resumeId,
-  }).finally(() => {
-    reloading = false;
-  });
+  })
+    .catch((cause: unknown) => {
+      throw setupFailure(step, cause, baseCtx);
+    })
+    .finally(() => {
+      reloading = false;
+    });
   if (resolution.resumed) {
     tools?.sessionReloaded();
   }
@@ -937,7 +958,9 @@ export async function executeAcpAgent<TContext, I, O>(
     });
   }
 
-  await applySessionSelection(step, ctx, resolution, baseCtx);
+  await applySessionSelection(step, ctx, resolution, baseCtx).catch((cause: unknown) => {
+    throw setupFailure(step, cause, baseCtx);
+  });
   turnError.cancel = () => resolution.live.session.cancel();
 
   // History seeds only a freshly opened session; a reused one already owns

@@ -41,7 +41,7 @@ export function assistantMessageItem(text: string, id?: string): MessageItem {
 export function functionCallItem(opts: {
   title: string;
   toolCallId: string;
-  rawInput?: Record<string, unknown>;
+  rawInput?: unknown;
   kind?: string;
 }): FunctionCallItem {
   const args = JSON.stringify(opts.rawInput ?? {});

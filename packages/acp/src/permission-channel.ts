@@ -128,6 +128,22 @@ function isChannelTimeout(error: unknown): boolean {
   return isNoeticError(error) && error.noeticError.kind === 'channel_timeout';
 }
 
+/**
+ * ACP types a tool call's `rawInput` as any JSON value; the request record
+ * keeps an object, so a scalar or array is carried as `{ value }`.
+ */
+export function rawInputRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return Object.fromEntries(Object.entries(value));
+  }
+  return {
+    value,
+  };
+}
+
 //#endregion
 
 //#region Public API
@@ -182,7 +198,7 @@ export function askUserForPermission(opts: AskUserForPermissionOptions = {}): Ac
       stepId: info.stepId,
       title: request.toolCall.title ?? request.toolCall.toolCallId,
       kind: request.toolCall.kind ?? undefined,
-      rawInput: request.toolCall.rawInput,
+      rawInput: rawInputRecord(request.toolCall.rawInput),
       options: request.options.map((option) => ({
         optionId: option.optionId,
         name: option.name,

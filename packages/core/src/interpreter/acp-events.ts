@@ -26,6 +26,7 @@ import type {
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
+import { errorMessage } from '../util/error-message';
 import { isFunctionCall } from './typeguards';
 
 type SessionUpdate = AcpSessionNotification['update'];
@@ -192,6 +193,11 @@ export class AcpEventBridge {
       this.start();
       this.sdk('response.completed', {
         stopReason: result.stopReason,
+        ...(result.reportedUsage
+          ? {
+              reportedUsage: result.reportedUsage,
+            }
+          : {}),
       });
       this.completed = true;
     }
@@ -210,7 +216,7 @@ export class AcpEventBridge {
     this.start();
     this.sdk('response.completed', {
       stopReason: 'error',
-      error: cause instanceof Error ? cause.message : String(cause),
+      error: errorMessage(cause),
     });
     this.completed = true;
   }

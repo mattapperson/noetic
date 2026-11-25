@@ -24,16 +24,16 @@
     },
     "packages/acp": {
       "name": "@noetic-tools/acp",
-      "version": "1.4.0",
+      "version": "2.0.0-next.1",
       "bin": {
         "noetic-acp": "./dist/bin.js",
         "noetic-pi": "./dist/pi/launch.js",
       },
       "dependencies": {
+        "@agentclientprotocol/sdk": "1.9.0",
         "@modelcontextprotocol/node": "2.1.2",
         "@modelcontextprotocol/server": "2.4.0",
         "@noetic-tools/types": "workspace:*",
-        "@zed-industries/agent-client-protocol": "^0.4.5",
         "ws": "8.22.1",
         "zod": "^4.0.0",
       },
@@ -87,7 +87,7 @@
     },
     "packages/context": {
       "name": "@noetic-tools/context",
-      "version": "1.11.1",
+      "version": "2.0.0-next.1",
       "dependencies": {
         "@noetic-tools/types": "workspace:*",
         "zod": "^4.0.0",
@@ -101,7 +101,7 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "5.21.0",
+      "version": "5.22.0-next.2",
       "dependencies": {
         "@noetic-tools/context": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -326,11 +326,11 @@
     },
     "packages/types": {
       "name": "@noetic-tools/types",
-      "version": "3.18.0",
+      "version": "3.19.0-next.1",
       "dependencies": {
+        "@agentclientprotocol/sdk": "1.9.0",
         "@openrouter/agent": "^0.11.0",
         "@standard-schema/spec": "1.1.0",
-        "@zed-industries/agent-client-protocol": "^0.4.5",
         "zod": "^4.0.0",
       },
       "devDependencies": {
@@ -390,6 +390,8 @@
     },
   },
   "packages": {
+    "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@1.9.0", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-saCOTPYBK1iqWqJFAYHXbg3+zCoFXyZZFoqQAwdTWkbrZZPpAETr80QOnYr2l+dzPwL0jpNhn3eDY8MoEIDbUA=="],
+
     "@ai-sdk/gateway": ["@ai-sdk/gateway@4.0.37", "", { "dependencies": { "@ai-sdk/provider": "4.0.4", "@ai-sdk/provider-utils": "5.0.18", "@vercel/oidc": "3.2.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-YBCTsSlX0ETVsjo0ihfBOeJ3p3y1wXKXDzF9Ygp9dscUY06dzOGmyWJSGsKg+khKVArzBWUW4UCSAKms20ZDmg=="],
 
     "@ai-sdk/provider": ["@ai-sdk/provider@4.0.4", "", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-tbHKNLirllUNF3ZlkCsXnwab2ZV1Sl4b1H/Cp9ruCce15IBmskE8Gwkk0yo9xDWY+jho2of7lVXtwSsyrq7cwQ=="],
@@ -809,8 +811,6 @@
     "@xyflow/react": ["@xyflow/react@12.11.2", "", { "dependencies": { "@xyflow/system": "0.0.79", "classcat": "^5.0.3", "zustand": "^4.4.0" }, "peerDependencies": { "@types/react": ">=17", "@types/react-dom": ">=17", "react": ">=17", "react-dom": ">=17" }, "optionalPeers": ["@types/react", "@types/react-dom"] }, "sha512-eLAlDWJfWnQEhJwGMjlWdAXO9eYllKpliUmPQlAmOLxz6mExXuzMVDUKLMquixgkrtmMFFtug3jGKmYYld12cA=="],
 
     "@xyflow/system": ["@xyflow/system@0.0.79", "", { "dependencies": { "@types/d3-drag": "^3.0.7", "@types/d3-interpolate": "^3.0.4", "@types/d3-selection": "^3.0.10", "@types/d3-transition": "^3.0.8", "@types/d3-zoom": "^3.0.8", "d3-drag": "^3.0.0", "d3-interpolate": "^3.0.1", "d3-selection": "^3.0.0", "d3-zoom": "^3.0.0" } }, "sha512-czLyOh91NF0hIzbNzwi8I6GlqG23BHh2435OddfI6uiaLH3xdrdygO93gqgH1Bv9mhy8XPFQJOBn1FTq4LvEWA=="],
-
-    "@zed-industries/agent-client-protocol": ["@zed-industries/agent-client-protocol@0.4.5", "", { "dependencies": { "zod": "^3.0.0" } }, "sha512-OwHKfu5AiKul/GSJilHg36+kOSV9eOl2eYnjR6tenAQDdraSnt22WFk0SDFTeuAANz1Gxkv+DTf7Hq32rvX7FQ=="],
 
     "accepts": ["accepts@2.0.0", "", { "dependencies": { "mime-types": "^3.0.0", "negotiator": "^1.0.0" } }, "sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng=="],
 
@@ -1549,8 +1549,6 @@
     "@tailwindcss/oxide-wasm32-wasi/tslib": ["tslib@2.8.1", "", { "bundled": true }, "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="],
 
     "@xyflow/react/zustand": ["zustand@4.5.7", "", { "dependencies": { "use-sync-external-store": "^1.2.2" }, "peerDependencies": { "@types/react": ">=16.8", "immer": ">=9.0.6", "react": ">=16.8" }, "optionalPeers": ["@types/react", "immer", "react"] }, "sha512-CHOUy7mu3lbD6o6LJLfllpjkzhHXSBlX8B9+qPddUsIfeF5S/UZ5q0kmCsnRqT1UHFQZchNFDDzMbQsuesHWlw=="],
-
-    "@zed-industries/agent-client-protocol/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
     "body-parser/content-type": ["content-type@2.1.0", "", {}, "sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag=="],
 

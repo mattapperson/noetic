@@ -12,14 +12,14 @@
  * forming a cycle. Core calls only the methods declared here — the ACP library's
  * `ClientSideConnection` never enters core's dependency graph.
  *
- * Protocol types are re-used verbatim from `@zed-industries/agent-client-protocol`
+ * Protocol types are re-used verbatim from `@agentclientprotocol/sdk`
  * (spec version 1) rather than mirrored, so the wire surface cannot drift from
  * the specification.
  *
  * @see https://agentclientprotocol.com/
  */
 
-import type * as acp from '@zed-industries/agent-client-protocol';
+import type * as acp from '@agentclientprotocol/sdk';
 import type { TokenUsage } from './common';
 import type { Context } from './context';
 import type { FsAdapter } from './fs-adapter';
@@ -516,8 +516,16 @@ export interface AcpTurnResult {
   items: Item[];
   /** The agent's final message: its text after the last tool call of the turn. */
   text: string;
+  /** Billed token delta supplied by an adapter, never context-window occupancy. */
   usage?: TokenUsage;
   cost?: number;
+  /**
+   * The `usage` the agent's `session/prompt` answer reported, verbatim. Kept
+   * apart from `usage` because an agent may report session totals rather than
+   * this turn's delta. Context-window occupancy (`usage_update`) is not here:
+   * it reaches the host as a raw `acp_event`.
+   */
+  reportedUsage?: acp.Usage;
   /** Plan entries reported via `plan` updates, latest snapshot wins. */
   plan?: ReadonlyArray<acp.PlanEntry>;
   /** Slash commands the agent advertised during the turn. */
@@ -552,15 +560,26 @@ export interface AcpSession {
   readonly sessionId: string;
   /** Mode state when the agent supports session modes. */
   readonly modes?: acp.SessionModeState;
+  /**
+   * Config options the agent advertises (model, reasoning effort, …), from
+   * `session/new` or `session/load`, refreshed by `config_option_update`.
+   */
+  readonly configOptions?: ReadonlyArray<acp.SessionConfigOption>;
   /** Slash commands currently offered, refreshed by `available_commands_update`. */
   readonly availableCommands: ReadonlyArray<acp.AvailableCommand>;
   /** Run one prompt turn to completion. */
   prompt(opts: AcpPromptOptions): Promise<AcpTurnResult>;
   /** Send `session/cancel` for an in-flight turn. */
   cancel(): Promise<void>;
-  /** Switch mode. Throws when the agent advertised no modes. */
+  /**
+   * Switch mode. Throws when the agent advertised no modes — on `session/new`
+   * or on `session/load`.
+   */
   setMode(modeId: string): Promise<void>;
-  /** Switch model. Throws when the agent advertised no models. */
+  /**
+   * Select a model through the `model` config option
+   * (`session/set_config_option`). Throws when the agent advertised none.
+   */
   setModel(modelId: string): Promise<void>;
 }
 
@@ -750,6 +769,8 @@ export interface AcpSessionInfo {
   currentModeId?: string;
   /** Modes the agent offers, for a mode switcher. */
   availableModes: ReadonlyArray<acp.SessionMode>;
+  /** Config options the agent currently advertises (model, effort, …). */
+  configOptions?: ReadonlyArray<acp.SessionConfigOption>;
   /** Slash commands the agent currently advertises. */
   availableCommands: ReadonlyArray<acp.AvailableCommand>;
 }
@@ -922,12 +943,15 @@ export type {
   PlanEntry as AcpPlanEntry,
   PromptCapabilities as AcpPromptCapabilities,
   RequestPermissionRequest as AcpRequestPermissionRequest,
+  SessionConfigOption as AcpSessionConfigOption,
   SessionMode as AcpSessionMode,
   SessionModeState as AcpSessionModeState,
   SessionNotification as AcpSessionNotification,
   ToolCallContent as AcpToolCallContent,
   ToolCallStatus as AcpToolCallStatus,
   ToolKind as AcpToolKind,
-} from '@zed-industries/agent-client-protocol';
+  Usage as AcpUsage,
+  UsageUpdate as AcpUsageUpdate,
+} from '@agentclientprotocol/sdk';
 
 //#endregion
