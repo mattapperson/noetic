@@ -1145,9 +1145,14 @@ export class AcpEventBridge {
       return;
     }
     if (update.sessionUpdate === 'plan_removed') {
-      this.framework('plan_removed', {
-        id: update.planId,
-      });
+      this.framework(
+        'plan_removed',
+        update.planId
+          ? {
+              id: update.planId,
+            }
+          : {},
+      );
       return;
     }
     if (update.sessionUpdate === 'current_mode_update') {

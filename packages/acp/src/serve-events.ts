@@ -141,41 +141,128 @@ const KINDS = [
   'other',
 ] as const;
 
-/** How a call presents, as its events carry it (spec 08 § Tool calls, plans and agent settings). */
-const EventPresentationSchema = z.object({
-  title: z.string().optional(),
-  kind: z.enum(KINDS).optional(),
-  locations: z
-    .array(
-      z.object({
-        path: z.string(),
-        line: z.number().optional(),
-      }),
-    )
-    .optional(),
-  status: z
-    .enum([
-      'pending',
-      'in_progress',
-    ])
-    .optional(),
-  progress: z.number().optional(),
-});
+/**
+ * How a call presents, as its events carry it (spec 08 § Tool calls, plans
+ * and agent settings). Each field is read on its own, so one the wire cannot
+ * show never costs the others.
+ */
+const PRESENTATION_FIELDS = {
+  title: z.string(),
+  kind: z.enum(KINDS),
+  locations: z.array(
+    z.object({
+      path: z.string(),
+      line: z.number().optional(),
+    }),
+  ),
+  status: z.enum([
+    'pending',
+    'in_progress',
+  ]),
+  progress: z.number(),
+};
 
-type EventPresentation = z.infer<typeof EventPresentationSchema>;
-
-function readPresentation(event: StreamEvent): EventPresentation {
-  const parsed = EventPresentationSchema.safeParse(event.data);
-  return parsed.success ? parsed.data : {};
+interface EventPresentation {
+  title?: string;
+  kind?: (typeof KINDS)[number];
+  locations?: ToolLocation[];
+  status?: 'pending' | 'in_progress';
+  progress?: number;
 }
 
-/** A call's structured content, as its events carry it; undefined when it carries none. */
-function readContent(event: StreamEvent): ToolContent[] | undefined {
+function readPresentation(event: StreamEvent): EventPresentation {
+  const field = <T>(schema: z.ZodType<T>, value: unknown): T | undefined => {
+    const parsed = schema.safeParse(value);
+    return parsed.success ? parsed.data : undefined;
+  };
+  const presentation: EventPresentation = {
+    title: field(PRESENTATION_FIELDS.title, event.data.title),
+    kind: field(PRESENTATION_FIELDS.kind, event.data.kind),
+    locations: field(PRESENTATION_FIELDS.locations, event.data.locations),
+    status: field(PRESENTATION_FIELDS.status, event.data.status),
+    progress: field(PRESENTATION_FIELDS.progress, event.data.progress),
+  };
+  return Object.fromEntries(
+    Object.entries(presentation).filter(([, value]) => value !== undefined),
+  );
+}
+
+/** The structured content an editor can show: everything but a terminal. */
+type ShownContent = Exclude<
+  ToolContent,
+  {
+    type: 'terminal';
+  }
+>;
+
+/** The structured content parts the pump knows how to show, each checked before it is shown. */
+const ContentPartSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('input_text'),
+    text: z.string(),
+  }),
+  z.object({
+    type: z.literal('input_image'),
+    imageUrl: z.string(),
+  }),
+  z.object({
+    type: z.literal('input_file'),
+    fileData: z.string().optional(),
+    fileId: z.string().nullish(),
+    fileUrl: z.string().optional(),
+    filename: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('input_video'),
+    videoUrl: z.string(),
+  }),
+  z.object({
+    type: z.literal('resource_link'),
+    uri: z.string(),
+    name: z.string(),
+    title: z.string().optional(),
+    mimeType: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('resource'),
+    uri: z.string(),
+    mimeType: z.string().optional(),
+    text: z.string().optional(),
+    blob: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('diff'),
+    path: z.string(),
+    oldText: z.string().nullable(),
+    newText: z.string(),
+  }),
+]);
+
+/** Every part an editor can show has a schema: a part added to `ToolContent` fails to compile here. */
+type CoveredContent = z.infer<typeof ContentPartSchema>['type'];
+/** @internal */
+export const UNCHECKED_CONTENT: Record<Exclude<ShownContent['type'], CoveredContent>, never> = {};
+
+/**
+ * A call's structured content, as its events carry it; undefined when it
+ * carries none the editor can show. An entry that is not a known part is
+ * left out rather than failing the turn. A terminal is left out too: it lives
+ * on the host that ran it, which is not the editor's.
+ */
+function readContent(event: StreamEvent): ShownContent[] | undefined {
   const content = event.data.content;
-  if (!Array.isArray(content) || content.length === 0) {
+  if (!Array.isArray(content)) {
     return undefined;
   }
-  return frameworkCast<ToolContent[]>(content);
+  const parts = content.flatMap((entry) => {
+    const parsed = ContentPartSchema.safeParse(entry);
+    return parsed.success
+      ? [
+          parsed.data,
+        ]
+      : [];
+  });
+  return parts.length > 0 ? parts : undefined;
 }
 
 function wireLocations(
@@ -301,12 +388,13 @@ const BLOCKS: BlockMappers = {
 };
 
 /** One piece of structured content, as the wire's tool-call content. */
-function wireContent(content: ToolContent): AcpToolCallContent {
-  if (content.type === 'diff' || content.type === 'terminal') {
+function wireContent(content: ShownContent): AcpToolCallContent {
+  if (content.type === 'diff') {
     return content;
   }
+
   // The registry is keyed by the union's own tags, so its mapper takes this part.
-  const toBlock = frameworkCast<(part: ToolContent) => WireBlock>(BLOCKS[content.type]);
+  const toBlock = frameworkCast<(part: ShownContent) => WireBlock>(BLOCKS[content.type]);
   return {
     type: 'content',
     content: toBlock(content),
@@ -407,6 +495,8 @@ interface TurnState {
   argsByCallId: Map<string, unknown>;
   /** Calls started but not completed — flushed at the turn boundary so the client is never left with a spinner. */
   openCalls: Set<string>;
+  /** The id of the plan the editor shows (null: an agent's only plan); undefined when it shows none. */
+  shownPlan?: string | null;
 }
 
 async function flushOpenCalls(state: TurnState, status: 'completed' | 'failed'): Promise<void> {
@@ -433,7 +523,9 @@ async function handleSdkEvent(state: TurnState, event: StreamEvent): Promise<voi
   const fc = readFunctionCallArgs(event);
   if (fc) {
     state.argsByCallId.set(fc.callId, fc.args);
+    return;
   }
+  await handleImageItem(state, event);
 }
 
 async function handleToolCallStarted(state: TurnState, event: StreamEvent): Promise<void> {
@@ -466,6 +558,10 @@ async function handleToolProgress(state: TurnState, event: StreamEvent): Promise
   }
   const report = readPresentation(event);
   const content = readContent(event);
+  // A report the editor can show nothing of — a generator's bare event — sends nothing.
+  if (Object.keys(report).length === 0 && content === undefined) {
+    return;
+  }
   await notifyIfPrimary(state.params, state.primary, {
     sessionUpdate: 'tool_call_update',
     toolCallId: call.callId,
@@ -536,28 +632,86 @@ async function handleToolCallCompleted(state: TurnState, event: StreamEvent): Pr
   });
 }
 
-/** The plan of the agent that answers the session, as the wire's plan. */
+const PlanEntriesSchema = z.array(
+  z.object({
+    content: z.string(),
+    priority: z.enum([
+      'high',
+      'medium',
+      'low',
+    ]),
+    status: z.enum([
+      'pending',
+      'in_progress',
+      'completed',
+    ]),
+  }),
+);
+
+/** A plan's id as its event names it; null for the agent's only plan. */
+function planIdOf(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+/**
+ * The plan of the agent that answers the session, as the wire's plan, which
+ * holds one plan. The plan the editor shows is the one last sent; another
+ * plan's update replaces it, and only its own removal clears it. A plan
+ * written as markdown or kept in a file has no entries to show.
+ */
 async function handlePlan(state: TurnState, event: StreamEvent, removed: boolean): Promise<void> {
-  const plan = event.data.plan;
-  const entries = removed
-    ? []
-    : typeof plan === 'object' && plan !== null && 'entries' in plan && Array.isArray(plan.entries)
-      ? frameworkCast<
-          Extract<
-            ServeSessionUpdate,
-            {
-              sessionUpdate: 'plan';
-            }
-          >['entries']
-        >(plan.entries)
-      : undefined;
-  // A plan written as markdown or kept in a file has no entries to show.
-  if (entries === undefined) {
+  if (removed) {
+    const id = planIdOf(event.data.id);
+    if (state.shownPlan === undefined || state.shownPlan !== id) {
+      return;
+    }
+    state.shownPlan = undefined;
+    await notifyIfPrimary(state.params, state.primary, {
+      sessionUpdate: 'plan',
+      entries: [],
+    });
     return;
   }
+  const plan = event.data.plan;
+  const record =
+    typeof plan === 'object' && plan !== null ? frameworkCast<Record<string, unknown>>(plan) : {};
+  const entries = PlanEntriesSchema.safeParse(record.entries);
+  if (!entries.success) {
+    return;
+  }
+  state.shownPlan = planIdOf(record.id);
   await notifyIfPrimary(state.params, state.primary, {
     sessionUpdate: 'plan',
-    entries,
+    entries: entries.data,
+  });
+}
+
+/**
+ * An image the agent answered with, as an image in its message: the item's
+ * result is a data URL, or a provider's raw base64 PNG.
+ */
+async function handleImageItem(state: TurnState, event: StreamEvent): Promise<void> {
+  if (event.type !== 'response.output_item.done') {
+    return;
+  }
+  const item = event.data.item;
+  const record =
+    typeof item === 'object' && item !== null ? frameworkCast<Record<string, unknown>>(item) : {};
+  if (
+    record.type !== 'image_generation_call' ||
+    typeof record.result !== 'string' ||
+    record.result === ''
+  ) {
+    return;
+  }
+  const media = DATA_URL.exec(record.result);
+  await notifyIfPrimary(state.params, state.primary, {
+    sessionUpdate: 'agent_message_chunk',
+    content: {
+      type: 'image',
+      mimeType: media?.[1] ?? 'image/png',
+      data: media?.[2] ?? record.result,
+    },
   });
 }
 

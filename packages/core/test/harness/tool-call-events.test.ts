@@ -16,8 +16,10 @@ import assert from 'node:assert';
 import type { Context, ContextLayer, LLMResponse } from '@noetic-tools/types';
 import { frameworkCast, SteeringAction } from '@noetic-tools/types';
 import { z } from 'zod';
+import { invokeTool } from '../../src/builders/step-builders';
 import { tool, toolWithGenerator } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import { execute } from '../../src/interpreter/execute';
 import { makeMessage } from '../_helpers';
 
 //#region Fakes
@@ -504,6 +506,69 @@ describe('model-path tool calls carry the tool presentation', () => {
         callId: 'call-bad',
         toolId: 'write',
         kind: 'edit',
+      },
+    ]);
+  });
+});
+
+describe('invokeTool calls carry the tool presentation', () => {
+  it('starts with the declared title, kind and locations, and completes with content', async () => {
+    const harness = new AgentHarness({
+      name: 'evt',
+      params: {},
+    });
+    const events: EmittedEvent[] = [];
+    const ctx = attachBroadcaster(harness.createContext(), events);
+    const write = tool({
+      name: 'write',
+      description: 'Write a file',
+      input: z.object({
+        path: z.string(),
+      }),
+      output: z.object({
+        path: z.string(),
+      }),
+      presentation: {
+        kind: 'edit',
+        title: ({ path }) => `Write ${path}`,
+        content: ({ path }) => [
+          {
+            type: 'diff',
+            path,
+            oldText: null,
+            newText: 'x',
+          },
+        ],
+      },
+      execute: async ({ path }) => ({
+        path,
+      }),
+    });
+    await execute(
+      invokeTool({
+        id: 'write-step',
+        tool: write,
+      }),
+      {
+        path: 'a.ts',
+      },
+      ctx,
+    );
+    const started = events.find((e) => e.type === 'evt:tool_call_started');
+    expect(started?.data).toEqual({
+      name: 'write',
+      callId: 'write-step',
+      toolId: 'write',
+      kind: 'edit',
+      title: 'Write a.ts',
+    });
+    const completed = events.find((e) => e.type === 'evt:tool_call_completed');
+    expect(completed?.data.content).toEqual([
+      {
+        type: 'diff',
+        path: 'a.ts',
+        oldText: null,
+        newText: 'x',
       },
     ]);
   });

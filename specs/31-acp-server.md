@@ -195,8 +195,14 @@ The translation is the client direction's `AcpEventBridge` table (spec 27,
 | `response.reasoning.delta` | `agent_thought_chunk` |
 | `tool_call_started` (framework, carries `callId`) | `tool_call` — `toolCallId` = `callId`; `title`, `kind` and `locations` as the event carries them, else from the tool's `presentation` declaration in the serve options (below); status `pending` while gated or when the event says so, `in_progress` once running |
 | `tool_progress` of a call it started | `tool_call_update` — what the report changed: `status`, `title`, `kind`, `locations`, `content`, and `progress` as `_meta.progress` |
-| `tool_call_completed` | `tool_call_update` — `completed` or `failed`; its structured `content` (diffs, terminals, images, resources) when it carries any — a data-URL `input_image` or audio `input_file` as the media block, a plain URL as a `resource_link` — else the output — or the error — as text content |
-| `plan_updated` with entries, `plan_removed` | `plan` — the entries, or none; a markdown or file plan is not sent |
+| `tool_call_completed` | `tool_call_update` — `completed` or `failed`; its structured `content` (diffs, images, resources) when it carries any it can show — a data-URL `input_image` or audio `input_file` as the media block, a video's data as a `resource`, a plain URL as a `resource_link` — else the output — or the error — as text content |
+| `response.output_item.done` of an `image_generation_call` | `agent_message_chunk` with the image (a data URL's media type, else `image/png`) |
+| `plan_updated` with entries, `plan_removed` | `plan` — the wire shows one plan: an update shows its entries, whatever its id; a removal clears them only when it removes the plan shown. A markdown or file plan is not sent |
+
+Each content part is checked before it is sent: one that is not a known
+part is left out, never failing the turn. A `terminal` is left out as well —
+it is the delegate's host's, which never created it in the editor — and a
+progress report with nothing the editor can show sends nothing.
 
 Each row reads the session's own, unscoped events: a delegated agent's call,
 progress and plan reach the editor as the step's own would, carrying what the

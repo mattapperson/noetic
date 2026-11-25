@@ -105,17 +105,30 @@ export function presentToolProgress(
   if (!report) {
     return undefined;
   }
-  const progress = attempt(() => report(events));
+  // A copy, read inside the guard: what the tool returned is never written
+  // to, and nothing in it can fail the call.
+  return attempt(() => normalizedProgress(report(events)));
+}
+
+function normalizedProgress(progress: ToolCallProgress | null): ToolCallProgress | undefined {
   if (!progress) {
     return undefined;
   }
-  if (progress.locations) {
-    progress.locations = progress.locations.map(toLocation);
-  }
-  if (progress.progress !== undefined) {
-    progress.progress = clampProgress(progress.progress);
-  }
-  return progress;
+  const { locations, progress: fraction, ...rest } = progress;
+  const clamped = clampProgress(fraction);
+  return {
+    ...rest,
+    ...(locations
+      ? {
+          locations: locations.map(toLocation),
+        }
+      : {}),
+    ...(clamped === undefined
+      ? {}
+      : {
+          progress: clamped,
+        }),
+  };
 }
 
 /**

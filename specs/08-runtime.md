@@ -822,10 +822,12 @@ title only for an agent that names its tools no other way.
   locations?, status? }`.
   `title` is the human title, `kind` a `ToolKind` (`read`, `edit`, `delete`,
   `move`, `search`, `execute`, `think`, `fetch`, `switch_mode`, `other`),
-  `locations` the files it works on (`{ path, line? }`), `status` `pending`
-  when the call waits (for approval, for its input) and absent when it runs.
-- `tool_progress` — what a running call reports, each field only when it
-  changed: `{ name, callId, toolId, toolServer?, status?, title?, kind?,
+  `locations` the files it works on (`{ path, line? }`), `status` what an
+  agent reports of its own call (`pending` while it waits, `in_progress`).
+  A Noetic tool's call carries none: one held for approval is announced by
+  `tool_call_held` (§ Held tool calls).
+- `tool_progress` — what a running call reports, each field only when the
+  report carries it: `{ name, callId, toolId, toolServer?, status?, title?, kind?,
   locations?, progress?, content? }`. `progress` is a fraction from 0 to 1; `content` replaces what an
   earlier report gave. A generator tool's report also carries the yielded
   `event`.
@@ -838,10 +840,11 @@ title only for an agent that names its tools no other way.
   is the part a tool's `toModelOutput` would return; the rest is what only a
   call produces: `resource_link`, `resource`, `diff` (`path`, `oldText` — null
   for a new file — `newText`) and `terminal` (`terminalId`). `result` is an agent's raw
-  record of what the call returned, when it gave one. A failed call carries no
-  structured content from its tool.
+  record of what the call returned, when it gave one. A Noetic tool's failed
+  call carries no structured content; an agent's own failed call carries
+  what the agent reported for it.
 
-A `callModel` step's call presents as its tool declares (`02-step-variants`
+A `callModel` step's call, and an `invokeTool` step's, presents as its tool declares (`02-step-variants`
 § Presentation): the declared title, kind and locations on its start, the
 declared progress on each event its generator yields, the declared content on
 its completion. An agent's own call presents as the agent reports it
@@ -852,7 +855,12 @@ and the files a session changed from the `diff` entries of the completions.
 
 **An image an agent answers with** is an `image_generation_call` output item
 on the stream and in the step's items, as a model's generated image is — never
-text. Its `result` is a data URL, so it carries its media type.
+text. Its `result` is a data URL, so it carries its media type (a provider's
+own image item carries raw base64). It was never the provider's, so a later
+model call is given `[image: <media type>]` in its place, as before images
+were items; a chat reply (`29-chat-platform-integration`) names it the same
+way, and a served editor (`31-acp-server`) shows it as an image in the
+answer.
 
 **The agent's plan** is its whole task list, replaced on every update:
 

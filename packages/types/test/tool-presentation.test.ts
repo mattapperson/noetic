@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import type { Tool } from '../src/index';
+import type { Tool, ToolCallProgress } from '../src/index';
 import {
   clampProgress,
+  frameworkCast,
   presentToolCall,
   presentToolContent,
   presentToolProgress,
@@ -172,6 +173,57 @@ describe('presentToolProgress', () => {
     expect(
       presentToolProgress(
         THROWING,
+        [
+          1,
+        ],
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe('presentToolProgress never fails a call', () => {
+  it('reads a frozen report without writing to it', () => {
+    const report = Object.freeze({
+      progress: 50,
+      locations: Object.freeze([
+        'a.ts',
+      ]),
+    });
+    const tool: Presentable = {
+      presentation: {
+        progress: () => frameworkCast<ToolCallProgress>(report),
+      },
+    };
+    expect(
+      presentToolProgress(
+        tool,
+        [
+          1,
+        ],
+      ),
+    ).toEqual({
+      progress: 0.5,
+      locations: [
+        {
+          path: 'a.ts',
+        },
+      ],
+    });
+    expect(report.progress).toBe(50);
+  });
+
+  it('reports nothing for a report it cannot read', () => {
+    const tool: Presentable = {
+      presentation: {
+        progress: () =>
+          frameworkCast<ToolCallProgress>({
+            locations: 'not-a-list',
+          }),
+      },
+    };
+    expect(
+      presentToolProgress(
+        tool,
         [
           1,
         ],

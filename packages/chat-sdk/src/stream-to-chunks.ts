@@ -126,6 +126,14 @@ export async function* streamToChatChunks(
       if (event.type === 'response.output_item.added' && isMessageItem(event.data.item)) {
         pendingSeparator = emittedText;
       }
+      // An image an agent answered with: a chat message names it, as it did
+      // before images were their own items.
+      const image =
+        event.type === 'response.output_item.done' ? imageMediaType(event.data.item) : undefined;
+      if (image !== undefined) {
+        emittedText = true;
+        yield `[image: ${image}]`;
+      }
       continue;
     }
 
@@ -286,4 +294,21 @@ function readToolCall(event: FrameworkStreamEvent): {
 
 function isMessageItem(item: unknown): boolean {
   return typeof item === 'object' && item !== null && 'type' in item && item.type === 'message';
+}
+
+/** An agent's image item's media type, from its data-URL result; undefined for anything else. */
+function imageMediaType(item: unknown): string | undefined {
+  if (
+    typeof item !== 'object' ||
+    item === null ||
+    !('type' in item) ||
+    item.type !== 'image_generation_call'
+  ) {
+    return undefined;
+  }
+  const result = 'result' in item ? item.result : undefined;
+  if (typeof result !== 'string' || !result.startsWith('data:')) {
+    return undefined;
+  }
+  return result.slice('data:'.length, result.search(/[;,]/));
 }

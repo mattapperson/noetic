@@ -352,8 +352,8 @@ tells which tool a call is to without parsing its wire name or its title. The
 runtime puts the title, kind and locations on the call's
 `tool_call_started`, what `progress` reports for the events so far on each
 `tool_progress`, and the `content` of a call that did not fail on its
-`tool_call_completed` — on the `callModel` tool loop, and on a call an agent
-makes through the tool bridge (`38-acp-tools`). A served harness shows them in
+`tool_call_completed` — on the `callModel` tool loop, on an `invokeTool` step,
+and on a call an agent makes through the tool bridge (`38-acp-tools`). A served harness shows them in
 its client's editor (`31-acp-server`). It is presentation only: it gates
 nothing, an undeclared tool presents by its name, and a method that throws
 presents nothing for that point. `tool()` and `toolWithGenerator()` take it;

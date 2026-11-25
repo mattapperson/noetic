@@ -7,6 +7,8 @@ import type { Span, SteeringDecision } from '@noetic-tools/types';
 import {
   frameworkCast,
   NoeticErrorImpl,
+  presentToolCall,
+  presentToolContent,
   presentToolProgress,
   validateSchema,
 } from '@noetic-tools/types';
@@ -150,9 +152,13 @@ async function runInvokeTool<TContext, I, O>(
       name: step.tool.name,
       callId: step.id,
       toolId: step.tool.name,
+      ...presentToolCall(step.tool, parsedArgs),
     },
   });
-  const emitCompleted = (error: boolean, output?: string): void => {
+  // A call that returned carries what it produced as structure, as the
+  // `callModel` loop's calls do (spec 02 § Presentation).
+  const emitCompleted = (error: boolean, output?: string, result?: unknown): void => {
+    const content = error ? undefined : presentToolContent(step.tool, result, parsedArgs);
     emitFrameworkEvent({
       broadcaster,
       agentName,
@@ -163,6 +169,11 @@ async function runInvokeTool<TContext, I, O>(
         toolId: step.tool.name,
         error,
         output,
+        ...(content
+          ? {
+              content,
+            }
+          : {}),
       },
     });
   };
@@ -226,7 +237,7 @@ async function runInvokeTool<TContext, I, O>(
       args: parsedArgs,
       output: result,
     });
-    emitCompleted(false, typeof result === 'string' ? result : JSON.stringify(result));
+    emitCompleted(false, typeof result === 'string' ? result : JSON.stringify(result), result);
     return frameworkCast<O>(result);
   }
 
@@ -272,7 +283,7 @@ async function runInvokeTool<TContext, I, O>(
       },
     });
     if (answer.resolution?.hasOutput) {
-      emitCompleted(false, JSON.stringify(answer.resolution.output));
+      emitCompleted(false, JSON.stringify(answer.resolution.output), answer.resolution.output);
       return frameworkCast<O>(answer.resolution.output);
     }
     const action = answer.resolution?.action ?? SteeringAction.Deny;
@@ -358,7 +369,7 @@ async function runInvokeTool<TContext, I, O>(
       args: parsedArgs,
       output: result,
     });
-    emitCompleted(false, typeof result === 'string' ? result : JSON.stringify(result));
+    emitCompleted(false, typeof result === 'string' ? result : JSON.stringify(result), result);
     return frameworkCast<O>(result);
   } catch (e) {
     emitToolUi({

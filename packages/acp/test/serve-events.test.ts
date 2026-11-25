@@ -502,8 +502,8 @@ describe('pumpTurnEvents — a call presents as its events say', () => {
         progress: 0.5,
         content: [
           {
-            type: 'terminal',
-            terminalId: 't1',
+            type: 'input_text',
+            text: '3 passed',
           },
         ],
       }),
@@ -523,8 +523,11 @@ describe('pumpTurnEvents — a call presents as its events say', () => {
       ],
       content: [
         {
-          type: 'terminal',
-          terminalId: 't1',
+          type: 'content',
+          content: {
+            type: 'text',
+            text: '3 passed',
+          },
         },
       ],
       _meta: {
@@ -740,6 +743,216 @@ describe('pumpTurnEvents — a call presents as its events say', () => {
       {
         sessionUpdate: 'plan',
         entries: [],
+      },
+    ]);
+  });
+});
+
+describe('pumpTurnEvents — what an editor cannot show', () => {
+  const END = fw('turn_completed', {
+    turnId: 't1',
+  });
+
+  it("leaves out a terminal (it is the delegate's host's) and a part it does not know, rather than failing the turn", async () => {
+    const { outcome, updates } = await pump([
+      START,
+      fw('tool_call_started', {
+        name: 'bash',
+        callId: 'c1',
+      }),
+      fw('tool_call_completed', {
+        name: 'bash',
+        callId: 'c1',
+        error: false,
+        output: 'ok',
+        content: [
+          {
+            type: 'terminal',
+            terminalId: 'acp-term-0',
+          },
+          {
+            type: 'text',
+            text: 'an MCP-style block',
+          },
+          null,
+        ],
+      }),
+      END,
+    ]);
+    expect(outcome).toEqual({
+      kind: 'stop',
+      stopReason: 'end_turn',
+    });
+    const completed = updates.find((update) => update.sessionUpdate === 'tool_call_update');
+    assert(completed && completed.sessionUpdate === 'tool_call_update');
+    // Nothing it can show: the output text instead.
+    expect(completed.content).toEqual([
+      {
+        type: 'content',
+        content: {
+          type: 'text',
+          text: 'ok',
+        },
+      },
+    ]);
+  });
+
+  it('keeps the fields it can show when one it cannot is beside them, and sends nothing for an empty report', async () => {
+    const { updates } = await pump([
+      START,
+      fw('tool_call_started', {
+        name: 'gen',
+        callId: 'c1',
+      }),
+      fw('tool_progress', {
+        name: 'gen',
+        callId: 'c1',
+        event: 1,
+      }),
+      fw('tool_progress', {
+        name: 'gen',
+        callId: 'c1',
+        title: 'Renamed',
+        progress: 0.5,
+        status: 'completed',
+      }),
+      END,
+    ]);
+    const reports = updates.filter((update) => update.sessionUpdate === 'tool_call_update');
+    expect(reports[0]).toEqual({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'c1',
+      title: 'Renamed',
+      _meta: {
+        progress: 0.5,
+      },
+    });
+    // The second is the boundary's flush.
+    expect(reports).toHaveLength(2);
+  });
+
+  it('shows one plan at a time: another plan replaces it, only its own removal clears it', async () => {
+    const plan = (id: string | undefined, content: string) =>
+      fw('plan_updated', {
+        stepId: 's',
+        plan: {
+          ...(id
+            ? {
+                id,
+              }
+            : {}),
+          entries: [
+            {
+              content,
+              priority: 'high',
+              status: 'pending',
+            },
+          ],
+        },
+      });
+    const { updates } = await pump([
+      START,
+      plan('A', 'a'),
+      fw('plan_removed', {
+        stepId: 's',
+        id: 'B',
+      }),
+      plan('B', 'b'),
+      fw('plan_removed', {
+        stepId: 's',
+        id: 'A',
+      }),
+      fw('plan_updated', {
+        stepId: 's',
+        plan: {
+          entries: [
+            {
+              content: 'bad',
+              priority: 'urgent',
+              status: 'pending',
+            },
+          ],
+        },
+      }),
+      fw('plan_removed', {
+        stepId: 's',
+        id: 'B',
+      }),
+      plan(undefined, 'only'),
+      fw('plan_removed', {
+        stepId: 's',
+      }),
+      END,
+    ]);
+    expect(
+      updates.map((update) =>
+        update.sessionUpdate === 'plan'
+          ? update.entries.map((entry) => entry.content)
+          : update.sessionUpdate,
+      ),
+    ).toEqual([
+      [
+        'a',
+      ],
+      [
+        'b',
+      ],
+      [],
+      [
+        'only',
+      ],
+      [],
+    ]);
+  });
+
+  it('shows an image the agent answered with as an image in its message', async () => {
+    const { updates } = await pump([
+      START,
+      sdk('response.output_item.done', {
+        item: {
+          type: 'image_generation_call',
+          result: 'data:image/jpeg;base64,AAAA',
+        },
+      }),
+      sdk('response.output_item.done', {
+        item: {
+          type: 'image_generation_call',
+          result: 'BBBB',
+        },
+      }),
+      sdk('response.output_item.done', {
+        item: {
+          type: 'image_generation_call',
+          result: '',
+        },
+      }),
+      sdk('response.output_item.done', {
+        item: 'not an item',
+      }),
+      sdk('response.output_item.added', {
+        item: {
+          type: 'image_generation_call',
+          result: 'CCCC',
+        },
+      }),
+      END,
+    ]);
+    expect(updates).toEqual([
+      {
+        sessionUpdate: 'agent_message_chunk',
+        content: {
+          type: 'image',
+          mimeType: 'image/jpeg',
+          data: 'AAAA',
+        },
+      },
+      {
+        sessionUpdate: 'agent_message_chunk',
+        content: {
+          type: 'image',
+          mimeType: 'image/png',
+          data: 'BBBB',
+        },
       },
     ]);
   });
