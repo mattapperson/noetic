@@ -18,7 +18,13 @@ import { SteerPoint, validateSchema } from '@noetic-tools/types';
 import { itemsToInput, toolModelOutputToProvider } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
 import { drainsOf } from '../runtime/drain';
-import { heldCallsOf, heldScopeOf, mayWriteHolds, waitOnHeldCalls } from '../runtime/held-calls';
+import {
+  heldCallsOf,
+  heldScopeOf,
+  mayWriteHolds,
+  noticeHeld,
+  waitOnHeldCalls,
+} from '../runtime/held-calls';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
 import type { ToolCallResult } from '../runtime/tool-call';
 import { createToolResultItem, executeToolCall } from '../runtime/tool-call';
@@ -323,6 +329,17 @@ async function executeFunctionCall(
       params.emitIfAllowed('tool_call_held', {
         ...toolResult.held,
       });
+      if (request.ctx) {
+        noticeHeld({
+          harness: scope.harness,
+          ctx: request.ctx,
+          held: toolResult.held,
+          emit: (settled) =>
+            params.emitIfAllowed('tool_call_settled', {
+              ...settled,
+            }),
+        });
+      }
     }
     return {
       held: true,
@@ -516,7 +533,7 @@ async function dropHolds(
   const executionId = heldScopeOf(request.ctx);
   for (const call of calls) {
     if (await holds.load(executionId, call.callId)) {
-      await holds.close(executionId, call.callId);
+      await holds.close(executionId, call.callId, 'skipped');
     }
   }
 }

@@ -24,7 +24,6 @@ import { runEvery } from '../connections/settle';
 import { pendingTasksOf, resumableWaitsOf } from '../interpreter/connection-steps';
 import { turnEndingIn } from '../interpreter/turn-ending';
 import { AcpSessionStore } from '../runtime/acp-session-store';
-import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import { stubOf } from '../runtime/durable/step-ledger';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
 import type { OutputSnapshot } from '../runtime/output-store';
@@ -558,6 +557,8 @@ export class AgentHarness<
       decisionModel: opts.decisionModel,
       emitItemsOnReplay: opts.emitItemsOnReplay,
       approveToolCall: opts.approveToolCall,
+      onHeld: opts.onHeld,
+      steerWhileHeld: opts.steerWhileHeld,
       now: opts.now,
     };
     this.outputStorage = this.config.storage ?? createInMemoryStorage();
@@ -749,6 +750,7 @@ export class AgentHarness<
    */
   async close(): Promise<void> {
     this.parkWatchers?.stopAll();
+    heldCallsOf(this).releaseWatches();
     await runEvery([
       ...[
         ...this.outputs.values(),
@@ -1433,7 +1435,9 @@ export class AgentHarness<
           // A harness that was replaced says nothing about the turn: it is the new
           // holder's now, and marking it stopped would keep a wake from resuming it.
           const replaced = isLeaseLost(error) || session.lease?.lost === true;
-          if (ctx.aborted && !replaced && ctx.abortReason !== INTERRUPT_REASON) {
+          // An interrupted turn answers its held calls "Cancelled before it ran." in
+          // the history it restarts from: no answer could reach them any more.
+          if (ctx.aborted && !replaced) {
             await heldCallsOf(this).clear(ctx.id);
           }
           if (record && !replaced && ctx.abortReason !== INTERRUPT_REASON) {
@@ -2054,6 +2058,22 @@ export class AgentHarness<
     return true;
   }
 
+  /**
+   * The thread whose turn `ctx` runs in, or `undefined` for a run the host started
+   * itself. Where an `onHeld` answer goes.
+   * @internal
+   */
+  heldThreadOf(ctx: Context): string | undefined {
+    const executionId = rootIdOf(ctx);
+    for (const [threadId, session] of this.sessions) {
+      const running = session.runner.context;
+      if (running && rootIdOf(running) === executionId) {
+        return threadId;
+      }
+    }
+    return undefined;
+  }
+
   /** The execution whose held calls `scope` names. */
   private heldExecutionId(
     scope: SessionScope | ExecutionScope | undefined,
@@ -2148,16 +2168,6 @@ export class AgentHarness<
       callId: request.callId,
       ctx: request.ctx,
       park: request.park,
-      onHeld: (held) => {
-        emitFrameworkEvent({
-          broadcaster: getBroadcaster(request.ctx),
-          agentName: this.config.name,
-          eventType: 'tool_call_held',
-          data: {
-            ...held,
-          },
-        });
-      },
     });
     return approval.decision;
   }

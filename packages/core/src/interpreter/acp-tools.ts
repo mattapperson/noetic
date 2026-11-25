@@ -39,7 +39,13 @@ import type { SplitStepTools } from '../connections/step-tools';
 import { offeredTools, stepConnectionsOf } from '../connections/step-tools';
 import { ToolAttr } from '../observability/genai-attributes';
 import { drainsOf } from '../runtime/drain';
-import { heldCallsOf, heldScopeOf, mayWriteHolds, waitOnHeldCalls } from '../runtime/held-calls';
+import {
+  heldCallsOf,
+  heldScopeOf,
+  mayWriteHolds,
+  noticeHeld,
+  waitOnHeldCalls,
+} from '../runtime/held-calls';
 import { createToolResultItem, executeToolCall, resolveWireJsonSchema } from '../runtime/tool-call';
 import { sanitizeToolNameForWire } from '../util/tool-name';
 import type { AcpEventBridge } from './acp-events';
@@ -486,6 +492,17 @@ export class AcpToolRunner implements AcpToolHost {
           ...held,
           callId: params.callId ?? held.callId,
           heldAs: held.callId,
+        });
+        noticeHeld({
+          harness: ctx.harness,
+          ctx,
+          held,
+          emit: (settled) =>
+            binding.events.toolEvent('tool_call_settled', {
+              ...settled,
+              callId: params.callId ?? settled.callId,
+              heldAs: settled.callId,
+            }),
         });
       }
       await waitOnHeldCalls({

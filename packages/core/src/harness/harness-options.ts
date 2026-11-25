@@ -26,6 +26,8 @@ import type {
   DecideResponse,
   DeliveryMode,
   FsAdapter,
+  HeldCallHandler,
+  HeldSteerPolicy,
   ItemSchemaConfig,
   LLMResponse,
   LlmProviderConfig,
@@ -257,6 +259,20 @@ export interface AgentHarnessOpts<
    * unapproved and the harness warns once per tool name.
    */
   approveToolCall?: ToolApprover;
+  /**
+   * Puts a held tool call in front of a person (spec 08 § Held tool calls): called
+   * once per question per process with the call and a signal that aborts when the
+   * call is settled any other way. Return the answer, taken as a decision item passed
+   * to `execute()` is, or `undefined` to leave the call held. The approver still
+   * decides what is held; this is what the host does with what it held.
+   */
+  onHeld?: HeldCallHandler;
+  /**
+   * What a steer does at the `held` steer point before any layer has a say: `apply`
+   * (the default) skips the held calls for it; `defer` keeps it queued behind them,
+   * so a question a person was shown stays open.
+   */
+  steerWhileHeld?: HeldSteerPolicy;
   /**
    * The live things the agent works with — browsers, devices, apps, chat workspaces,
    * sources — keyed by name, or as a list of named entries (`[mcp({ name, … })]`)

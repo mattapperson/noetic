@@ -1,4 +1,4 @@
-import type { Context, HeldCall, SteeringDecision } from '@noetic-tools/types';
+import type { Context, SteeringDecision } from '@noetic-tools/types';
 import { SteeringAction } from '@noetic-tools/types';
 import type { HeldRecord, HoldHost } from './held-calls';
 import {
@@ -202,8 +202,6 @@ export async function awaitApproval(params: {
    */
   recordId?: string;
   ctx: Context;
-  /** Called once, when the call is first held. */
-  onHeld?: (held: HeldCall) => void;
   /** False when the turn must stay live while the call is held. Default true. */
   park?: boolean;
 }): Promise<ToolApproval> {
@@ -247,7 +245,7 @@ export async function awaitApproval(params: {
       });
       if (!announced) {
         announced = true;
-        (params.onHeld ?? announcerOf(params.harness, params.ctx))(toHeldCall(record));
+        announcerOf(params.harness, params.ctx)(toHeldCall(record));
       }
       await waitOnHeldCalls({
         harness: params.harness,

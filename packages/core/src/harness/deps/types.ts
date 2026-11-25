@@ -40,6 +40,8 @@ export type {
   FsAdapter,
   HarnessResponse,
   HarnessStatus,
+  HeldCallHandler,
+  HeldSteerPolicy,
   Item,
   ItemSchemaConfig,
   ItemSchemaExtensions,
