@@ -1,3 +1,8 @@
+## @noetic-tools/core-v5.22.0-next.2 (2026-11-25)
+
+* feat(core): land the spec-workspace patch: decide headers and base URL, Tool.toModelOutput, interact ([7b21be0](https://github.com/mattapperson/noetic/commit/7b21be0)), closes [#161](https://github.com/mattapperson/noetic/issues/161) [#159](https://github.com/mattapperson/noetic/issues/159) [#159](https://github.com/mattapperson/noetic/issues/159) [#159](https://github.com/mattapperson/noetic/issues/159) [#120](https://github.com/mattapperson/noetic/issues/120) [#160](https://github.com/mattapperson/noetic/issues/160)
+* feat(platform-cloudflare-worker): storage scopes and spill for large values; unblock the release cha ([63d0a30](https://github.com/mattapperson/noetic/commit/63d0a30)), closes [#162](https://github.com/mattapperson/noetic/issues/162)
+
 ## @noetic-tools/core-v5.22.0-next.1 (2026-11-25)
 
 * fix(chat-sdk): a parked turn's reply finishes, and a lost click is not reported delivered ([e498c5e](https://github.com/mattapperson/noetic/commit/e498c5e))
