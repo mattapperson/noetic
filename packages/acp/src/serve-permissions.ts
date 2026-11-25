@@ -26,7 +26,6 @@ import type {
 
 //#region Policy evaluation
 
-const DEFAULT_ASK_TIMEOUT_MS = 5 * 60 * 1e3;
 /** The longest delay a timer takes: about 24.8 days. */
 const MAX_HOOK_TIMEOUT_MS = 2 ** 31 - 1;
 
@@ -90,13 +89,17 @@ export class ServePermissionBroker {
     ) => Promise<AcpServePermissionReply>,
   ) {}
 
-  async ask(prompt: AcpServePermissionPrompt, timeoutMs: number): Promise<AskOutcome> {
+  /** Ask the client. With no `timeoutMs` the ask waits for an answer or a session cancel. */
+  async ask(prompt: AcpServePermissionPrompt, timeoutMs?: number): Promise<AskOutcome> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const parked = new Promise<AskOutcome>((resolve) => {
       this.pending.set(prompt.requestId, {
         sessionId: prompt.sessionId,
         resolve,
       });
+      if (timeoutMs === undefined) {
+        return;
+      }
       timer = setTimeout(() => {
         this.answer(prompt.requestId, {
           decision: 'deny',
@@ -174,7 +177,7 @@ export function createServePermissionLayer(params: {
   presentation: ServeToolPresentation;
 }): ContextLayer {
   const { sessionId, policy, broker, presentation } = params;
-  const askTimeoutMs = policy.askTimeoutMs ?? DEFAULT_ASK_TIMEOUT_MS;
+  const { askTimeoutMs } = policy;
 
   const beforeToolCall = async (hookParams: {
     toolName: string;
@@ -258,8 +261,8 @@ export function createServePermissionLayer(params: {
       beforeToolCall,
     },
     timeouts: {
-      // The broker owns the editor's deadline (askTimeoutMs). After it a call may be
-      // held for a person through the harness, for as long as that takes, so the
+      // The broker owns the editor's deadline (askTimeoutMs, none unless set). After it
+      // a call may be held for a person through the harness, for as long as that takes, so the
       // lifecycle timeout is the longest a timer allows and only backstops a wedge.
       beforeToolCall: MAX_HOOK_TIMEOUT_MS,
     },

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type { ChannelHandle, ExternalChannel, Tool } from '@noetic-tools/types';
+import { NoeticErrorImpl } from '@noetic-tools/types';
 import { z } from 'zod';
 import { chatTools, fromAiSdkTool } from '../src/ai-tools';
 import type { ApprovalDecision, ApprovalRequest } from '../src/approvals';
@@ -344,6 +345,94 @@ describe('fromAiSdkTool', () => {
     );
     expect(result).toBe('deleted');
     expect(served).toBe(2);
+  });
+
+  /** A harness whose first wait runs out its timer; the second is answered. */
+  function timerRunsOutOnce(
+    toolCtx: ReturnType<typeof approvalToolCtx>['toolCtx'],
+    requests: ApprovalRequest[],
+  ) {
+    const timeouts: Array<number | undefined> = [];
+    const harness = {
+      ...toolCtx.harness,
+      recv: (
+        _channel: unknown,
+        _ctx: unknown,
+        opts?: {
+          timeout?: number;
+        },
+      ) => {
+        timeouts.push(opts?.timeout);
+        if (timeouts.length === 1) {
+          return Promise.reject(
+            new NoeticErrorImpl({
+              kind: 'channel_timeout',
+              channelName: approvalDecisions.name,
+              timeout: opts?.timeout ?? 0,
+            }),
+          );
+        }
+        return Promise.resolve({
+          requestId: requests[0].requestId,
+          approved: true,
+        });
+      },
+    };
+    return {
+      timeouts,
+      ctx: {
+        ...toolCtx,
+        harness,
+      },
+    };
+  }
+
+  test('with no approvalTimeout the wait never times out: it parks again when a timer ends', async () => {
+    const tool = fromAiSdkTool(
+      'deleteMessage',
+      aiTool({
+        execute: async () => 'deleted',
+      }),
+      {
+        needsApproval: true,
+        approval: 'channel',
+      },
+    );
+    const { toolCtx, requests } = approvalToolCtx([]);
+    const { timeouts, ctx } = timerRunsOutOnce(toolCtx, requests);
+
+    expect(await tool.execute({}, ctx)).toBe('deleted');
+    expect(timeouts).toEqual([
+      2 ** 31 - 1,
+      2 ** 31 - 1,
+    ]);
+  });
+
+  test('a set approvalTimeout ends the wait', async () => {
+    const tool = fromAiSdkTool(
+      'deleteMessage',
+      aiTool({
+        execute: async () => 'deleted',
+      }),
+      {
+        needsApproval: true,
+        approval: 'channel',
+        approvalTimeout: 5e3,
+      },
+    );
+    const { toolCtx, requests } = approvalToolCtx([]);
+    const { timeouts, ctx } = timerRunsOutOnce(toolCtx, requests);
+
+    try {
+      await tool.execute({}, ctx);
+      expect.unreachable('the wait should have timed out');
+    } catch (e) {
+      assert(e instanceof NoeticErrorImpl);
+      expect(e.noeticError.kind).toBe('channel_timeout');
+    }
+    expect(timeouts).toHaveLength(1);
+    assert(timeouts[0] !== undefined);
+    expect(timeouts[0]).toBeLessThanOrEqual(5e3);
   });
 
   test('rejected gated call throws with the reason and never runs the tool', async () => {

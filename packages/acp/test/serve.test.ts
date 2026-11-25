@@ -477,6 +477,26 @@ describe('ServePermissionBroker', () => {
     expect(reply.reason).toContain('timed out');
   });
 
+  it('with no timeout an ask waits until it is answered', async () => {
+    const broker = new ServePermissionBroker(() => new Promise(() => {}));
+    const ask = broker.ask({
+      requestId: 'r1',
+      sessionId: 's1',
+      toolName: 'bash',
+      title: 'bash',
+    });
+    const first = await Promise.race([
+      ask,
+      new Promise<'waiting'>((resolve) => setTimeout(() => resolve('waiting'), 30)),
+    ]);
+    expect(first).toBe('waiting');
+
+    broker.answer('r1', {
+      decision: 'allow',
+    });
+    expect((await ask).decision).toBe('allow');
+  });
+
   it('cancelSession unwinds every park for that session only', async () => {
     const broker = new ServePermissionBroker(() => new Promise(() => {}));
     const askA = broker.ask(

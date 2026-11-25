@@ -72,8 +72,11 @@ describe('chatApprover', () => {
     ]);
   });
 
-  test('holds with no deadline when the timeout is infinite', async () => {
+  test('holds with no deadline unless a timeout is set', async () => {
     const { params } = approverParams(1e6, 'call-7');
+    expect(await chatApprover()(params)).toEqual({
+      action: 'hold',
+    });
     expect(
       await chatApprover({
         timeout: Number.POSITIVE_INFINITY,

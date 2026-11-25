@@ -577,8 +577,9 @@ topic (broadcast, each waiter filters for its `requestId`) — the shape
 `@noetic-tools/chat-sdk` already uses for tool approvals. The handler parks on
 the decision topic *before* publishing its request, because topic delivery
 reaches only subscribers parked at send time; publishing first would let a fast
-reviewer answer into the void. An unanswered prompt denies on timeout rather
-than hanging the agent's turn: waiting must not become approval.
+reviewer answer into the void. A prompt waits until it is answered or the turn is cancelled: a permission
+request never times out unless `timeout` is set. When a set timeout passes the
+prompt is denied (or takes `onTimeout`): waiting must not become approval.
 
 Because reaching a person means reaching a channel, `onPermissionRequest`
 receives `(request, ctx, info)` — the executing context, plus which agent and

@@ -28,6 +28,7 @@ import type {
   ChannelHandle,
   ExternalChannel,
 } from '@noetic-tools/types';
+import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 
 //#region Scope
@@ -118,14 +119,25 @@ export const acpPermissionDecisions: ExternalChannel<AcpPermissionReply> = {
 
 //#endregion
 
+//#region Helpers
+
+/** The longest wait one timer takes, about 24.8 days. A wait with no deadline parks again after it. */
+const MAX_WAIT_MS = 2 ** 31 - 1;
+
+function isChannelTimeout(error: unknown): boolean {
+  return isNoeticError(error) && error.noeticError.kind === 'channel_timeout';
+}
+
+//#endregion
+
 //#region Public API
 
 /** @public Options for {@link askUserForPermission}. */
 export interface AskUserForPermissionOptions {
   /**
    * How long to wait for an answer, in milliseconds. On expiry the handler
-   * resolves with {@link onTimeout} rather than hanging the agent's turn
-   * forever. Defaults to 5 minutes.
+   * resolves with {@link onTimeout}. With none, the request waits until it is
+   * answered or the turn is cancelled.
    */
   timeout?: number;
   /**
@@ -142,7 +154,7 @@ export interface AskUserForPermissionOptions {
  * @public
  */
 export function askUserForPermission(opts: AskUserForPermissionOptions = {}): AcpPermissionHandler {
-  const timeout = opts.timeout ?? 5 * 60 * 1e3;
+  const { timeout } = opts;
   const onTimeout: AcpPermissionOutcome = opts.onTimeout ?? {
     decision: 'deny',
     reason: 'no answer from the user before the permission request timed out',
@@ -150,15 +162,17 @@ export function askUserForPermission(opts: AskUserForPermissionOptions = {}): Ac
 
   return async (request, ctx, info) => {
     const requestId = crypto.randomUUID();
-    const deadline = Date.now() + timeout;
+    const deadline = timeout === undefined ? undefined : Date.now() + timeout;
+    const park = (): Promise<AcpPermissionReply> =>
+      ctx.recv(acpPermissionDecisions, {
+        timeout: deadline === undefined ? MAX_WAIT_MS : Math.max(1, deadline - Date.now()),
+      });
 
     // Park on the decision topic BEFORE publishing the request. Topic delivery
     // reaches only subscribers that are parked at send time, so a reviewer who
     // answers immediately would otherwise answer into the void and the agent
     // would wait out the whole timeout.
-    let waiting = ctx.recv(acpPermissionDecisions, {
-      timeout,
-    });
+    let waiting = park();
 
     await ctx.send(acpPermissionRequests, {
       requestId,
@@ -183,12 +197,17 @@ export function askUserForPermission(opts: AskUserForPermissionOptions = {}): Ac
     //
     // Re-parking between messages leaves a microtask-sized window in which a
     // decision could be missed — only reachable when two prompts are answered
-    // in the same tick, and bounded by the timeout rather than hanging.
+    // in the same tick.
     while (true) {
       let reply: AcpPermissionReply;
       try {
         reply = await waiting;
-      } catch {
+      } catch (error) {
+        // No deadline was set, so the end of one timer is not the end of the wait.
+        if (deadline === undefined && isChannelTimeout(error)) {
+          waiting = park();
+          continue;
+        }
         return onTimeout;
       }
       if (reply.requestId === requestId) {
@@ -198,13 +217,10 @@ export function askUserForPermission(opts: AskUserForPermissionOptions = {}): Ac
           reason: reply.reason,
         };
       }
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
+      if (deadline !== undefined && deadline - Date.now() <= 0) {
         return onTimeout;
       }
-      waiting = ctx.recv(acpPermissionDecisions, {
-        timeout: remaining,
-      });
+      waiting = park();
     }
   };
 }

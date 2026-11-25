@@ -622,7 +622,7 @@ for await (const p of harness.getChannelStream(acpPermissionRequests, ACP_PERMIS
 }
 ```
 
-Requests are a queue (subscribe ONCE — a second subscriber steals them); decisions are a topic (broadcast, filtered by `requestId`). The handler parks before publishing, since topic delivery reaches only subscribers parked at send time. An unanswered prompt denies on timeout (5 min default; `askUserForPermission({ timeout, onTimeout })`). Because reaching a person means reaching a channel, `onPermissionRequest` receives `(request, ctx, info)` where `info` is `{ agentId, stepId }`.
+Requests are a queue (subscribe ONCE — a second subscriber steals them); decisions are a topic (broadcast, filtered by `requestId`). The handler parks before publishing, since topic delivery reaches only subscribers parked at send time. A prompt waits until answered; it denies on timeout only when one is set (`askUserForPermission({ timeout, onTimeout })`). Because reaching a person means reaching a channel, `onPermissionRequest` receives `(request, ctx, info)` where `info` is `{ agentId, stepId }`.
 
 ### Live ACP session control
 
@@ -652,7 +652,7 @@ serveAcp(harnessOrFactory, {
   permissions: {    // gate over first-party tool calls; default 'allow' (author curated the tools)
     default: 'allow' | 'ask' | 'deny',
     rules: [{ tool?, kind?, decision }],  // checked deny → ask → allow
-    askTimeoutMs,   // unanswered ask denies (5 min default)
+    askTimeoutMs,   // optional: an ask waits until answered unless this is set
   },
   onPermissionRequest, // (prompt) => Promise<{ decision }> — answer asks in-process instead of the wire
   history: { load(sessionId), save(sessionId, item) },  // presence advertises loadSession
@@ -2192,7 +2192,7 @@ harness.approve({ toolName, toolArgs, callId, ctx, park? }): Promise<SteeringDec
 // also ctx.harness.approve(...) and, in a layer function, ctx.approve({ toolName, toolArgs, callId, park? })
 ```
 
-The approver decides; with none, or on `hold`, the action is held and `approve` resolves once a decision passed to `harness.execute()` answers it. Asked by `needsApproval` tools, connection operations that need approval (from a model or a step), long-task questions, ACP permission requests with no policy `default`, the served-agent gate after its timeout, `chatTools()` gated tools (set `approveToolCall: chatApprover()` to ask in chat; `approval: 'channel'` opts back into the in-memory flow), and `plan({ requireApproval: true })`. A parked response lists held calls as `held`.
+The approver decides; with none, or on `hold`, the action is held and `approve` resolves once a decision passed to `harness.execute()` answers it. Asked by `needsApproval` tools, connection operations that need approval (from a model or a step), long-task questions, ACP permission requests with no policy `default`, the served-agent gate after its `askTimeoutMs` (when set), `chatTools()` gated tools (set `approveToolCall: chatApprover()` to ask in chat; `approval: 'channel'` opts back into the in-memory flow), and `plan({ requireApproval: true })`. A parked response lists held calls as `held`.
 
 ### `durable` on a tool
 

@@ -13,7 +13,7 @@ import type {
   Channel,
   Context,
 } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
 import type { AcpPermissionPrompt, AcpPermissionReply } from '../src/permission-channel';
 import {
   acpPermissionDecisions,
@@ -204,6 +204,46 @@ describe('askUserForPermission', () => {
     });
 
     expect((await pending).decision).toBe('deny');
+  });
+
+  test('with no timeout the request never times out: it parks again when a timer ends', async () => {
+    const timeouts: Array<number | undefined> = [];
+    const sent: AcpPermissionPrompt[] = [];
+    const ctx = frameworkCast<Context>({
+      threadId: 'thread-1',
+      async send(_channel: Channel<unknown>, value: AcpPermissionPrompt) {
+        sent.push(value);
+      },
+      recv(
+        _channel: Channel<unknown>,
+        opts?: {
+          timeout?: number;
+        },
+      ) {
+        timeouts.push(opts?.timeout);
+        if (timeouts.length === 1) {
+          return Promise.reject(
+            new NoeticErrorImpl({
+              kind: 'channel_timeout',
+              channelName: acpPermissionDecisions.name,
+              timeout: opts?.timeout ?? 0,
+            }),
+          );
+        }
+        return Promise.resolve({
+          requestId: sent[0].requestId,
+          decision: 'allow',
+        });
+      },
+    });
+
+    const outcome = await askUserForPermission()(request(), ctx, INFO);
+
+    expect(outcome.decision).toBe('allow');
+    expect(timeouts).toEqual([
+      2 ** 31 - 1,
+      2 ** 31 - 1,
+    ]);
   });
 
   test('denies when nobody answers before the timeout', async () => {

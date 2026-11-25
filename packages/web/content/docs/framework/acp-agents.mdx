@@ -504,7 +504,7 @@ for await (const prompt of harness.getChannelStream(
 
 The prompt carries what a reviewer needs: `agentId`, `stepId`, `threadId`, the tool `title` and `kind`, the raw input, and the agent's own options.
 
-Subscribe **once** — requests are a queue, so a second subscriber would steal them. Decisions are a topic, broadcast to every waiting handler, each filtering for its own `requestId`. An unanswered prompt denies when it times out (5 minutes by default): waiting must never become approval. Override with `askUserForPermission({ timeout, onTimeout })`.
+Subscribe **once** — requests are a queue, so a second subscriber would steal them. Decisions are a topic, broadcast to every waiting handler, each filtering for its own `requestId`. A prompt waits until it is answered or the turn is cancelled. Set a deadline with `askUserForPermission({ timeout, onTimeout })`: when it passes the prompt is denied, because waiting must never become approval, unless `onTimeout` says otherwise.
 
 ## Inspecting and steering live sub-agents
 

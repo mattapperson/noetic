@@ -106,9 +106,10 @@ export interface AcpServePermissionPolicy {
   default?: AcpServePermissionDecision;
   rules?: ReadonlyArray<AcpServePermissionRule>;
   /**
-   * How long an `ask` waits for the client's answer, in milliseconds.
-   * Defaults to 5 minutes. On expiry the call is denied — waiting must not
-   * become approval.
+   * How long an `ask` waits for the client's answer, in milliseconds. With
+   * none, the ask waits until the client answers or the turn is cancelled. On
+   * expiry the call goes to the harness's approval seam, and is denied when
+   * there is none: waiting must not become approval.
    */
   askTimeoutMs?: number;
 }

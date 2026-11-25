@@ -105,9 +105,6 @@ export function resolveApproval(params: {
 
 //#region Through the harness
 
-/** How long a held approval waits for a click by default: five minutes. */
-const DEFAULT_HOLD_MS = 3e5;
-
 /**
  * An `approveToolCall` approver that asks in chat and holds the call
  * (Noetic spec 08 § Held tool calls).
@@ -124,10 +121,10 @@ const DEFAULT_HOLD_MS = 3e5;
  * ```
  *
  * @param options - `timeout` is how long the call stays held, in milliseconds,
- *   before it is denied. Default five minutes. `Infinity` holds it until answered.
+ *   before it is denied. With none, the call is held until it is answered.
  */
 export function chatApprover(options: { timeout?: number } = {}): ToolApprover {
-  const timeout = options.timeout ?? DEFAULT_HOLD_MS;
+  const { timeout } = options;
   return async ({ toolName, toolArgs, callId, ctx }) => {
     if (callId === undefined) {
       return {
@@ -146,7 +143,7 @@ export function chatApprover(options: { timeout?: number } = {}): ToolApprover {
       ctx,
     );
     const now = ctx.harness.config.now?.() ?? Date.now();
-    return Number.isFinite(timeout)
+    return timeout !== undefined && Number.isFinite(timeout)
       ? {
           action: 'hold',
           dueAt: now + timeout,

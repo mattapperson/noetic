@@ -1,10 +1,12 @@
 import type { Tool, ToolExecutionContext } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import { frameworkCast, isNoeticError } from '@noetic-tools/types';
 import type { ZodTypeAny } from 'zod';
 import { z } from 'zod';
+import type { ApprovalDecision } from './approvals';
 import { approvalDecisions, approvalRequests, noteWaiting } from './approvals';
 
-const DEFAULT_APPROVAL_TIMEOUT = 300_000; // 5 minutes for a human to click a button
+/** The longest wait one timer takes, about 24.8 days. A wait with no deadline parks again after it. */
+const MAX_WAIT_MS = 2 ** 31 - 1;
 
 /** Structural subset of an AI SDK tool (`ai` package `Tool`). */
 export interface AiSdkToolLike {
@@ -27,7 +29,7 @@ export interface FromAiSdkToolOptions {
   needsApproval?: boolean;
   /**
    * How long a call gated with `approval: 'channel'` waits for a decision, in
-   * milliseconds. Default 5 minutes. A call the harness holds takes its deadline
+   * milliseconds. With none it waits until answered. A call the harness holds takes its deadline
    * from the approver instead (`chatApprover({ timeout })`), so this option is
    * refused without `approval: 'channel'` rather than ignored.
    */
@@ -70,7 +72,7 @@ export function fromAiSdkTool(
     ? frameworkCast<ZodTypeAny>(aiTool.inputSchema)
     : z.unknown();
   const needsApproval = options.needsApproval ?? vendorNeedsApproval(aiTool);
-  const timeout = options.approvalTimeout ?? DEFAULT_APPROVAL_TIMEOUT;
+  const timeout = options.approvalTimeout;
   // Gating inside the tool is the older, in-memory flow, kept for those who ask for it.
   const inTool = options.approval === 'channel';
   if (options.approvalTimeout !== undefined && !inTool) {
@@ -123,7 +125,7 @@ export interface ChatToolsOptions {
   requireApproval?: boolean | Record<string, boolean>;
   /**
    * How long a call gated with `approval: 'channel'` waits for a decision, in
-   * milliseconds. Default 5 minutes. A call the harness holds takes its deadline
+   * milliseconds. With none it waits until answered. A call the harness holds takes its deadline
    * from the approver instead (`chatApprover({ timeout })`), so this option is
    * refused without `approval: 'channel'` rather than ignored.
    */
@@ -176,17 +178,20 @@ async function awaitApproval(params: {
   name: string;
   args: unknown;
   toolCtx: ToolExecutionContext;
-  timeout: number;
+  /** How long to wait, in milliseconds. With none, the wait ends only with an answer. */
+  timeout?: number;
 }): Promise<void> {
   const { ctx, harness } = params.toolCtx;
   const requestId = crypto.randomUUID();
-  const deadline = Date.now() + params.timeout;
+  const deadline = params.timeout === undefined ? undefined : Date.now() + params.timeout;
+  const park = (): Promise<ApprovalDecision> =>
+    harness.recv(approvalDecisions, ctx, {
+      timeout: deadline === undefined ? MAX_WAIT_MS : Math.max(1, deadline - Date.now()),
+    });
 
   // Park the receiver BEFORE sending the request: topic delivery is lossy,
   // and the subscription must exist before any decision can possibly arrive.
-  let pending = harness.recv(approvalDecisions, ctx, {
-    timeout: params.timeout,
-  });
+  let pending = park();
   await harness.send(
     approvalRequests,
     {
@@ -202,7 +207,17 @@ async function awaitApproval(params: {
   const done = noteWaiting(harness, requestId);
   try {
     while (true) {
-      const decision = await pending;
+      const decision = await pending.catch((error: unknown) => {
+        // No deadline was set, so the end of one timer is not the end of the wait.
+        if (deadline === undefined && isChannelTimeout(error)) {
+          return undefined;
+        }
+        throw error;
+      });
+      if (decision === undefined) {
+        pending = park();
+        continue;
+      }
       if (decision.requestId === requestId) {
         if (!decision.approved) {
           const reason = decision.reason ? `: ${decision.reason}` : '';
@@ -213,17 +228,18 @@ async function awaitApproval(params: {
       // Another gated call's decision woke us. Re-park immediately — the gap
       // is a microtask, and external sends arrive from I/O macrotasks, so a
       // decision cannot slip through it.
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
+      if (deadline !== undefined && deadline - Date.now() <= 0) {
         throw new Error(`Tool call '${params.name}' timed out waiting for approval.`);
       }
-      pending = harness.recv(approvalDecisions, ctx, {
-        timeout: remaining,
-      });
+      pending = park();
     }
   } finally {
     done();
   }
+}
+
+function isChannelTimeout(error: unknown): boolean {
+  return isNoeticError(error) && error.noeticError.kind === 'channel_timeout';
 }
 
 interface ChatAiModule {

@@ -304,7 +304,8 @@ The mechanics:
 - `ask` parks the hook on a **permission broker** owned by the served agent.
   The broker registers the park *before* forwarding, so an answer racing back
   in the same tick still lands, and it owns the editor's deadline
-  (`askTimeoutMs`, default 5 minutes). When that passes with no answer the call
+  (`askTimeoutMs`, none unless set: an ask waits until it is answered or the
+  session is cancelled). When a set deadline passes with no answer the call
   goes to the harness's approval seam (`08-runtime` § Held tool calls), where
   a person can still answer it; the turn stays live meanwhile. A harness with
   no seam denies it. A layer hook receives an `ExecutionContext`,
