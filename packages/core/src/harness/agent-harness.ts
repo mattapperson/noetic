@@ -171,11 +171,13 @@ import type {
   StepsInput,
   StepsOutput,
   StorageAdapter,
+  StoredTurn,
   StreamEvent,
   StreamingItem,
   SubprocessAdapter,
   Tool,
   TraceExporter,
+  TurnCut,
   UsageCharge,
   ValidStepChain,
   WriteOffSpendOptions,
@@ -201,6 +203,7 @@ import { recordedToolCalls } from './recorded-tool-calls';
 import type { SpendClient } from './spend';
 import { Spend } from './spend';
 import { ThreadRecord } from './thread-record';
+import { TurnCuts } from './turn-cuts';
 
 //#region Types
 
@@ -218,6 +221,8 @@ interface Session {
   arriving?: number;
   /** The `execute()` options of the turn in flight, to resume it with if it parks. */
   turnOptions?: ExecuteOptions;
+  /** The message ids of the turn in flight: what its cuts are counted by. */
+  turnMessageIds?: ReadonlyArray<string>;
   /**
    * The options of messages kept in storage for after a parked turn, by message
    * id. Options hold live objects (layers, connections) storage cannot, so they
@@ -235,6 +240,9 @@ function keepForLater(
   session.keptOptions.set(message.id, message.options);
   return record.keepQueued(message);
 }
+
+/** A thread's turn in flight, as its record stores it. */
+type StoredTurnRecord = NonNullable<Awaited<ReturnType<ThreadRecord['turn']>>>;
 
 //#endregion
 
@@ -299,6 +307,9 @@ const LEASE_WAIT_MARGIN_MS = 1e3;
 
 /** What a turn's run resolves to when it parked instead of finishing. */
 const PARKED: unique symbol = Symbol('parked');
+
+/** What a turn's run resolves to when it was cut instead of failing (spec 23 § Cut turns). */
+const CUT: unique symbol = Symbol('cut');
 
 /** When the turn on `ctx` parked until, or undefined when it did not park. */
 function parkedUntil(ctx: Context): number | undefined {
@@ -457,6 +468,12 @@ export class AgentHarness<
   private readonly leaseOptions?: TurnLeaseOptions;
   /** The flow version this harness runs, when the host names one. */
   private readonly version?: string;
+  /** Set with the lease: how cut turns are run again, and each thread's cut mark. */
+  private readonly cuts?: TurnCuts;
+  /** The cut each cut turn's context ended with, for its response. */
+  private readonly cutOfContext = new WeakMap<Context, TurnCut>();
+  /** The `execute()` options a stored turn is woken with when none are given. */
+  private readonly turnOptionsFor?: (turn: StoredTurn) => ExecuteOptions | Promise<ExecuteOptions>;
   /** Set when turns park (`environment.storage.park`): the grace before one does. */
   private readonly parkGraceMs?: number;
   /** Set when this harness wakes the turns it parked (`park.autoWake`). */
@@ -619,6 +636,8 @@ export class AgentHarness<
       now: opts.now,
       ...storageEnv?.lease,
     });
+    this.cuts = this.leaseOptions ? new TurnCuts(storageEnv?.lease?.cut) : undefined;
+    this.turnOptionsFor = opts.turnOptions;
     this.parkGraceMs = resolveParkGrace(this.leaseOptions ? storageEnv?.park : undefined);
     this.parkWatchers = this.createParkWatchers(storageEnv?.park);
     this.spend = this.checkpointStore
@@ -1239,6 +1258,7 @@ export class AgentHarness<
           ctx.itemLog.items,
           session.runner.queue.peekAll().map((message) => message.id),
         );
+        this.cuts?.forget(threadId);
         return;
       }
       session.accumulatedItems = [
@@ -1294,6 +1314,7 @@ export class AgentHarness<
             }
           }
         },
+        cutOf: (ctx) => this.cutOfContext.get(ctx),
         heldCalls: async (ctx) =>
           (await heldCallsOf(this).list(rootIdOf(ctx)))
             .filter((held) => held.resolution === undefined)
@@ -1317,6 +1338,7 @@ export class AgentHarness<
       session.turnOptions = perTurnOptions;
       this.parkWatchers?.stop(threadId);
       const messageIds = messages.map((m) => m.id);
+      session.turnMessageIds = messageIds;
       const history = record ? await record.history() : session.accumulatedItems;
       const graph = this.agentGraph ? frameworkCast<Step>(this.agentGraph) : undefined;
       const views = this.#connections.turnViews(perTurnOptions.connections, graph);
@@ -1365,14 +1387,7 @@ export class AgentHarness<
         perTurnOptions.connections,
         graph,
       );
-      if (this.agentGraph || this.harnessTools.length > 0 || connectionTools.length > 0) {
-        const stepTools = this.agentGraph ? collectAllTools(this.agentGraph) : [];
-        this.setUnifiedTools(ctx, [
-          ...stepTools,
-          ...this.harnessTools,
-          ...connectionTools,
-        ]);
-      }
+      this.setTurnTools(ctx, perTurnOptions.tools ?? [], connectionTools);
       // Steers the last harness accepted but never applied go back in the queue;
       // ones already in the conversation are skipped when offered.
       for (const steer of (await record?.steers()) ?? []) {
@@ -1426,11 +1441,12 @@ export class AgentHarness<
       }
       const until = Number.isFinite(wakeAt) ? wakeAt : undefined;
       await record.park(ctx, until);
+      this.cuts?.forget(threadId);
       await this.#connections.release(ctx.id);
       this.parkWatchers?.watch(threadId, {
         executionId: ctx.id,
         until,
-        options: session.turnOptions ?? {},
+        options: session.turnOptions,
       });
       // Before the turn answers as parked: whoever wakes it has to know when.
       await this.announceWakeTime();
@@ -1461,7 +1477,7 @@ export class AgentHarness<
         );
       }
       const result = await this.initAndRun(this.agentGraph, '', ctx).catch(
-        async (error: unknown): Promise<typeof PARKED> => {
+        async (error: unknown): Promise<typeof PARKED | typeof CUT> => {
           // An interrupted turn restarts from what it finished, so the
           // interrupting message lands after the work it interrupted.
           if (ctx.abortReason === INTERRUPT_REASON) {
@@ -1472,6 +1488,11 @@ export class AgentHarness<
           if (await closeOutPark(ctx)) {
             return PARKED;
           }
+          // Cut short with everything before the stop on record: run again later.
+          if (await this.closeOutCut(session, ctx, error)) {
+            return CUT;
+          }
+          this.cuts?.forget(threadId);
           // The turn ended here, in a live process. Say so, or a routine wake would
           // take it for one cut off by a crash and run it again, every time.
           // It stopped rather than redo a recorded effect under a newer flow version:
@@ -1503,10 +1524,12 @@ export class AgentHarness<
       );
       // A flow that caught the wait's cancellation and returned is parked all the
       // same: the wait it was in has not ended, and the woken turn goes back to it.
-      if (result === PARKED || (await closeOutPark(ctx))) {
+      if (result === CUT || result === PARKED || (await closeOutPark(ctx))) {
         return '';
       }
-      await keepHistory(ctx, result);
+      if (await this.keepOrCut(session, ctx, () => keepHistory(ctx, result))) {
+        return '';
+      }
       this.parkWatchers?.forget(threadId, ctx.id);
       await this.announceWakeTimeQuietly();
       return result;
@@ -1535,8 +1558,11 @@ export class AgentHarness<
    * it knows the event a parked turn waits for has arrived. A turn another harness
    * holds, or one already running here, is left alone.
    *
+   * A turn that was cut (spec 23 § Cut turns) is due once its back-off is over.
+   *
    * A resumed turn replays what it finished and goes on. `options` are the
-   * `execute()` options it runs with; a stored turn keeps none of its own.
+   * `execute()` options it runs with; a stored turn keeps none of its own, so
+   * without them the harness asks `AgentHarnessOpts.turnOptions`.
    *
    * Resolves the ids of the threads it resumed. Durable sessions only.
    * @public
@@ -1571,14 +1597,17 @@ export class AgentHarness<
       // A routine wake leaves alone a parked turn that is not due, one with no
       // deadline at all (it waits for an answer, not for a time), and one that
       // failed or was cancelled here: only a turn cut off by a crash resumes unasked.
-      const notDue = turn.parked && (turn.parked.until === undefined || turn.parked.until > now);
+      const cut = turn.parked ? undefined : this.cuts?.markOf(threadId, turn);
+      const notDue =
+        (turn.parked && (turn.parked.until === undefined || turn.parked.until > now)) ||
+        (cut !== undefined && this.cuts !== undefined && this.cuts.dueAt(cut) > now);
       if (!scope?.threadId && (notDue || (turn.stopped && !turn.parked))) {
         // A parked turn found in storage, as at boot, is watched over from here on.
         if (turn.parked && this.parkWatchers && !this.parkWatchers.has(threadId)) {
           this.parkWatchers.watch(threadId, {
             executionId: turn.executionId,
             until: turn.parked.until,
-            options: scope?.options ?? {},
+            options: scope?.options,
           });
         }
         continue;
@@ -1594,6 +1623,7 @@ export class AgentHarness<
       if (held && !scope?.threadId) {
         continue;
       }
+      const options = scope?.options ?? (await this.storedTurnOptions(threadId, turn, cut));
       // Re-deliver the turn's own messages: the same ids resume it, and a resumed
       // turn reads its input from its checkpoint, not from these. They go back as
       // one arrival: handed over one at a time, the first would start a turn of
@@ -1603,13 +1633,144 @@ export class AgentHarness<
           id,
           input: [],
           deliveryMode: 'next-turn',
-          options: scope?.options ?? {},
+          options,
           enqueuedAt: Date.now(),
         })),
       );
       woken.push(threadId);
     }
     return woken;
+  }
+
+  /**
+   * A turn stopped by `lease_lost` or `ledger_write_failed` is cut, not failed
+   * (spec 23 § Cut turns): its record stays, marked, and a wake runs it again once
+   * its back-off is over. Resolves false when `error` does not cut the turn, or the
+   * turn has been cut as often as it may be and fails instead.
+   */
+  private async closeOutCut(session: Session, ctx: Context, error: unknown): Promise<boolean> {
+    const { record } = session;
+    const { threadId } = session.runner;
+    const reason = this.cuts?.reasonOf(error);
+    if (!reason || !record || !this.cuts || !this.leaseOptions) {
+      return false;
+    }
+    // The storage that refused a write may refuse this read: the mark in memory counts then.
+    const stored = await record.turn().catch(() => undefined);
+    if (reason === 'lease_lost') {
+      return this.closeOutLostLease(threadId, ctx, stored);
+    }
+    const messageIds = stored?.executionId === ctx.id ? stored.messageIds : session.turnMessageIds;
+    const mark = this.cuts.cut(
+      threadId,
+      {
+        messageIds: messageIds ?? [],
+        cut: stored?.executionId === ctx.id ? stored.cut : undefined,
+      },
+      reason,
+      this.now(),
+    );
+    if (!mark) {
+      return false;
+    }
+    await record.cut(ctx, mark);
+    // Messages still queued wait in storage, as for a park: one that started a turn
+    // now would throw the cut turn away.
+    const interrupts: QueuedMessage[] = [];
+    for (const queued of session.runner.queue.drainAll()) {
+      if (queued.deliveryMode === 'interrupt') {
+        interrupts.push(queued);
+        continue;
+      }
+      await keepForLater(session, record, queued);
+    }
+    for (const interrupt of interrupts.reverse()) {
+      session.runner.queue.prepend(interrupt);
+    }
+    this.cutOfContext.set(ctx, {
+      reason,
+      attempt: mark.count,
+      wakeAt: this.cuts.dueAt(mark),
+    });
+    // Before the turn answers as cut: whoever wakes it has to know when.
+    await this.announceWakeTimeQuietly();
+    return true;
+  }
+
+  /**
+   * Another holder took the turn (spec 23 § Cut turns, A replaced harness). The
+   * turn is theirs: this harness writes nothing to it, counts nothing, and leaves
+   * its own queue alone. It is cut only while it is still on record under this
+   * execution, when a wake can pick it up should that holder die; otherwise the
+   * other holder ended it, and the response fails as before.
+   */
+  private async closeOutLostLease(
+    threadId: string,
+    ctx: Context,
+    stored: StoredTurnRecord | undefined,
+  ): Promise<boolean> {
+    if (!this.leaseOptions || stored?.executionId !== ctx.id || stored.parked || stored.stopped) {
+      return false;
+    }
+    const heldUntil = await heldElsewhereUntil(this.leaseOptions, threadId).catch(() => undefined);
+    this.cutOfContext.set(ctx, {
+      reason: 'lease_lost',
+      wakeAt: heldUntil ?? this.now(),
+    });
+    await this.announceWakeTimeQuietly();
+    return true;
+  }
+
+  /**
+   * Record the end of a turn whose work is done. Resolves true when that write was
+   * refused and the turn was cut instead: a wake replays it to here.
+   */
+  private async keepOrCut(
+    session: Session,
+    ctx: Context,
+    keep: () => Promise<void>,
+  ): Promise<boolean> {
+    try {
+      await keep();
+      return false;
+    } catch (error) {
+      if (await this.closeOutCut(session, ctx, error)) {
+        return true;
+      }
+      this.cuts?.forget(session.runner.threadId);
+      throw error;
+    }
+  }
+
+  /** The options a stored turn is woken with when the wake names none: `turnOptions`, or none. */
+  private async storedTurnOptions(
+    threadId: string,
+    turn: StoredTurnRecord,
+    cut: StoredTurn['cut'],
+  ): Promise<ExecuteOptions> {
+    if (!this.turnOptionsFor) {
+      return {};
+    }
+    return await this.turnOptionsFor({
+      threadId,
+      executionId: turn.executionId,
+      messageIds: turn.messageIds,
+      ...(turn.version === undefined
+        ? {}
+        : {
+            version: turn.version,
+          }),
+      ...(turn.parked
+        ? {
+            parked: turn.parked,
+          }
+        : {}),
+      ...(cut
+        ? {
+            cut,
+          }
+        : {}),
+    });
   }
 
   /**
@@ -1652,15 +1813,17 @@ export class AgentHarness<
       return undefined;
     }
     // A turn with no park on record is cut off, unless it is simply running here.
-    // (One that is parked may still be closing out in this process: it counts.)
+    // (One that is parked, or cut, may still be closing out in this process: it counts.)
     const runner = this.sessions.get(threadId)?.runner;
-    if (!turn.parked && runner && runner.getStatus().kind !== 'idle') {
+    const closingCut = runner?.context !== undefined && this.cutOfContext.has(runner.context);
+    if (!turn.parked && runner && runner.getStatus().kind !== 'idle' && !closingCut) {
       // Running here. Should this process die, the turn is cut off, and it can be
       // picked up once the lease it held has run out: that is when to look again.
       // The turn ending, or parking, replaces this time with the real one.
       return this.leaseOptions ? now + this.leaseOptions.ttlMs + LEASE_WAIT_MARGIN_MS : undefined;
     }
-    const due = turn.parked?.until ?? now;
+    const cut = turn.parked ? undefined : this.cuts?.markOf(threadId, turn);
+    const due = turn.parked?.until ?? (cut && this.cuts ? this.cuts.dueAt(cut) : now);
     const heldUntil = this.leaseOptions
       ? await heldElsewhereUntil(this.leaseOptions, threadId)
       : undefined;
@@ -2150,7 +2313,8 @@ export class AgentHarness<
     messages: ReadonlyArray<QueuedMessage>,
   ): Promise<boolean> {
     const turn = await record.turn();
-    if (!turn || (!turn.parked && !turn.stuck)) {
+    const cut = turn ? this.cuts?.markOf(session.runner.threadId, turn) : undefined;
+    if (!turn || (!turn.parked && !turn.stuck && !cut)) {
       return false;
     }
     if (messages.some((message) => message.deliveryMode === 'interrupt')) {
@@ -2920,6 +3084,21 @@ export class AgentHarness<
   }
 
   /** Resolves layer-provided tools and merges with step tools into ctx.unifiedTools. */
+  /** The tools a session turn offers: its own first (one named like another replaces it), then the flow's, the harness's and its connections'. */
+  private setTurnTools(
+    ctx: Context,
+    turnTools: ReadonlyArray<Tool>,
+    connectionTools: ReadonlyArray<Tool>,
+  ): void {
+    const stepTools = this.agentGraph ? collectAllTools(this.agentGraph) : [];
+    this.setUnifiedTools(ctx, [
+      ...turnTools,
+      ...stepTools,
+      ...this.harnessTools,
+      ...connectionTools,
+    ]);
+  }
+
   private setUnifiedTools(ctx: Context, stepTools: Tool[]): void {
     const layers = ctx.layers;
     const layerTools = layers && layers.length > 0 ? resolveLayerTools(layers, this, ctx) : [];

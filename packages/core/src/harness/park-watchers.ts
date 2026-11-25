@@ -49,7 +49,8 @@ export interface ParkWatcherHost {
   /** The state of one of them now, or undefined when it cannot be read. */
   taskState(task: ParkedTask, signal: AbortSignal): Promise<string | undefined>;
   /** Resume the thread's turn. Resolves false when it could not be resumed just now. */
-  wake(threadId: string, options: ExecuteOptions): Promise<boolean>;
+  /** `options` undefined: the harness finds them (`turnOptions`). */
+  wake(threadId: string, options: ExecuteOptions | undefined): Promise<boolean>;
   /** The execution of the turn the thread has parked now, or undefined when it has none. */
   parked(threadId: string): Promise<string | undefined>;
   now(): number;
@@ -61,7 +62,7 @@ export interface ParkedTurn {
   /** When its earliest wait runs out, or undefined when none has a deadline. */
   readonly until: number | undefined;
   /** The `execute()` options the turn ran with, to resume it with. */
-  readonly options: ExecuteOptions;
+  readonly options?: ExecuteOptions;
 }
 
 interface Watcher {

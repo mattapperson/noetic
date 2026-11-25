@@ -214,6 +214,14 @@ export class ThreadRecord {
           : {
               version: this.host.version,
             }),
+        // Kept until the turn ends, even when it resumes under a new execution (its
+        // checkpoint was not written): how often it was cut counts toward giving up.
+        ...(record.turn?.cut !== undefined &&
+        (record.turn.executionId === ctx.id || isSameList(record.turn.messageIds, messageIds))
+          ? {
+              cut: record.turn.cut,
+            }
+          : {}),
         // Kept until the turn ends: a host that dies part way through going on
         // must not find the same step stuck again.
         ...(record.turn?.executionId === ctx.id && record.turn.accept !== undefined
@@ -292,13 +300,40 @@ export class ThreadRecord {
         ? {
             ...record,
             turn: {
-              ...record.turn,
+              ...withoutCut(record.turn),
               parked:
                 until === undefined
                   ? {}
                   : {
                       until,
                     },
+            },
+          }
+        : record,
+    );
+  }
+
+  /**
+   * The turn on `ctx` was cut (spec 23 § Cut turns): keep its record, marked with how
+   * often and when. Best-effort and unfenced: storage that just refused a write may
+   * refuse this one, and the harness keeps the mark in memory as well. Written only
+   * while the record still names the turn's execution.
+   */
+  cut(
+    ctx: Context,
+    cut: {
+      reason: string;
+      count: number;
+      at: number;
+    },
+  ): Promise<void> {
+    return this.update((record) =>
+      record.turn?.executionId === ctx.id
+        ? {
+            ...record,
+            turn: {
+              ...record.turn,
+              cut,
             },
           }
         : record,
@@ -315,7 +350,7 @@ export class ThreadRecord {
         ? {
             ...record,
             turn: {
-              ...record.turn,
+              ...withoutCut(record.turn),
               stopped: {
                 at,
                 reason,
@@ -546,6 +581,12 @@ export class ThreadRecord {
   }
 }
 
+function withoutCut(turn: NonNullable<SessionRecord['turn']>): NonNullable<SessionRecord['turn']> {
+  const { cut, ...rest } = turn;
+  void cut;
+  return rest;
+}
+
 function withoutTurn(record: SessionRecord): SessionRecord {
   const { turn, ...rest } = record;
   void turn;
@@ -558,6 +599,10 @@ function withoutTurn(record: SessionRecord): SessionRecord {
  */
 function isSameDelivery(turn: ReadonlyArray<string>, delivered: ReadonlyArray<string>): boolean {
   return delivered.length > 0 && delivered.every((id) => turn.includes(id));
+}
+
+function isSameList(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean {
+  return a.length === b.length && a.every((id, i) => id === b[i]);
 }
 
 function addUsage(total: SessionUsage, spent: TurnUsage): SessionUsage {

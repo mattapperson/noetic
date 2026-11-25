@@ -216,6 +216,11 @@ export interface ExecuteOptions {
    * with `CONNECTION_NAME_TAKEN`.
    */
   connections?: ConnectionEntries;
+  /**
+   * Tools for this turn only, offered beside the harness's own `tools`, its
+   * connections' and its flow's. A tool with a name already offered replaces it.
+   */
+  tools?: ReadonlyArray<Tool>;
   /** Override the harness's default delivery mode for this message only. */
   deliveryMode?: DeliveryMode;
   /**

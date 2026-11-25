@@ -74,6 +74,18 @@ const SessionRecordSchema = z.object({
           z.string(),
         ])
         .optional(),
+      /**
+       * Set while the turn is cut (spec 23 § Cut turns): its lease was lost or a
+       * durable write failed, and a wake runs it again once its back-off is over.
+       * `count` is how many times it has been cut.
+       */
+      cut: z
+        .object({
+          reason: z.string(),
+          count: z.number(),
+          at: z.number(),
+        })
+        .optional(),
       /** Set while the turn is parked: every part of it waits, and no harness holds it. */
       parked: z
         .object({

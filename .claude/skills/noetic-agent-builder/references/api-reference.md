@@ -2155,10 +2155,12 @@ A `StorageAdapter` over one SQLite table (default `noetic_storage`). `database` 
 interface StorageAdapter {
   swap?<T>(key: string, prev: T | null, next: T): Promise<boolean>; // compare-and-set
 }
-// environment.storage.lease?: { holder?: string; ttlMs?: number; waitMs?: number; now?: () => number }
+// environment.storage.lease?: { holder?: string; ttlMs?: number; waitMs?: number; now?: () => number;
+//   cut?: { attempts?: number /* 3 */; delayMs?: number /* 1e3 */; maxDelayMs?: number /* 6e4 */ } }
+// HarnessResponse.cut?: { reason: 'lease_lost' | 'ledger_write_failed'; attempt?: number; wakeAt: number } — event `{name}:turn_cut`
 ```
 
-On storage with `swap` (`createFileStorage`, `createSqliteStorage`, `createInMemoryStorage({ swap: true })`), each `harness.execute()` turn takes its thread's lease: one harness writes a turn, a replaced harness stops with `lease_lost`, and a failed ledger write stops the turn with `ledger_write_failed`.
+On storage with `swap` (`createFileStorage`, `createSqliteStorage`, `createInMemoryStorage({ swap: true })`), each `harness.execute()` turn takes its thread's lease: one harness writes a turn, a replaced harness stops with `lease_lost`, and a failed ledger write stops the turn with `ledger_write_failed`. A failed write **cuts** the turn rather than failing it: the response resolves with `cut`, the turn stays on record, and a routine `wake()` runs it again after a back-off (1 s doubling, at most 60 s), failing it only after `cut.attempts`. A `lease_lost` while the other holder still runs the turn is a cut too (no `attempt`, `wakeAt` = its lease end); once that holder finished it, the response rejects as before. A host with a stable single-instance identity (a Durable Object) passes it as `holder`, so it takes its own leases over at once after a restart.
 
 ### Flow versions and the trail
 
@@ -2254,6 +2256,8 @@ Each tool call in a model round is recorded as it finishes, so a resumed round r
 // environment.storage.park?: boolean | { graceMs?: number }   (needs swap storage)
 // AgentHarness({ now?: () => number })
 harness.wake(scope?: { threadId?: string; options?: ExecuteOptions }): Promise<string[]>;
+// AgentHarness({ turnOptions?: (turn: StoredTurn) => ExecuteOptions | Promise<ExecuteOptions> }) — options for a woken turn when wake() names none
+// ExecuteOptions.tools?: Tool[] — tools for one turn, ahead of the harness's own
 harness.getNextWakeTime(): Promise<number | undefined>;   // earliest parked deadline or next cron() tick
 harness.onWakeTimeChange(listener: (at: number | undefined) => void | Promise<void>): () => void; // told when that time changes; a parking turn waits for it
 harness.waitForIdle(): Promise<void>;                     // due scheduled events are read; every turn finished or parked
