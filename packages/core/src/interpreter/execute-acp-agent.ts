@@ -22,6 +22,7 @@ import type {
   AcpReattachHandle,
   AcpSession,
   AcpSessionPolicy,
+  AcpSystemPrompt,
   AcpTurnResult,
   AcpWhenHostExits,
   Context,
@@ -292,6 +293,22 @@ function bindHostToStep<TContext, I, O>(
           stepId: opts.step.id,
         })
     : undefined;
+  const elicit = opts.step.onElicitation;
+  host.onElicitation = elicit
+    ? (request) =>
+        elicit(request, opts.ctx, {
+          agentId: opts.agentId,
+          stepId: opts.step.id,
+        })
+    : undefined;
+  const subagents = opts.step.onSubagentUpdate;
+  host.onSubagentUpdate = subagents
+    ? (event) =>
+        subagents(event, opts.ctx, {
+          agentId: opts.agentId,
+          stepId: opts.step.id,
+        })
+    : undefined;
   host.onSessionUpdate = opts.onUpdate;
   host.onClientActivity = opts.onActivity;
   // A step that gives no tools gets none, even on a session another step
@@ -326,7 +343,7 @@ function buildHost<TContext, I, O>(
     threadId: opts.ctx.threadId,
     signal: abortSignalOf(opts.ctx),
     // Connection-level: ACP negotiates the capability set once, in `initialize`.
-    capabilities: opts.step.clientCapabilities,
+    capabilities: effectiveCapabilities(opts.step),
     onSessionUpdate: opts.onUpdate,
     onClientActivity: opts.onActivity,
   };
@@ -349,7 +366,36 @@ function normalizedCapabilities(config: AcpClientCapabilityConfig | undefined): 
     additionalDirectories: [
       ...(config?.additionalDirectories ?? []),
     ].sort(),
+    elicitation: config?.elicitation === true,
+    subagents: config?.subagents === true,
   });
+}
+
+/**
+ * The step's capability config with the hook-derived defaults made explicit:
+ * a step that answers elicitations or takes subagent updates advertises them
+ * unless it says otherwise.
+ */
+function effectiveCapabilities<TContext, I, O>(
+  step: StepAcpAgent<TContext, I, O>,
+): AcpClientCapabilityConfig | undefined {
+  const config = step.clientCapabilities;
+  if (!config && !step.onElicitation && !step.onSubagentUpdate) {
+    return undefined;
+  }
+  return {
+    ...config,
+    ...(step.onElicitation && config?.elicitation === undefined
+      ? {
+          elicitation: true,
+        }
+      : {}),
+    ...(step.onSubagentUpdate && config?.subagents === undefined
+      ? {
+          subagents: true,
+        }
+      : {}),
+  };
 }
 
 /**
@@ -362,6 +408,7 @@ function assertSessionScopedSettingsMatch<TContext, I, O>(
   live: AcpLiveSession,
   cwd: string,
   tools: AcpToolRunner | undefined,
+  settings: SessionSettings,
 ): void {
   const conflict = (setting: string, hint: string): NoeticConfigError =>
     new NoeticConfigError({
@@ -374,6 +421,21 @@ function assertSessionScopedSettingsMatch<TContext, I, O>(
     throw conflict(
       'cwd',
       'A session is created in one working directory. Give every step sharing a `session.reuse` key the same `cwd`, or use a separate session.',
+    );
+  }
+  if (settings.meta !== undefined && JSON.stringify(settings.meta) !== JSON.stringify(live.meta)) {
+    throw conflict(
+      'sessionMeta',
+      'A session takes its `_meta` when it is created. Give every step sharing a `session.reuse` key the same `sessionMeta`, or leave it off the later steps.',
+    );
+  }
+  if (
+    settings.systemPrompt !== undefined &&
+    JSON.stringify(settings.systemPrompt) !== JSON.stringify(live.systemPrompt)
+  ) {
+    throw conflict(
+      'systemPrompt',
+      'A session takes its system prompt when it is created. Give every step sharing a `session.reuse` key the same `systemPrompt`, or leave it off the later steps.',
     );
   }
   // The agent reads its tool list once, so a step may serve any part of it —
@@ -411,7 +473,7 @@ function assertCapabilitiesCompatible<TContext, I, O>(
   step: StepAcpAgent<TContext, I, O>,
   live: AcpLiveSession,
 ): void {
-  const requested = step.clientCapabilities;
+  const requested = effectiveCapabilities(step);
   if (requested === undefined) {
     return;
   }
@@ -423,6 +485,49 @@ function assertCapabilitiesCompatible<TContext, I, O>(
     message: `step.acpAgent(${JSON.stringify(step.id)}) reuses session '${step.session?.reuse}' but requests different clientCapabilities than the connection was opened with.`,
     hint: 'ACP negotiates client capabilities once per connection. Give every step sharing a `session.reuse` key the same `clientCapabilities`, or use a separate session.',
   });
+}
+
+/** The `_meta` and system prompt the step opens its session with. */
+interface SessionSettings {
+  meta?: Readonly<Record<string, unknown>>;
+  systemPrompt?: AcpSystemPrompt;
+}
+
+/** A string prompt appends; an empty one is no prompt. */
+function systemPromptOf(prompt: string | AcpSystemPrompt | undefined): AcpSystemPrompt | undefined {
+  const normalized =
+    typeof prompt === 'string'
+      ? {
+          text: prompt,
+        }
+      : prompt;
+  if (!normalized || normalized.text.trim().length === 0) {
+    return undefined;
+  }
+  return {
+    text: normalized.text,
+    mode: normalized.mode ?? 'append',
+  };
+}
+
+async function resolveSessionSettings<TContext, I, O>(
+  step: StepAcpAgent<TContext, I, O>,
+  ctx: Context<TContext>,
+): Promise<SessionSettings> {
+  const meta = await resolveLazy(step.sessionMeta, ctx);
+  const systemPrompt = systemPromptOf(await resolveLazy(step.systemPrompt, ctx));
+  return {
+    ...(meta
+      ? {
+          meta,
+        }
+      : {}),
+    ...(systemPrompt
+      ? {
+          systemPrompt,
+        }
+      : {}),
+  };
 }
 
 /** Keeping a connection is always explicit; the default closes it with the step. */
@@ -477,17 +582,19 @@ async function sessionOn(
     loadId?: string;
     /** The session an earlier attempt of this step opened. */
     resumeId?: string;
+    settings: SessionSettings;
   },
 ): Promise<{
   session: AcpSession;
   resumed: boolean;
 }> {
-  const { cwd, loadId, resumeId } = opts;
+  const { cwd, loadId, resumeId, settings } = opts;
   if (loadId) {
     return {
       session: await connection.loadSession({
         sessionId: loadId,
         cwd,
+        ...settings,
       }),
       resumed: false,
     };
@@ -497,6 +604,7 @@ async function sessionOn(
       .loadSession({
         sessionId: resumeId,
         cwd,
+        ...settings,
       })
       .catch(() => undefined);
     if (session) {
@@ -509,6 +617,7 @@ async function sessionOn(
   return {
     session: await connection.newSession({
       cwd,
+      ...settings,
     }),
     resumed: false,
   };
@@ -527,6 +636,7 @@ async function openSession<TContext, I, O>(opts: {
   resumeId?: string;
   /** How to reach the agent that earlier attempt left running, when it can outlive its host. */
   reattach?: AcpReattachHandle;
+  settings: SessionSettings;
 }): Promise<SessionResolution> {
   let resumed = false;
   let reattached = false;
@@ -563,6 +673,7 @@ async function openSession<TContext, I, O>(opts: {
         keepAlive,
         cwd: opts.cwd,
         tools: opts.tools?.tools,
+        ...opts.settings,
       };
     }
     const connection = holdingConnections(
@@ -580,6 +691,7 @@ async function openSession<TContext, I, O>(opts: {
         cwd: opts.cwd,
         loadId: opts.step.session?.load,
         resumeId: opts.resumeId,
+        settings: opts.settings,
       });
       resumed = opened.resumed;
       const { session } = opened;
@@ -591,6 +703,7 @@ async function openSession<TContext, I, O>(opts: {
         keepAlive,
         cwd: opts.cwd,
         tools: opts.tools?.tools,
+        ...opts.settings,
       };
     } catch (e) {
       await connection.close().catch(() => undefined);
@@ -599,7 +712,7 @@ async function openSession<TContext, I, O>(opts: {
   });
 
   if (!fresh) {
-    assertSessionScopedSettingsMatch(opts.step, live, opts.cwd, opts.tools);
+    assertSessionScopedSettingsMatch(opts.step, live, opts.cwd, opts.tools, opts.settings);
     if (live.agentId !== opts.agent.agentId) {
       throw new NoeticConfigError({
         code: 'ACP_SESSION_AGENT_CONFLICT',
@@ -965,6 +1078,7 @@ export async function executeAcpAgent<TContext, I, O>(
   }
 
   const cwd = (await resolveLazy(step.cwd, ctx)) ?? baseCtx.cwdState.cwd;
+  const settings = await resolveSessionSettings(step, ctx);
   const tools = await resolveServedTools(step, ctx, layers, agent);
 
   // Capture the conversation so far BEFORE appending this turn's prompt, so a
@@ -1040,6 +1154,7 @@ export async function executeAcpAgent<TContext, I, O>(
     tools,
     resumeId,
     reattach,
+    settings,
   })
     .catch((cause: unknown) => {
       throw setupFailure(step, cause, baseCtx);

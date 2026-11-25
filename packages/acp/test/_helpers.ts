@@ -24,6 +24,7 @@ import type {
   ShellExecResult,
 } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
+import type { SystemPromptMeta } from '../src/connection';
 import { openAcpConnection } from '../src/connection';
 import { createAcpLoopbackPair } from '../src/transport-loopback';
 
@@ -191,6 +192,8 @@ export interface FakeAgentScript {
   loadResponse?: acp.LoadSessionResponse;
   /** The `usage` the `session/prompt` answer reports. */
   usage?: acp.Usage;
+  /** The `_meta` the `session/prompt` answer carries. */
+  responseMeta?: Record<string, unknown>;
   /** Answer the draft `session/set_model` request (agents that predate config options). */
   acceptsSetModel?: boolean;
   /** Stop reason returned from `session/prompt`. Defaults to `end_turn`. */
@@ -262,6 +265,9 @@ export interface AcpTestRigOptions {
   signal?: AbortSignal;
   /** Additionally observe the agent's `fs/*` and `terminal/*` calls. */
   onActivity?: (activity: AcpClientActivity) => void;
+  onElicitation?: AcpClientHost['onElicitation'];
+  onSubagentUpdate?: AcpClientHost['onSubagentUpdate'];
+  systemPromptMeta?: SystemPromptMeta;
 }
 
 /**
@@ -345,6 +351,11 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
                 usage: script.usage,
               }
             : {}),
+          ...(script.responseMeta
+            ? {
+                _meta: script.responseMeta,
+              }
+            : {}),
         };
       },
       async cancel(params) {
@@ -366,6 +377,8 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
     permissions: opts.policy,
     steerPermission: opts.steer,
     onPermissionRequest: opts.handler,
+    onElicitation: opts.onElicitation,
+    onSubagentUpdate: opts.onSubagentUpdate,
     onSessionUpdate: (notification) => {
       updates.push(notification);
     },
@@ -379,6 +392,7 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
     transport: pair.client,
     host,
     signal: opts.signal,
+    systemPromptMeta: opts.systemPromptMeta,
   });
 
   return {

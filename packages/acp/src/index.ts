@@ -160,7 +160,7 @@ export { NoeticAcpClient } from './client';
  * pieces underneath it.
  * @public
  */
-export type { OpenAcpConnectionOptions } from './connection';
+export type { OpenAcpConnectionOptions, SystemPromptMeta } from './connection';
 /** @public */
 export { openAcpConnection } from './connection';
 

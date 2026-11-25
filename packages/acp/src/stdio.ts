@@ -17,6 +17,7 @@ import type {
   AcpTransportFactory,
   AcpWhenHostExits,
   SpawnCommand,
+  ToolBridgeAddress,
 } from '@noetic-tools/types';
 import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
 import type { KeeperLink } from './keeper/client';
@@ -83,6 +84,40 @@ export interface LocalMachineOptions {
    * closes it, or it exits.
    */
   detachedTimeoutMs?: number;
+  /**
+   * Rewrite the agent's command just before it starts — wrap it in a sandbox
+   * (`sandbox-exec`, `bwrap`), swap in a binary the host ships. `command.env`
+   * is the complete environment the agent would get; `bridges` are the tool
+   * bridge addresses this machine handed out, so a sandbox can let their
+   * ports through. The returned command runs with exactly its own `args`,
+   * `env` (the given one when it names none) and `cwd`, as the leader of its
+   * own process group, with or without a keeper.
+   */
+  wrap?: (command: LocalAgentCommand, info: LocalWrapInfo) => SpawnCommand | Promise<SpawnCommand>;
+  /** The agent's stderr. Default: this process's stderr. */
+  onStderr?: (chunk: string) => void;
+}
+
+/** @public The command {@link LocalMachineOptions.wrap} receives: `env` is complete. */
+export interface LocalAgentCommand extends SpawnCommand {
+  readonly env: Readonly<Record<string, string>>;
+}
+
+/** @public What {@link LocalMachineOptions.wrap} is told besides the command. */
+export interface LocalWrapInfo {
+  /** Every tool bridge address `reach` handed out on this machine, in order. */
+  readonly bridges: ReadonlyArray<ToolBridgeAddress>;
+}
+
+/** The variables that are set, so a wrapper sees plain strings. */
+function definedEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined) {
+      out[name] = value;
+    }
+  }
+  return out;
 }
 
 /**
@@ -99,15 +134,52 @@ export function localMachine(
 ): AcpMachineFactory {
   return async ({ signal, whenHostExits = 'keep' }): Promise<AcpMachine> => {
     const started = new Set<AcpTransport>();
+    const bridges: ToolBridgeAddress[] = [];
     const useKeeper = options.keeper !== false;
     let keeper: Promise<KeeperLink | undefined> | undefined;
     const keeperOptions = {
       whenHostExits,
       detachedTimeoutMs: options.detachedTimeoutMs ?? 0,
     };
+    const withStderr = (link: KeeperLink | undefined): KeeperLink | undefined => {
+      if (link && options.onStderr) {
+        link.onStderr = options.onStderr;
+      }
+      return link;
+    };
     const openKeeper = (): Promise<KeeperLink | undefined> => {
-      keeper ??= useKeeper ? startKeeper(agentId, keeperOptions) : Promise.resolve(undefined);
+      keeper ??= useKeeper
+        ? startKeeper(agentId, keeperOptions).then(withStderr)
+        : Promise.resolve(undefined);
       return keeper;
+    };
+    /** The command as it will run: the host's wrapper applied, env complete. */
+    const prepare = async (command: SpawnCommand): Promise<SpawnCommand> => {
+      const env = definedEnv({
+        ...process.env,
+        ...command.env,
+      });
+      if (!options.wrap) {
+        return {
+          ...command,
+          env,
+        };
+      }
+      const wrapped = await options.wrap(
+        {
+          ...command,
+          env,
+        },
+        {
+          bridges: [
+            ...bridges,
+          ],
+        },
+      );
+      return {
+        ...wrapped,
+        env: wrapped.env ?? env,
+      };
     };
     signal?.addEventListener(
       'abort',
@@ -131,6 +203,7 @@ export function localMachine(
         {
           signal,
           whenHostExits,
+          onStderr: options.onStderr,
         },
       );
       started.add(transport);
@@ -140,27 +213,24 @@ export function localMachine(
       reach: async (bridge) => {
         const link = await openKeeper();
         if (!link) {
+          bridges.push(bridge);
           return bridge;
         }
         const url = await link.reach(new URL(bridge.url).pathname, bridge.url);
-        return {
+        const reached = {
           ...bridge,
           url,
         };
+        bridges.push(reached);
+        return reached;
       },
       launch: async (command) => {
-        const env = {
-          ...process.env,
-          ...command.env,
-        };
+        const prepared = await prepare(command);
         const link = await openKeeper();
         if (!link) {
-          return await start(command, env);
+          return await start(prepared, prepared.env ?? {});
         }
-        const transport = await link.launch({
-          ...command,
-          env,
-        });
+        const transport = await link.launch(prepared);
         started.add(transport);
         return transport;
       },
@@ -173,7 +243,7 @@ export function localMachine(
           });
         }
         const link = attachKeeper(agentId, named, whenHostExits);
-        keeper = link;
+        keeper = link.then(withStderr);
         const transport = (await link).transport();
         started.add(transport);
         return transport;
@@ -209,9 +279,11 @@ async function spawnStdio(
   {
     signal,
     whenHostExits = 'keep',
+    onStderr,
   }: {
     signal: AbortSignal | undefined;
     whenHostExits?: AcpWhenHostExits;
+    onStderr?: (chunk: string) => void;
   },
 ): Promise<AcpTransport> {
   const fail = (message: string, cause: unknown): AcpConnectError =>
@@ -234,7 +306,7 @@ async function spawnStdio(
       stdio: [
         'pipe',
         'pipe',
-        'inherit',
+        onStderr ? 'pipe' : 'inherit',
       ],
       // Its own process group, so shutdown can signal the whole tree without
       // ever signalling the host's group. Windows stops the tree by pid.
@@ -277,6 +349,10 @@ async function spawnStdio(
   // streams report that to their reader, so the Node-side error is handled.
   child.stdin?.on('error', () => undefined);
   child.stdout?.on('error', () => undefined);
+  if (onStderr) {
+    child.stderr?.on('error', () => undefined);
+    child.stderr?.on('data', (chunk: Buffer) => onStderr(chunk.toString('utf8')));
+  }
   if (signal?.aborted) {
     await close().catch(() => undefined);
     throw fail('was aborted while starting', signal.reason);

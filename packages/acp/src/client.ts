@@ -28,12 +28,26 @@ import { allowOnceOption } from './tool-permissions';
 /** Build the `ClientCapabilities` sent during `initialize`. */
 export function clientCapabilitiesFor(host: AcpClientHost): acp.ClientCapabilities {
   const config = host.capabilities;
+  const elicitation = config?.elicitation ?? host.onElicitation !== undefined;
+  const subagents = config?.subagents ?? host.onSubagentUpdate !== undefined;
   return {
     fs: {
       readTextFile: config?.readTextFile !== false,
       writeTextFile: config?.writeTextFile !== false,
     },
     terminal: config?.terminal !== false,
+    ...(elicitation
+      ? {
+          elicitation: {
+            form: {},
+          },
+        }
+      : {}),
+    ...(subagents
+      ? {
+          subagents: {},
+        }
+      : {}),
   };
 }
 
@@ -165,6 +179,33 @@ export class NoeticAcpClient implements acp.Client {
     return {
       outcome: selected,
     };
+  }
+
+  /**
+   * Ask the current step's handler. With none, or when it throws, the answer
+   * is `cancel`: the agent stops asking rather than waiting forever.
+   */
+  async createElicitation(
+    params: acp.CreateElicitationRequest,
+  ): Promise<acp.CreateElicitationResponse> {
+    const handler = this.host.onElicitation;
+    if (!handler) {
+      return {
+        action: 'cancel',
+      };
+    }
+    try {
+      return await handler(params);
+    } catch {
+      return {
+        action: 'cancel',
+      };
+    }
+  }
+
+  /** A URL-mode elicitation finished; nothing waits on it here. */
+  async completeElicitation(_params: acp.CompleteElicitationNotification): Promise<void> {
+    return;
   }
 
   async sessionUpdate(params: acp.SessionNotification): Promise<void> {

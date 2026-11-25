@@ -28,6 +28,8 @@ import type {
   AcpResumeTurnOptions,
   AcpSession,
   AcpSessionNotification,
+  AcpSubagentEvent,
+  AcpSystemPrompt,
   AcpTransport,
   AcpTurnResult,
 } from '@noetic-tools/types';
@@ -55,6 +57,23 @@ export interface OpenAcpConnectionOptions {
   reattach?: AcpReattachHandle;
   /** The transport reaches an agent an earlier host started (through its keeper). */
   reattached?: boolean;
+  /**
+   * The agent's own way to take a system prompt it does not advertise
+   * `sessionCapabilities.systemPrompt` for: the `_meta` to send instead, or
+   * undefined when it has none for that mode.
+   */
+  systemPromptMeta?: SystemPromptMeta;
+}
+
+/** @public See {@link OpenAcpConnectionOptions.systemPromptMeta}. */
+export type SystemPromptMeta = (
+  prompt: Required<AcpSystemPrompt>,
+) => Record<string, unknown> | undefined;
+
+/** The `_meta` and `systemPrompt` a session request carries. */
+interface SessionFields {
+  _meta?: Record<string, unknown>;
+  systemPrompt?: acp.SystemPrompt;
 }
 
 /** Routes a session's notifications to whichever turn is currently running. */
@@ -126,8 +145,26 @@ const KeeperTurnSchema = z.discriminatedUnion('state', [
   }),
 ]);
 
-function isRecord(value: unknown): boolean {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The child session an update announces: the subagents RFD's
+ * `subagent_update`, or codex-acp's earlier draft `subagent_spawned`.
+ */
+export function announcedChild(update: AcpSessionNotification['update']): string | undefined {
+  if (update.sessionUpdate === 'subagent_update') {
+    return update.sessionId;
+  }
+  // A draft variant the library does not know arrives as sent (update-filter).
+  const draft: Record<string, unknown> = {
+    ...update,
+  };
+  if (draft.sessionUpdate !== 'subagent_spawned') {
+    return undefined;
+  }
+  return typeof draft.subagentSessionId === 'string' ? draft.subagentSessionId : undefined;
 }
 
 /** JSON-RPC's "method not found". */
@@ -308,10 +345,16 @@ class AcpSessionImpl implements AcpSession {
       if (!response) {
         return undefined;
       }
-      return accumulator.result({
+      const result = accumulator.result({
         stopReason: response.stopReason,
         reportedUsage: response.usage ?? undefined,
       });
+      return {
+        ...result,
+        currentModeId: result.currentModeId ?? this.modeState?.currentModeId,
+        configOptions: this.options,
+        responseMeta: response._meta ?? undefined,
+      };
     } finally {
       opts.signal?.removeEventListener('abort', onAbort);
       this.activeTurn = undefined;
@@ -409,6 +452,10 @@ class AcpSessionImpl implements AcpSession {
 
 class AcpAgentConnectionImpl implements AcpAgentConnection {
   private readonly sessions = new Map<string, AcpSessionImpl>();
+  /** Each subagent's child session, to the session that announced it. */
+  private readonly children = new Map<string, string>();
+  /** Set by {@link openAcpConnection}; see `OpenAcpConnectionOptions.systemPromptMeta`. */
+  systemPromptMeta?: SystemPromptMeta;
 
   constructor(
     private readonly agentId: string,
@@ -464,6 +511,45 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     return this.track(session);
   }
 
+  /**
+   * Hand a subagent's notification to the host's subagent handler. True when
+   * it belongs to a child session, which the step's output must never see.
+   */
+  divertsChild(notification: AcpSessionNotification, host: AcpClientHost): boolean {
+    const owner = notification.sessionId;
+    const update = notification.update;
+    const child = announcedChild(update);
+    const known = this.sessions.has(owner) || this.children.has(owner);
+    if (child !== undefined && child !== owner && known) {
+      this.children.set(child, owner);
+      host.onSubagentUpdate?.(this.subagentEvent(child, owner, update));
+      return this.children.has(owner);
+    }
+    const parent = this.children.get(owner);
+    if (parent === undefined) {
+      return false;
+    }
+    host.onSubagentUpdate?.(this.subagentEvent(owner, parent, update));
+    return true;
+  }
+
+  private subagentEvent(
+    sessionId: string,
+    parentSessionId: string,
+    update: AcpSessionNotification['update'],
+  ): AcpSubagentEvent {
+    return {
+      sessionId,
+      parentSessionId,
+      update,
+      cancel: async () => {
+        await this.agent.cancel({
+          sessionId,
+        });
+      },
+    };
+  }
+
   /** The sink the client hands every `session/update` notification. */
   get sink(): NotificationSink {
     return (notification) => {
@@ -485,6 +571,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
       this.agent.newSession({
         cwd: opts.cwd,
         mcpServers: this.sessionMcpServers(opts.mcpServers),
+        ...this.sessionFields(opts),
       }),
       this.watch.death,
     ]);
@@ -509,6 +596,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         capability: 'loadSession',
       });
     }
+    const fields = this.sessionFields(opts);
     // Register before the call: `session/load` replays the conversation through
     // `session/update` notifications, which must not be dropped on the floor.
     const session = this.track(
@@ -528,6 +616,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         sessionId: opts.sessionId,
         cwd: opts.cwd,
         mcpServers: this.sessionMcpServers(opts.mcpServers),
+        ...fields,
       }),
       this.watch.death,
     ]);
@@ -539,6 +628,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
 
   async close(): Promise<void> {
     this.sessions.clear();
+    this.children.clear();
     // Reject anything still in flight first. Once the transport is down
     // nothing can answer it, so a pending request would hang forever.
     this.watch.shutdown();
@@ -573,6 +663,73 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
           ]
         : []),
     ]);
+  }
+
+  /**
+   * The step's `_meta` and system prompt for a session request. The prompt
+   * goes as the protocol's `systemPrompt` when the agent advertises the mode,
+   * else through the agent's fallback `_meta`; with neither it is refused
+   * rather than dropped. The step's `_meta` keys win over the fallback's.
+   */
+  private sessionFields(opts: AcpNewSessionOptions): SessionFields {
+    const prompt = opts.systemPrompt;
+    let native: acp.SystemPrompt | undefined;
+    let fallback: Record<string, unknown> | undefined;
+    if (prompt) {
+      const mode = prompt.mode ?? 'append';
+      if (this.advertisesSystemPrompt(mode)) {
+        native = {
+          mode,
+          content: [
+            {
+              type: 'text',
+              text: prompt.text,
+            },
+          ],
+        };
+      } else {
+        fallback = this.systemPromptMeta?.({
+          text: prompt.text,
+          mode,
+        });
+        if (!fallback) {
+          throw new AcpCapabilityError({
+            agentId: this.agentId,
+            capability:
+              mode === 'override'
+                ? 'sessionCapabilities.systemPrompt.mode.override'
+                : 'sessionCapabilities.systemPrompt',
+          });
+        }
+      }
+    }
+    const meta =
+      fallback || opts.meta
+        ? {
+            ...fallback,
+            ...opts.meta,
+          }
+        : undefined;
+    return {
+      ...(meta
+        ? {
+            _meta: meta,
+          }
+        : {}),
+      ...(native
+        ? {
+            systemPrompt: native,
+          }
+        : {}),
+    };
+  }
+
+  private advertisesSystemPrompt(mode: 'append' | 'override'): boolean {
+    const capability = this.agentCapabilities.sessionCapabilities?.systemPrompt;
+    if (!capability) {
+      return false;
+    }
+    return mode === 'append' || Boolean(capability.mode?.override);
   }
 
   /** Reject HTTP/SSE MCP transports the agent never advertised support for. */
@@ -624,6 +781,7 @@ export async function openAcpConnection(
   // policy and event sink to whichever step opened the connection, silently
   // ignoring the configuration of every step that later reuses the session.
   let sink: NotificationSink | undefined;
+  let connection: AcpAgentConnectionImpl | undefined;
   const host = opts.host;
 
   const client = new NoeticAcpClient({
@@ -635,6 +793,11 @@ export async function openAcpConnection(
   // so without this a dead agent leaves every request hanging forever.
   const watch = watchTransport(opts.agentId, opts.transport, opts.signal);
   const notify = (notification: AcpSessionNotification): void => {
+    // A subagent's own updates go to the host's subagent handler, never to
+    // the step's output or turn.
+    if (connection?.divertsChild(notification, host)) {
+      return;
+    }
     sink?.(notification);
     host.onSessionUpdate(notification);
   };
@@ -662,7 +825,7 @@ export async function openAcpConnection(
     });
   }
 
-  const connection = new AcpAgentConnectionImpl(
+  connection = new AcpAgentConnectionImpl(
     opts.agentId,
     agent,
     opts.transport,
@@ -675,6 +838,7 @@ export async function openAcpConnection(
     opts.reattach,
     opts.reattached === true,
   );
+  connection.systemPromptMeta = opts.systemPromptMeta;
   sink = connection.sink;
   return connection;
 }

@@ -197,6 +197,10 @@ export class KeeperLink {
   private readonly encoder = new TextEncoder();
   private closed = false;
   private stopping?: Promise<void>;
+  /** Where the agent's stderr goes. Default: this process's stderr. */
+  onStderr: (chunk: string) => void = (chunk) => {
+    process.stderr.write(chunk);
+  };
 
   constructor(
     private readonly socket: net.Socket,
@@ -356,7 +360,7 @@ export class KeeperLink {
       return;
     }
     if (message.keeper === 'stderr') {
-      process.stderr.write(message.data);
+      this.onStderr(message.data);
       return;
     }
     const waiter = this.waiters.get(message.id);

@@ -39,6 +39,7 @@
       "@noetic-tools/acp": ["../acp/src/index.ts"],
       "@noetic-tools/acp/server": ["../acp/src/server.ts"],
       "@noetic-tools/acp/remote": ["../acp/src/remote.ts"],
+      "@noetic-tools/acp/stdio": ["../acp/src/stdio.ts"],
       "@noetic-tools/eval": ["../eval/src/index.ts"],
       "@noetic/plugin-powerline": ["../plugin-powerline/src/index.tsx"],
       "@noetic/plugin-design-deck": ["../plugin-design-deck/src/index.tsx"]

@@ -1435,3 +1435,222 @@ describe('executeAcpAgent — session/load replay (#100)', () => {
     expect(raw.every((e) => e.data.replay === true)).toBe(true);
   });
 });
+
+describe('executeAcpAgent host features', () => {
+  it('passes sessionMeta and a string systemPrompt to newSession', async () => {
+    const { ctx } = harnessCtx();
+    const opened: AcpNewSessionOptions[] = [];
+    await execute(
+      step.acpAgent({
+        id: 'settings',
+        agent: fakeAgent({
+          onNewSession: (opts) => opened.push(opts),
+        }),
+        prompt: 'go',
+        sessionMeta: {
+          vendor: {
+            flag: true,
+          },
+        },
+        systemPrompt: 'rules',
+      }),
+      undefined,
+      ctx,
+    );
+    expect(opened[0]?.meta).toEqual({
+      vendor: {
+        flag: true,
+      },
+    });
+    expect(opened[0]?.systemPrompt).toEqual({
+      text: 'rules',
+      mode: 'append',
+    });
+  });
+
+  it('drops a blank systemPrompt', async () => {
+    const { ctx } = harnessCtx();
+    const opened: AcpNewSessionOptions[] = [];
+    await execute(
+      step.acpAgent({
+        id: 'blank',
+        agent: fakeAgent({
+          onNewSession: (opts) => opened.push(opts),
+        }),
+        prompt: 'go',
+        systemPrompt: {
+          text: '   ',
+          mode: 'override',
+        },
+      }),
+      undefined,
+      ctx,
+    );
+    expect(opened[0]?.systemPrompt).toBeUndefined();
+    expect(opened[0]?.meta).toBeUndefined();
+  });
+
+  it('binds onElicitation and onSubagentUpdate to the step and advertises both', async () => {
+    const { ctx } = harnessCtx();
+    let host: AcpClientHost | undefined;
+    const subagentSteps: string[] = [];
+    await execute(
+      step.acpAgent({
+        id: 'hooks',
+        agent: fakeAgent({
+          onConnect: (connected) => {
+            host = connected;
+          },
+        }),
+        prompt: 'go',
+        onElicitation: async (_request, _ctx, info) => ({
+          action: 'accept',
+          content: {
+            step: info.stepId,
+          },
+        }),
+        onSubagentUpdate: (_event, _ctx, info) => {
+          subagentSteps.push(info.stepId);
+        },
+      }),
+      undefined,
+      ctx,
+    );
+    assert(host);
+    expect(host.capabilities).toEqual({
+      elicitation: true,
+      subagents: true,
+    });
+    assert(host.onElicitation);
+    expect(
+      await host.onElicitation({
+        mode: 'form',
+        sessionId: 's',
+        message: 'q',
+        requestedSchema: {
+          type: 'object',
+          properties: {},
+        },
+      }),
+    ).toEqual({
+      action: 'accept',
+      content: {
+        step: 'hooks',
+      },
+    });
+    host.onSubagentUpdate?.({
+      sessionId: 'child',
+      parentSessionId: 's',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: {
+          type: 'text',
+          text: 'x',
+        },
+      },
+      cancel: async () => undefined,
+    });
+    expect(subagentSteps).toEqual([
+      'hooks',
+    ]);
+  });
+
+  it('an explicit capability config wins over the hook default', async () => {
+    const { ctx } = harnessCtx();
+    let host: AcpClientHost | undefined;
+    await execute(
+      step.acpAgent({
+        id: 'withdrawn',
+        agent: fakeAgent({
+          onConnect: (connected) => {
+            host = connected;
+          },
+        }),
+        prompt: 'go',
+        clientCapabilities: {
+          elicitation: false,
+        },
+        onElicitation: async () => ({
+          action: 'decline',
+        }),
+      }),
+      undefined,
+      ctx,
+    );
+    expect(host?.capabilities).toEqual({
+      elicitation: false,
+    });
+  });
+
+  it('a reused session with different sessionMeta is a conflict', async () => {
+    const { ctx, harness } = harnessCtx();
+    const agent = fakeAgent();
+    const opts = {
+      agent,
+      prompt: 'go',
+      session: {
+        reuse: 'meta',
+        keepAlive: 'run' as const,
+      },
+    };
+    await execute(
+      step.acpAgent({
+        ...opts,
+        id: 'a',
+        sessionMeta: {
+          v: 1,
+        },
+      }),
+      undefined,
+      ctx,
+    );
+    const error = await execute(
+      step.acpAgent({
+        ...opts,
+        id: 'b',
+        sessionMeta: {
+          v: 2,
+        },
+      }),
+      undefined,
+      ctx,
+    ).catch((e: unknown) => e);
+    await harness.closeAcpSessions();
+    assert(isNoeticConfigError(error));
+    expect(error.code).toBe('ACP_SESSION_SETTING_CONFLICT');
+    expect(error.message).toContain('sessionMeta');
+  });
+
+  it('a reused session whose later step adds a hook needs the capability it was opened with', async () => {
+    const { ctx, harness } = harnessCtx();
+    const agent = fakeAgent();
+    const opts = {
+      agent,
+      prompt: 'go',
+      session: {
+        reuse: 'caps',
+        keepAlive: 'run' as const,
+      },
+    };
+    await execute(
+      step.acpAgent({
+        ...opts,
+        id: 'a',
+      }),
+      undefined,
+      ctx,
+    );
+    const error = await execute(
+      step.acpAgent({
+        ...opts,
+        id: 'b',
+        onSubagentUpdate: () => undefined,
+      }),
+      undefined,
+      ctx,
+    ).catch((e: unknown) => e);
+    await harness.closeAcpSessions();
+    assert(isNoeticConfigError(error));
+    expect(error.code).toBe('ACP_SESSION_CAPABILITY_CONFLICT');
+  });
+});

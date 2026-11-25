@@ -15,6 +15,7 @@
  */
 
 import type { AcpAgent, AcpMachineFactory, AcpTransportFactory } from '@noetic-tools/types';
+import type { SystemPromptMeta } from './connection';
 import { defineAcpAgent } from './define';
 import type { AcpToolWiring } from './tool-bridge';
 import {
@@ -134,11 +135,13 @@ function preset({
   base,
   opts = {},
   wiring,
+  systemPromptMeta,
 }: {
   agentId: string;
   base: AcpProcessSpec;
   opts?: AcpPresetOptions;
   wiring: AcpToolWiring;
+  systemPromptMeta?: SystemPromptMeta;
 }): AcpAgent {
   const spec: AcpProcessSpec = {
     command: opts.command ?? base.command,
@@ -166,10 +169,24 @@ function preset({
         }),
     env: spec.env,
     tools: wiring,
+    systemPromptMeta,
   });
 }
 
 //#endregion
+
+/**
+ * claude-agent-acp's own system prompt extension, read by bridges that predate
+ * `sessionCapabilities.systemPrompt`: append mode only.
+ */
+const claudeSystemPromptMeta: SystemPromptMeta = (prompt) =>
+  prompt.mode === 'append'
+    ? {
+        systemPrompt: {
+          append: prompt.text,
+        },
+      }
+    : undefined;
 
 //#region Presets
 
@@ -184,6 +201,7 @@ export function claudeCode(opts: AcpPresetOptions = {}): AcpAgent {
     base: PRESET_COMMANDS['claude-code'],
     opts,
     wiring: claudeToolWiring,
+    systemPromptMeta: claudeSystemPromptMeta,
   });
 }
 

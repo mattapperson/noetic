@@ -215,6 +215,21 @@ export class AcpEventBridge {
               reportedUsage: result.reportedUsage,
             }
           : {}),
+        ...(result.currentModeId
+          ? {
+              currentModeId: result.currentModeId,
+            }
+          : {}),
+        ...(result.configOptions
+          ? {
+              configOptions: result.configOptions,
+            }
+          : {}),
+        ...(result.responseMeta
+          ? {
+              responseMeta: result.responseMeta,
+            }
+          : {}),
       });
       this.completed = true;
     }
