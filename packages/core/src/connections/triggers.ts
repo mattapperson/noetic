@@ -248,6 +248,8 @@ export class TriggerRunner {
    * a queued one (spec 35 § Triggers).
    */
   private readonly threads = new Map<string, Promise<void>>();
+  /** Events being stored right now, whose turns do not exist yet. */
+  private handling = 0;
 
   constructor(private readonly options: TriggerRunnerOptions) {
     for (const trigger of options.triggers) {
@@ -388,7 +390,7 @@ export class TriggerRunner {
       ]);
       const due = await this.nextDue();
       const overdue = due !== undefined && due <= now() && Date.now() < giveUpAt;
-      if (!overdue && this.threads.size === 0) {
+      if (!overdue && this.threads.size === 0 && this.handling === 0) {
         return;
       }
       await wait(DUE_POLL_MS, this.controller.signal);
@@ -541,11 +543,16 @@ export class TriggerRunner {
         break;
       }
       if (message.type === 'event') {
+        // In hand from here: storing the event and saying when the next is due come
+        // before its turn exists, and `idle()` must not take that gap for rest.
+        this.handling += 1;
         try {
           await this.handle(trigger, message.event);
         } catch (e) {
           message.stored?.(e);
           throw e;
+        } finally {
+          this.handling -= 1;
         }
         message.stored?.();
         continue;

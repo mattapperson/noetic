@@ -29,7 +29,7 @@ import { spawn } from './spawn-builder';
 import { runCode } from './step-builders';
 import { everyDocumentItem } from './workflow-custom-items';
 import type { HydrationContext } from './workflow-hydrator';
-import { hydrateWorkflow } from './workflow-hydrator';
+import { hydrateWorkflow, noteFlowSource } from './workflow-hydrator';
 
 //#region Types
 
@@ -162,6 +162,13 @@ export function workflow<
       }
       return outputText(await executeStep(cached.step, input, ctx));
     },
+  });
+  // The step hydrates when it first runs. What it will run is known now.
+  noteFlowSource(step, {
+    document:
+      opts.document === undefined ? undefined : frameworkCast<WorkflowDocument>(opts.document),
+    ref: opts.ref,
+    workflows: opts.workflows,
   });
   return frameworkCast<TypedWorkflowStep<D, M>>(step);
 }

@@ -196,13 +196,23 @@ function dayMatches(schedule: CronSchedule, parts: ZonedParts): boolean {
   return dayOk || weekdayOk;
 }
 
-/** Minutes to skip from a non-matching time: to the next hour or the next day where possible. */
+/** More minutes than any clock change takes out of a day. */
+const CLOCK_CHANGE_MARGIN = 180;
+
+/**
+ * Minutes to skip from a non-matching time: to the next hour, or towards the next
+ * day. A day the clocks go forward in is shorter than 24 hours, so a skip of "the
+ * rest of today" would land past the next midnight and miss a run at it. The skip
+ * stops short of midnight by more than any clock change, and goes on by the hour.
+ */
 function skipMinutes(schedule: CronSchedule, parts: ZonedParts): number {
+  const toNextHour = 60 - parts.minute;
   if (!schedule.months.has(parts.month) || !dayMatches(schedule, parts)) {
-    return (23 - parts.hour) * 60 + (60 - parts.minute);
+    const toMidnight = (23 - parts.hour) * 60 + toNextHour;
+    return toMidnight > CLOCK_CHANGE_MARGIN ? toMidnight - CLOCK_CHANGE_MARGIN : toNextHour;
   }
   if (!schedule.hours.has(parts.hour)) {
-    return 60 - parts.minute;
+    return toNextHour;
   }
   return 1;
 }

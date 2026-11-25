@@ -112,6 +112,8 @@ const SessionRecordSchema = z.object({
           'next-turn',
         ]),
         enqueuedAt: z.number(),
+        /** The `resourceId` it was sent with: the one option storage can hold. */
+        resourceId: z.string().optional(),
       }),
     )
     .optional(),

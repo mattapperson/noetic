@@ -204,8 +204,14 @@ export class TurnLease implements LedgerFence {
   static async take(
     opts: TurnLeaseOptions,
     threadId: string,
-    signal?: AbortSignal,
+    wait?: {
+      /** Ends the wait for a lease held elsewhere. */
+      signal?: AbortSignal;
+      /** A term the new one must be above: what the thread's record was last written at. */
+      above?: number;
+    },
   ): Promise<TurnLease> {
+    const signal = wait?.signal;
     let stored = await readLease(opts.storage, threadId);
     let now = opts.now();
     const giveUpAt = Date.now() + opts.waitMs;
@@ -231,7 +237,7 @@ export class TurnLease implements LedgerFence {
       now = opts.now();
     }
     const next: LeaseRecord = {
-      term: nextTerm(stored, now),
+      term: Math.max(nextTerm(stored, now), (wait?.above ?? 0) + 1),
       holder: opts.holder,
       heldUntil: now + opts.ttlMs,
     };

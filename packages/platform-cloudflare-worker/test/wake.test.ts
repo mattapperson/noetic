@@ -167,6 +167,7 @@ for (const [name, make] of Object.entries(storages)) {
       const earlyWake = alarmWake({
         harness: early,
         alarms: alarm,
+        now: () => w.clock.t,
       });
       expect(await earlyWake.alarm()).toEqual([]);
       expect(alarm.at).toBe(1e6 + DAY);
@@ -180,6 +181,7 @@ for (const [name, make] of Object.entries(storages)) {
       const wake = alarmWake({
         harness: second,
         alarms: alarm,
+        now: () => w.clock.t,
       });
       expect(await wake.alarm()).toEqual([
         't',
@@ -598,10 +600,37 @@ describe('a turn another Worker still holds', () => {
     await alarmWake({
       harness: second,
       alarms: alarm,
+      now: () => w.clock.t,
     }).alarm();
     // Nothing could be woken yet, and the alarm is not dropped: it comes back
     // when the lease is free, not in a tight loop before then.
     expect(alarm.at).toBe(w.clock.t + 3e4);
     await second.close();
+  });
+});
+
+describe('an alarm pass that leaves something due', () => {
+  it('sets the next alarm ahead, never in the past where it would fire at once', async () => {
+    const alarm = fakeAlarm();
+    const clock = {
+      t: 5e6,
+    };
+    // Due an hour ago, and no pass changes that: a schedule whose source will not deliver.
+    const stuck: Parameters<typeof alarmWake>[0]['harness'] = {
+      start: async () => {},
+      wake: async () => [],
+      waitForIdle: async () => {},
+      getNextWakeTime: async () => clock.t - HOUR,
+      onWakeTimeChange: () => () => {},
+    };
+    await alarmWake({
+      harness: stuck,
+      alarms: alarm,
+      now: () => clock.t,
+    }).alarm();
+    assert(alarm.at !== undefined);
+    expect(alarm.at).toBeGreaterThan(clock.t);
+    // Soon enough to pick the work up when it can be done.
+    expect(alarm.at).toBeLessThanOrEqual(clock.t + 6e4);
   });
 });

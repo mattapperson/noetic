@@ -411,7 +411,7 @@ for (const turn of await harness.listStuckRuns()) {
 | `restart` | Forget what the turn recorded and run it from the top. Every step runs again, effects included. |
 | `abandon` | Drop the turn. Its trail is kept. |
 
-To keep an effect step matching across edits, give it a [`replayKey`](#replay-identity). A harness running a [JSON workflow](/docs/framework/json-runtime) needs no `version`: it defaults to a hash of the document, so an edited document is a new version. Any other flow without a `version` behaves as before: a resumed turn discards whatever no longer matches and runs it again.
+To keep an effect step matching across edits, give it a [`replayKey`](#replay-identity). A harness whose `agentGraph` runs a [JSON workflow](/docs/framework/json-runtime) needs no `version`: it defaults to a hash of every document in the graph (`hydrateWorkflow`, `workflow({ document })`, `workflow({ ref })`, alone or among other steps) and of the named workflows they can refer to, so an edited document or subflow is a new version. Key order does not matter. A document you run yourself with `parseAndRunWorkflow` is not covered: set `version`. Any other flow without a `version` behaves as before: a resumed turn discards whatever no longer matches and runs it again.
 
 ### The Trail
 

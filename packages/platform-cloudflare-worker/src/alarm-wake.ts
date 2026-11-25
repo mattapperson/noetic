@@ -29,7 +29,15 @@ export interface AlarmWakeOptions {
   harness: WakeableHarness;
   /** The object's storage: `ctx.storage`. */
   alarms: AlarmStorageLike;
+  /** The clock the harness runs on, when it is not `Date.now`. */
+  now?: () => number;
 }
+
+/**
+ * How long until the alarm tries again when, after a whole pass, something is still
+ * due that the pass could not do: a schedule's event its source did not deliver.
+ */
+const RETRY_MS = 3e4;
 
 /** @public What `alarmWake` returns. */
 export interface AlarmWake {
@@ -98,7 +106,11 @@ export function alarmWake(options: AlarmWakeOptions): AlarmWake {
       await harness.waitForIdle();
       // The alarm that fired is spent. Set it again even when the time did not
       // change, as when it fired early and nothing was due.
-      await set(await harness.getNextWakeTime());
+      const next = await harness.getNextWakeTime();
+      const now = (options.now ?? Date.now)();
+      // Still due after a pass that did all it could: an alarm set in the past
+      // fires at once, and the object would spin. Try again in a while.
+      await set(next !== undefined && next <= now ? now + RETRY_MS : next);
       return woken;
     },
   };

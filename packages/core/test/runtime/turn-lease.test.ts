@@ -406,7 +406,9 @@ describe('TurnLease against a bad clock or slow storage', () => {
           waitMs: 5e3,
         },
         't',
-        abort.signal,
+        {
+          signal: abort.signal,
+        },
       ),
     );
     // Told to stop is not the same as losing the lease.

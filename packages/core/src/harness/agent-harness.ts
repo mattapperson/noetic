@@ -20,13 +20,12 @@ import {
   NoeticErrorImpl,
 } from '@noetic-tools/types';
 import { toStep } from '../builders/sequence';
-import { workflowDocumentOf } from '../builders/workflow-hydrator';
 import { runEvery } from '../connections/settle';
 import { pendingTasksOf, resumableWaitsOf } from '../interpreter/connection-steps';
 import { turnEndingIn } from '../interpreter/turn-ending';
 import { AcpSessionStore } from '../runtime/acp-session-store';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
-import { hashStepInput, stubOf } from '../runtime/durable/step-ledger';
+import { stubOf } from '../runtime/durable/step-ledger';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
 import { awaitApproval } from '../runtime/tool-approval';
 import { ConnectionGate } from './connection-gate';
@@ -174,6 +173,7 @@ import type {
   WriteOffSpendOptions,
 } from './deps/types';
 import { SteeringAction } from './deps/types';
+import { flowVersionOf } from './flow-version';
 import type {
   AgentHarnessOpts,
   ParkConfig,
@@ -205,6 +205,22 @@ interface Session {
   lease?: TurnLease;
   /** The `execute()` options of the turn in flight, to resume it with if it parks. */
   turnOptions?: ExecuteOptions;
+  /**
+   * The options of messages kept in storage for after a parked turn, by message
+   * id. Options hold live objects (layers, connections) storage cannot, so they
+   * wait here; a message another process picks up keeps its `resourceId` only.
+   */
+  readonly keptOptions: Map<string, ExecuteOptions>;
+}
+
+/** Keep `message` in storage for after the thread's parked turn, with its options. */
+function keepForLater(
+  session: Session,
+  record: ThreadRecord,
+  message: QueuedMessage,
+): Promise<void> {
+  session.keptOptions.set(message.id, message.options);
+  return record.keepQueued(message);
 }
 
 //#endregion
@@ -229,16 +245,6 @@ function stuckOf(error: unknown):
     from,
     to,
   };
-}
-
-/**
- * The version of a flow hydrated from a JSON workflow: a hash of its document, so
- * an edited document is a new version without the host naming one.
- */
-function documentVersion(graph: object | undefined): string | undefined {
-  const document = graph ? workflowDocumentOf(graph) : undefined;
-  const hash = document ? hashStepInput(document) : undefined;
-  return hash === undefined ? undefined : `workflow-${hash}`;
 }
 
 /** True when `execute()` was handed a list. `Array.isArray` does not narrow a readonly one. */
@@ -565,7 +571,7 @@ export class AgentHarness<
       ? this.createSpend(this.config.storage ?? createInMemoryStorage())
       : undefined;
     this.agentGraph = opts.agentGraph ? toStep(opts.agentGraph) : undefined;
-    this.version = opts.version ?? documentVersion(this.agentGraph);
+    this.version = opts.version ?? flowVersionOf(frameworkCast<Step | undefined>(this.agentGraph));
     this.harnessTools = opts.tools ?? [];
     this._contextLayers = opts.contextLayers;
     this.llm = new LlmGateway({
@@ -1132,6 +1138,7 @@ export class AgentHarness<
     };
     const session: Session = {
       accumulatedItems: [],
+      keptOptions: new Map(),
       record,
       runner: new SessionRunner({
         threadId,
@@ -1145,8 +1152,13 @@ export class AgentHarness<
           // One harness drives a thread's turn: take its lease before reading anything.
           const lease =
             record && this.leaseOptions
-              ? // Aborting the thread ends the wait for a lease held elsewhere.
-                await TurnLease.take(this.leaseOptions, threadId, session.runner.signal)
+              ? await TurnLease.take(this.leaseOptions, threadId, {
+                  // Aborting the thread ends the wait for a lease held elsewhere.
+                  signal: session.runner.signal,
+                  // A lease record that was deleted must not start again below the
+                  // term the thread's own record was last written at.
+                  above: await record.term(),
+                })
               : undefined;
           record?.hold(lease);
           session.lease = lease;
@@ -1257,7 +1269,13 @@ export class AgentHarness<
       for (const steer of (await record?.steers()) ?? []) {
         const queued = session.runner.queue.peekAll().some((m) => m.id === steer.id);
         if (!queued && !messageIds.includes(steer.id)) {
-          session.runner.queue.enqueue(steer);
+          // With the options it was sent with, when this process is the one it was sent to.
+          const options = session.keptOptions.get(steer.id) ?? steer.options;
+          session.keptOptions.delete(steer.id);
+          session.runner.queue.enqueue({
+            ...steer,
+            options,
+          });
         }
       }
       // A stuck turn the host chose to go on with may discard what no longer matches.
@@ -1280,8 +1298,17 @@ export class AgentHarness<
       }
       // Messages still queued wait in storage, not in this process: the woken
       // turn gets them back, and the runner is left with nothing to start.
+      const interrupts: QueuedMessage[] = [];
       for (const queued of session.runner.queue.drainAll()) {
-        await record.keepQueued(queued);
+        if (queued.deliveryMode === 'interrupt') {
+          interrupts.push(queued);
+          continue;
+        }
+        await keepForLater(session, record, queued);
+      }
+      // An interrupt replaces the turn, parked or not: it stays for the runner to start.
+      for (const interrupt of interrupts.reverse()) {
+        session.runner.queue.prepend(interrupt);
       }
       const until = Number.isFinite(wakeAt) ? wakeAt : undefined;
       await record.park(ctx, until);
@@ -1788,6 +1815,10 @@ export class AgentHarness<
               options,
             })
           ).length > 0,
+        parked: async (threadId) => {
+          const turn = (await this.sessionStore?.load(threadId))?.turn;
+          return turn?.parked && !turn.stuck ? turn.executionId : undefined;
+        },
         now: () => this.now(),
       },
       config.wakeDebounceMs ?? DEFAULT_WAKE_DEBOUNCE_MS,
@@ -1820,7 +1851,7 @@ export class AgentHarness<
     }
     for (const message of messages) {
       if (!turn.messageIds.includes(message.id)) {
-        await record.keepQueued(message);
+        await keepForLater(session, record, message);
       }
     }
     if (turn.parked && messages.some(isSteer)) {
@@ -1930,7 +1961,7 @@ export class AgentHarness<
     if (!turn?.parked || turn.messageIds.includes(message.id)) {
       return false;
     }
-    await record.keepQueued(message);
+    await keepForLater(session, record, message);
     if (isSteer(message)) {
       await this.wake({
         threadId: session.runner.threadId,

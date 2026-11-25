@@ -189,9 +189,11 @@ A woken turn replays its ledger, so no finished model call is made again, and it
 
 - a timer for the turn's `until`;
 - a listener on each event the turn waits for, on the same harness connection, from the cursor the wait recorded;
-- a poll, every `taskPollMs` (default 5 s), of each long operation one of its calls waits on. An operation has no event to listen for, so its state is read; the turn is woken when the state changes from the one it last woke for.
+- a poll, every `taskPollMs` (default 5 s), of each long operation one of its calls waits on. An operation has no event to listen for, so its state is read; the turn is woken when the state changes from the one it last woke for. An operation that goes back to `working` and then asks again is news again: a second question wakes the turn as the first did.
 
 Either one calls `wake({ threadId })` with the options the turn ran with. A watcher knows the event's type but not the wait's `filter`, which is code in the flow, so it wakes on any event of that type; a turn whose filter turns the event down parks again. The watcher remembers the last cursor it saw, so each event wakes the turn at most once, and it waits `wakeDebounceMs` (default 250) after the first event so a burst wakes it once.
+
+A watcher stands in for one turn. Before it wakes the thread it checks that the thread's parked turn is still that one: a turn another harness woke, which then failed or parked anew, is not woken by a watcher left over from before. When a wake cannot be done for a while (the runner is still closing the turn out) the watcher tries again, and if every try fails it goes back to watching.
 
 A watcher lives in the process. When the process ends the parked turns stay in storage, and the next process rebuilds a watcher for each one its first `wake()` finds. So a long-lived host calls `wake()` once, at boot.
 
@@ -252,7 +254,9 @@ What settling does, precisely:
 
 A decision for a thread with no stuck turn is refused with `decision_refused`. The decision is never written to the conversation, and other input passed beside it is delivered after it, so `abandon` and the next message can go in one call.
 
-A harness whose `agentGraph` is the root step `hydrateWorkflow` returned, and that names no version, takes `workflow-<hash of the document>`: editing the document is a new version, and the same document on another deploy is the same one. An explicit `version` wins.
+A harness whose `agentGraph` runs a JSON workflow, and that names no version, takes `workflow-<hash>`. The hash covers every document the graph runs: the root `hydrateWorkflow` returned, a `workflow({ document })` or `workflow({ ref })` step, and either of those as one step of several or nested inside other steps. It also covers the named workflows those were given, since a subflow `ref` runs one of them. Keys are sorted before hashing, so the same document is the same version whatever order its keys come back in from a database. Editing any of it is a new version. An explicit `version` wins.
+
+The named workflows are read when the harness is built. `dynamicWorkflow` and `parseAndRunWorkflow` run a document that arrives at run time, on a context the harness or the host already made, and are not versioned this way: a host that runs its own document with `parseAndRunWorkflow` and edits it between runs names the `version` itself.
 
 A harness with neither behaves as it did before versions: a resumed turn discards whatever no longer matches and runs it again. An entry recorded under no version never makes a turn stuck.
 

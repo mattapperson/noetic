@@ -243,3 +243,98 @@ describe('harness.onWakeTimeChange()', () => {
     await harness.close();
   });
 });
+
+describe('waitForIdle() and a tick that is being taken in', () => {
+  it('waits for the turn of a tick whose wake-time listener is slow', async () => {
+    // Regression: between storing a tick and starting its turn, the runner tells
+    // the wake-time listeners. With a listener that takes time (setting an alarm
+    // is a storage write), idle saw no turn yet and returned.
+    const storage = createInMemoryStorage();
+    await storage.set(CURSOR_KEY, new Date(minuteAgo(1)).toISOString());
+    const ticks: string[] = [];
+    const harness = everyMinute(storage, ticks);
+    harness.onWakeTimeChange(() => new Promise((resolve) => setTimeout(resolve, 60)));
+
+    await harness.start();
+    await harness.waitForIdle();
+    expect(ticks.length).toBeGreaterThanOrEqual(1);
+    await harness.close();
+  });
+});
+
+describe('two triggers on one cron()', () => {
+  it('each gets the ticks it missed, whichever of them was further behind', async () => {
+    const storage = createInMemoryStorage();
+    const cursorKey = (id: string): string => `noetic/connections/triggers/${id}/cursor`;
+    // Listed first, and up to date but for one tick. The second missed three.
+    await storage.set(cursorKey('recent'), new Date(minuteAgo(1)).toISOString());
+    await storage.set(cursorKey('behind'), new Date(minuteAgo(3)).toISOString());
+    const turns: string[] = [];
+    const harness = new AgentHarness({
+      name: 'schedule',
+      params: {},
+      agentGraph: agent,
+      connections: {
+        clock: cron('* * * * *'),
+      },
+      triggers: [
+        'recent',
+        'behind',
+      ].map((id) => ({
+        id,
+        connection: 'clock',
+        event: 'tick',
+        input: `"${id} " & event.payload.scheduledFor`,
+        thread: `"${id}:" & event.id`,
+      })),
+      environment: {
+        storage: {
+          adapter: storage,
+        },
+      },
+      _testCallModel: async (request) => {
+        turns.push(JSON.stringify(request));
+        return {
+          items: [
+            assistantMessage('done'),
+          ],
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+          },
+        };
+      },
+    });
+    await harness.start();
+    const started = Date.now();
+    await harness.waitForIdle();
+    // It did not sit out the wait for an event that was never coming.
+    expect(Date.now() - started).toBeLessThan(5e3);
+    const of = (id: string): number => turns.filter((turn) => turn.includes(`${id} 20`)).length;
+    expect(of('recent')).toBeGreaterThanOrEqual(1);
+    expect(of('behind')).toBeGreaterThanOrEqual(3);
+    // Nothing is left overdue, so a host's alarm is not set in the past.
+    const next = await harness.getNextWakeTime();
+    assert(next !== undefined);
+    expect(next).toBeGreaterThan(Date.now() - 1e3);
+    await harness.close();
+  });
+});
+
+describe('a cron trigger that fell further behind than a restart replays', () => {
+  it('starts again from now, and its next wake time is ahead', async () => {
+    const storage = createInMemoryStorage();
+    // Two days of minutes missed: more than the thousand a restart replays.
+    await storage.set(CURSOR_KEY, new Date(minuteAgo(2 * 24 * 60)).toISOString());
+    const ticks: string[] = [];
+    const harness = everyMinute(storage, ticks);
+    await harness.start();
+    const next = await harness.getNextWakeTime();
+    assert(next !== undefined);
+    // The schedule agrees with the source: nothing is due that will not be delivered.
+    expect(next).toBeGreaterThan(Date.now() - 1e3);
+    await harness.waitForIdle();
+    expect(ticks.length).toBeLessThan(3);
+    await harness.close();
+  });
+});

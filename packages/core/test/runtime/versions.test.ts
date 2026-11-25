@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { callModel, invokeTool, runCode } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
 import { hydrateWorkflow } from '../../src/builders/workflow-hydrator';
+import { workflow } from '../../src/builders/workflow-step';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import { assistantMessage, makeMessage } from '../_helpers';
@@ -394,18 +395,28 @@ describe('a harness running a JSON workflow', () => {
     },
   });
 
+  const hydrated = (doc: WorkflowDocument): ReturnType<typeof hydrateWorkflow> =>
+    hydrateWorkflow(doc, {
+      tools: new Map(),
+      // A one-node document runs no child step.
+      executeStep: async () => expect.unreachable('the document has no child step'),
+    });
+
   /** The version the harness stamps on what a turn records. */
-  async function versionOf(doc: WorkflowDocument, version?: string): Promise<string | undefined> {
+  function versionOf(doc: WorkflowDocument, version?: string): Promise<string | undefined> {
+    return versionOfGraph(hydrated(doc), version);
+  }
+
+  async function versionOfGraph(
+    agentGraph: ConstructorParameters<typeof AgentHarness>[0]['agentGraph'],
+    version?: string,
+  ): Promise<string | undefined> {
     const m = model('a');
     const harness = new AgentHarness({
       name: 'versions',
       params: {},
       version,
-      agentGraph: hydrateWorkflow(doc, {
-        tools: new Map(),
-        // A one-node document runs no child step.
-        executeStep: async () => expect.unreachable('the document has no child step'),
-      }),
+      agentGraph,
       environment: {
         storage: {
           adapter: createInMemoryStorage(),
@@ -427,6 +438,91 @@ describe('a harness running a JSON workflow', () => {
     // The same document is the same version; an edited one is another.
     expect(await versionOf(document('Be brief.'))).toBe(first);
     expect(await versionOf(document('Be thorough.'))).not.toBe(first);
+  });
+
+  it('is the same version however the keys of the document are ordered', async () => {
+    // A document that went through a database comes back with its keys reordered.
+    const reordered: WorkflowDocument = {
+      root: {
+        instructions: 'Be brief.',
+        model: 'test/model',
+        id: 'answer',
+        kind: 'callModel',
+      },
+      version: 1,
+    };
+    expect(await versionOf(reordered)).toBe(await versionOf(document('Be brief.')));
+  });
+
+  it('has a version when the document is one step of several', async () => {
+    const before = runCode<ContextData, string, string>({
+      id: 'before',
+      execute: async (input) => input,
+    });
+    const versionWith = (prompt: string): Promise<string | undefined> =>
+      versionOfGraph([
+        before,
+        hydrated(document(prompt)),
+      ]);
+    const first = await versionWith('Be brief.');
+    assert(first?.startsWith('workflow-'));
+    expect(await versionWith('Be thorough.')).not.toBe(first);
+  });
+
+  it('has a version when the flow is a workflow() step, inline or by name', async () => {
+    const inline = (prompt: string): Promise<string | undefined> =>
+      versionOfGraph(
+        workflow({
+          id: 'flow',
+          document: document(prompt),
+        }),
+      );
+    const first = await inline('Be brief.');
+    assert(first?.startsWith('workflow-'));
+    expect(await inline('Be thorough.')).not.toBe(first);
+
+    const named = (prompt: string): Promise<string | undefined> =>
+      versionOfGraph(
+        workflow({
+          id: 'flow',
+          ref: 'answer',
+          workflows: new Map([
+            [
+              'answer',
+              document(prompt),
+            ],
+          ]),
+        }),
+      );
+    const byName = await named('Be brief.');
+    assert(byName?.startsWith('workflow-'));
+    expect(await named('Be thorough.')).not.toBe(byName);
+  });
+
+  it('is a new version when a named subflow the document refers to is edited', async () => {
+    const parent: WorkflowDocument = {
+      version: 1,
+      root: {
+        kind: 'callModel',
+        id: 'answer',
+        model: 'test/model',
+        instructions: 'Be brief.',
+      },
+    };
+    const withChild = (prompt: string): Promise<string | undefined> =>
+      versionOfGraph(
+        hydrateWorkflow(parent, {
+          tools: new Map(),
+          executeStep: async () => expect.unreachable('the document has no child step'),
+          workflows: new Map([
+            [
+              'child',
+              document(prompt),
+            ],
+          ]),
+        }),
+      );
+    expect(await withChild('Refund.')).not.toBe(await withChild('Refund twice.'));
   });
 
   it('keeps the version the host names', async () => {

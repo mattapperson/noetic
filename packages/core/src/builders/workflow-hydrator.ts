@@ -491,21 +491,40 @@ export function hydrateWorkflow(
     ...root.customItems,
   };
   recordDocumentConnections(frameworkCast<Step>(root), doc, ctx.mcp);
-  documents.set(root, doc);
+  noteFlowSource(root, {
+    document: doc,
+    workflows: ctx.workflows,
+  });
   return root;
 }
 
-/** The document each hydrated root step came from. */
-const documents = new WeakMap<object, WorkflowDocument>();
+/**
+ * @internal
+ * Where a step's flow comes from: the document it runs, or the name it looks one
+ * up by, and the named workflows its subflow refs resolve against.
+ */
+export interface FlowSource {
+  readonly document?: WorkflowDocument;
+  readonly ref?: string;
+  readonly workflows?: ReadonlyMap<string, WorkflowDocument>;
+}
+
+/** The source of each step that runs a JSON workflow. */
+const flowSources = new WeakMap<object, FlowSource>();
+
+/** @internal Note that `step` runs the flow `source` describes. */
+export function noteFlowSource(step: object, source: FlowSource): void {
+  flowSources.set(step, source);
+}
 
 /**
  * @internal
- * The document `step` was hydrated from, when it is the root of one. A harness
- * given such a step and no `version` names its flow by the document's hash
- * (spec 23 § Versions).
+ * The flow `step` runs, when it runs a JSON workflow: a hydrated root, or a
+ * `workflow()` step. A harness given such a step and no `version` names its flow
+ * by a hash of it (spec 23 § Versions).
  */
-export function workflowDocumentOf(step: object): WorkflowDocument | undefined {
-  return documents.get(step);
+export function flowSourceOf(step: object): FlowSource | undefined {
+  return flowSources.get(step);
 }
 
 //#endregion

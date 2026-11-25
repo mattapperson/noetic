@@ -459,7 +459,14 @@ describe('a parked turn', () => {
       park: false,
     });
     await holder.execute('hello', delivery);
-    for (let i = 0; i < 500 && !(await fixture.storage.get('turn-lease:t')); i += 1) {
+    // Until the turn is on record and its lease is held.
+    const turnOnRecord = async (): Promise<boolean> => {
+      const stored = await fixture.storage.get<{
+        turn?: object;
+      }>('session:t');
+      return stored?.turn !== undefined && (await fixture.storage.get('turn-lease:t')) !== null;
+    };
+    for (let i = 0; i < 500 && !(await turnOnRecord()); i += 1) {
       await tick(1);
     }
 
@@ -467,8 +474,18 @@ describe('a parked turn', () => {
       ...fixture,
       m: model('b'),
     });
+    // A routine wake passes over it.
     expect(await other.wake()).toEqual([]);
-    expect(await other.wake(scope)).toEqual([]);
+    // Asked for by name, the wake goes for the turn, cannot have it, and says so:
+    // the caller hears `lease_lost` rather than "there was nothing to wake".
+    expect(await other.wake(scope)).toEqual([
+      't',
+    ]);
+    const refused = await other.getAgentResponse(scope).then(
+      () => 'answered',
+      (error: unknown) => (isNoeticError(error) ? error.noeticError.kind : 'threw'),
+    );
+    expect(refused).toBe('lease_lost');
 
     fixture.mailbox.push('go on');
     const response = await holder.getAgentResponse(scope);

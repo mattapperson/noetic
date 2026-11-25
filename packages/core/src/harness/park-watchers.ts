@@ -50,6 +50,8 @@ export interface ParkWatcherHost {
   taskState(task: ParkedTask, signal: AbortSignal): Promise<string | undefined>;
   /** Resume the thread's turn. Resolves false when it could not be resumed just now. */
   wake(threadId: string, options: ExecuteOptions): Promise<boolean>;
+  /** The execution of the turn the thread has parked now, or undefined when it has none. */
+  parked(threadId: string): Promise<string | undefined>;
   now(): number;
 }
 
@@ -80,6 +82,25 @@ const WAKE_RETRY_MS = 20;
 
 //#endregion
 
+//#region Helpers
+
+/** Resolves after `ms`, or as soon as `signal` aborts. Leaves no listener behind. */
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done, {
+      once: true,
+    });
+  });
+}
+
+//#endregion
+
 //#region ParkWatchers
 
 /** One harness's watchers, by thread. */
@@ -87,6 +108,8 @@ export class ParkWatchers {
   private readonly watchers = new Map<string, Watcher>();
   /** The last cursor seen for a wait, so a turn that parks again does not see it twice. */
   private readonly seen = new Map<string, string>();
+  /** The harness closed: a wake still being tried is given up. */
+  private closed = false;
 
   constructor(
     private readonly host: ParkWatcherHost,
@@ -101,6 +124,7 @@ export class ParkWatchers {
 
   /** Watch over a turn that just parked, or that storage says is parked. */
   watch(threadId: string, turn: ParkedTurn): void {
+    this.closed = false;
     this.stop(threadId);
     const watcher: Watcher = {
       controller: new AbortController(),
@@ -138,6 +162,7 @@ export class ParkWatchers {
   }
 
   stopAll(): void {
+    this.closed = true;
     for (const threadId of [
       ...this.watchers.keys(),
     ]) {
@@ -223,26 +248,20 @@ export class ParkWatchers {
       for (const task of tasks) {
         const state = await this.host.taskState(task, signal);
         const key = `${turn.executionId}\u0000task\u0000${task.taskId}`;
-        if (state === undefined || state === 'working' || this.seen.get(key) === state) {
+        if (state === 'working') {
+          // Back at work: the state it left is news again the next time it comes,
+          // as when a task asks a second question.
+          this.seen.delete(key);
+          continue;
+        }
+        if (state === undefined || this.seen.get(key) === state) {
           continue;
         }
         this.seen.set(key, state);
         void this.fire(threadId, watcher, turn);
         return;
       }
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, this.taskPollMs);
-        signal.addEventListener(
-          'abort',
-          () => {
-            clearTimeout(timer);
-            resolve();
-          },
-          {
-            once: true,
-          },
-        );
-      });
+      await pause(this.taskPollMs, signal);
     }
   }
 
@@ -253,10 +272,24 @@ export class ParkWatchers {
     }
     this.stop(threadId);
     for (let attempt = 0; attempt < WAKE_ATTEMPTS; attempt += 1) {
+      // Watched over, replaced by a newer watch, or the harness closed: not ours to wake.
+      if (this.closed || this.watchers.has(threadId)) {
+        return;
+      }
+      // The turn this watcher stood in for is gone: another harness woke it, and
+      // what the thread holds now, if anything, is a different turn or the same
+      // one stopped. Waking by thread id would resume that one.
+      if ((await this.host.parked(threadId)) !== turn.executionId) {
+        return;
+      }
       if (await this.host.wake(threadId, turn.options)) {
         return;
       }
-      await new Promise((resolve) => setTimeout(resolve, WAKE_RETRY_MS));
+      await pause(WAKE_RETRY_MS);
+    }
+    // Every try failed and the turn is still parked: go on watching it, or nothing would.
+    if (!this.closed && !this.watchers.has(threadId)) {
+      this.watch(threadId, turn);
     }
   }
 }

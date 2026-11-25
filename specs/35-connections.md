@@ -440,6 +440,28 @@ empty cursor, "before the first event". This is what lets a watcher and the
 parked turn it wakes both read the same event (`23-durable-execution` § Parked
 turns).
 
+A source may emit events with no cursor. Its position is then the event's place
+in what the source has emitted in this process, a value that means nothing to
+`start` (which is given `null` for it) and nothing in another process, where it
+reads as "before everything this process emitted". So listening again from where
+a listener began replays what came since, and not what came before it.
+
+Because `start` runs once, the stream has one position: that of the first
+listener. Two durable listeners that are at different places in it (two triggers
+with different stored cursors) cannot both be given what they missed, unless the
+source has a `schedule`.
+
+**A source with a `schedule`** produces its events from time, not from a stream
+to share, so each listener gets a run of `start` of its own, from its own cursor
+(or from `schedule.begin(now)` when it has none). Two triggers on one `cron()`
+each receive every tick they missed, whichever was further behind. An event such
+a run emits goes to its listener alone; `source.emit()` from host code still
+reaches all of them.
+
+`cron()` replays at most 1000 missed ticks. A cursor further behind than that
+starts again from now, and its `schedule.next` says the same, so the time the
+schedule reports as due is always one the source will deliver.
+
 `cron(schedule, { timezone })` is a built-in source with one event, `tick`,
 delivered once per scheduled time even after downtime.
 

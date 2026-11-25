@@ -73,6 +73,11 @@ export class ThreadRecord {
     this.fence = fence;
   }
 
+  /** The lease term the stored record was last written at, when it was written under one. */
+  term(): Promise<number | undefined> {
+    return this.run(async () => (await this.load())?.term);
+  }
+
   /** The history the thread's next turn builds on: what storage holds, or none. */
   history(): Promise<Item[]> {
     return this.run(async () => this.host.parseItems((await this.load())?.items ?? []));
@@ -146,6 +151,11 @@ export class ThreadRecord {
       input: message.input,
       deliveryMode: message.deliveryMode,
       enqueuedAt: message.enqueuedAt,
+      ...(message.options.resourceId === undefined
+        ? {}
+        : {
+            resourceId: message.options.resourceId,
+          }),
     };
     return this.update((record) => ({
       ...record,
@@ -163,9 +173,14 @@ export class ThreadRecord {
         id: steer.id,
         input: this.parseInput(steer.input),
         deliveryMode: steer.deliveryMode,
-        // Options carry live objects (layers, state) that storage cannot hold; a
-        // steer applied mid-turn never reads them.
-        options: {},
+        // Options carry live objects (layers, state) that storage cannot hold. The
+        // harness the message was sent to still has them and puts them back.
+        options:
+          steer.resourceId === undefined
+            ? {}
+            : {
+                resourceId: steer.resourceId,
+              },
         enqueuedAt: steer.enqueuedAt,
       })),
     );

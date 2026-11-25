@@ -266,10 +266,10 @@ A source's `emit` rejects when no trigger is there to store the event, which is 
 
 A harness in a Worker is built with `park: { autoWake: false }`: its own timers do not outlive the request. The host picks one preset.
 
-**Alarm.** `alarmWake({ harness, alarms })`, in a Durable Object, with `alarms` the object's `ctx.storage`.
+**Alarm.** `alarmWake({ harness, alarms, now? })`, in a Durable Object, with `alarms` the object's `ctx.storage` and `now` the clock the harness runs on when it is not `Date.now`.
 
 - It listens with `harness.onWakeTimeChange()` and keeps the object's alarm at the time it hears, deleting the alarm when there is none. The host sets no alarm itself: the first is set when the harness starts, and a turn that parks does not answer until its alarm is set.
-- `alarm()`, called from the object's `alarm()` handler, calls `harness.start()`, `harness.wake()` and `harness.waitForIdle()`, then sets the alarm to `harness.getNextWakeTime()`, since the alarm that fired is spent even when the time did not change. `getNextWakeTime()` covers a turn a dead Worker was cut off in: it is due when that Worker's lease runs out, so the alarm is neither dropped nor fired in a loop before then. Starting the harness is what makes a `cron()` source deliver the ticks that fell due while nothing ran. It does not throw for a turn that failed, since a throw makes the runtime retry the alarm.
+- `alarm()`, called from the object's `alarm()` handler, calls `harness.start()`, `harness.wake()` and `harness.waitForIdle()`, then sets the alarm to `harness.getNextWakeTime()`, since the alarm that fired is spent even when the time did not change. `getNextWakeTime()` covers a turn a dead Worker was cut off in: it is due when that Worker's lease runs out, so the alarm is neither dropped nor fired in a loop before then. Starting the harness is what makes a `cron()` source deliver the ticks that fell due while nothing ran. A wake time that is still in the past after the pass (something due that this pass could not do) is not set as it is, since an alarm in the past fires at once: the alarm is set 30 seconds ahead. It does not throw for a turn that failed, since a throw makes the runtime retry the alarm.
 - `stop()` stops the listening.
 
 A `cron()` trigger therefore runs on the alarm preset as it does on Node, with the schedule written once. The package has no cron helper of its own.

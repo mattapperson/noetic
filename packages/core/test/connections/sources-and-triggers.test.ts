@@ -144,6 +144,45 @@ describe('cron schedules', () => {
     expect(cronMatches(everyMinute, Date.parse('2026-01-01T00:00:00Z'))).toBe(true);
   });
 
+  test('does not skip the run after the clocks go forward', () => {
+    // Regression: skipping "the rest of today" assumed a 24-hour day. Sunday 8 March
+    // 2026 is 23 hours long in New York, so the skip landed past Monday's midnight.
+    const mondays = parseCronSchedule('0 0 * * 1', 'America/New_York');
+    const runs: string[] = [];
+    let after = Date.parse('2026-03-02T12:00:00Z');
+    for (let i = 0; i < 4; i += 1) {
+      const next = nextCronRun(mondays, after);
+      assert(next !== undefined);
+      runs.push(new Date(next).toISOString());
+      after = next;
+    }
+    expect(runs).toEqual([
+      // Midnight is 05:00 UTC until the change, 04:00 UTC after it.
+      '2026-03-09T04:00:00.000Z',
+      '2026-03-16T04:00:00.000Z',
+      '2026-03-23T04:00:00.000Z',
+      '2026-03-30T04:00:00.000Z',
+    ]);
+  });
+
+  test('keeps to local time when the clocks go back', () => {
+    const daily = parseCronSchedule('30 9 * * *', 'America/New_York');
+    const before = nextCronRun(daily, Date.parse('2026-10-31T00:00:00Z'));
+    const onTheDay = nextCronRun(daily, Date.parse('2026-11-01T00:00:00Z'));
+    const after = nextCronRun(daily, Date.parse('2026-11-02T00:00:00Z'));
+    expect(
+      [
+        before,
+        onTheDay,
+        after,
+      ].map((ms) => new Date(ms ?? 0).toISOString()),
+    ).toEqual([
+      '2026-10-31T13:30:00.000Z',
+      '2026-11-01T14:30:00.000Z',
+      '2026-11-02T14:30:00.000Z',
+    ]);
+  });
+
   test('either day field matches when both are restricted', () => {
     const schedule = parseCronSchedule('0 0 13 * 5');
     expect(cronMatches(schedule, Date.parse('2026-02-13T00:00:00Z'))).toBe(true);
@@ -267,7 +306,109 @@ describe('defineSource', () => {
   });
 });
 
+describe('a source that emits without cursors', () => {
+  test('listening again from where a listener began replays only what came since', async () => {
+    const DoneSchema = z.object({
+      n: z.number(),
+    });
+    let emitNext: ((n: number) => Promise<void>) | undefined;
+    const source = defineSource({
+      events: {
+        done: DoneSchema,
+      },
+      async start({ emit, signal }) {
+        emitNext = (n) =>
+          emit({
+            type: 'done',
+            id: `e${n}`,
+            payload: {
+              n,
+            },
+          });
+        await new Promise((resolve) =>
+          signal.addEventListener('abort', resolve, {
+            once: true,
+          }),
+        );
+      },
+    });
+    const [connection] = await source.connect({
+      name: 'jobs',
+      signal: new AbortController().signal,
+      artifacts: createInMemoryArtifactStore(),
+    });
+    assert(connection);
+    const listen = (cursor?: string | null) =>
+      connection.listen({
+        event: 'done',
+        cursor,
+        signal: new AbortController().signal,
+      });
+    // Someone listens, and three events go by.
+    const early = listen();
+    await sleep(5);
+    assert(emitNext);
+    for (const n of [
+      1,
+      2,
+      3,
+    ]) {
+      await emitNext(n);
+    }
+    await take(early, 3);
+
+    // A wait begins now, and records where the source is.
+    const wait = listen();
+    const { cursor } = await wait.ready;
+    assert(cursor);
+    await emitNext(4);
+    await wait.close();
+
+    // It listens again from there (its turn was parked and woken): event 4 is
+    // what it missed. Events 1 to 3 came before it began.
+    const again = listen(cursor);
+    const replayed = await take(again, 1);
+    expect(replayed.map((m) => (m.type === 'event' ? m.event.id : m.type))).toEqual([
+      'e4',
+    ]);
+    await connection.release();
+  });
+});
+
 describe('cron()', () => {
+  test('two listeners each get what they missed, from their own cursors', async () => {
+    const source = cron('* * * * *');
+    const [connection] = await source.connect({
+      name: 'clock',
+      signal: new AbortController().signal,
+      artifacts: createInMemoryArtifactStore(),
+    });
+    assert(connection);
+    const minute = 6e4;
+    const ago = (minutes: number): string =>
+      new Date(Math.floor(Date.now() / minute) * minute - minutes * minute).toISOString();
+    const listen = (cursor: string) =>
+      connection.listen({
+        event: 'tick',
+        cursor,
+        signal: new AbortController().signal,
+      });
+    // The one that listens first is the one that is nearly up to date.
+    const recent = listen(ago(1));
+    const behind = listen(ago(3));
+    const ids = (messages: EventStreamMessage[]): string[] =>
+      messages.map((m) => (m.type === 'event' ? m.event.id : m.type));
+    expect(ids(await take(recent, 1))).toEqual([
+      ago(0),
+    ]);
+    expect(ids(await take(behind, 3))).toEqual([
+      ago(2),
+      ago(1),
+      ago(0),
+    ]);
+    await connection.release();
+  });
+
   test('delivers every tick missed since the cursor, each once', async () => {
     const source = cron('* * * * *');
     const [connection] = await source.connect({
