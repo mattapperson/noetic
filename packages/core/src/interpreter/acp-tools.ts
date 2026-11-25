@@ -248,7 +248,11 @@ export function mergeBridgedItems(
 
 //#endregion
 
-/** Who made a bridged call: the step's own agent, a subagent, or nobody known. */
+/**
+ * Who made a bridged call: the step's own agent, a subagent, or — for a call
+ * nobody announced in a turn with subagents — the step's until the turn ends,
+ * when a late announcement can still claim it for a subagent.
+ */
 type CallOwner =
   | {
       kind: 'step';
@@ -258,8 +262,15 @@ type CallOwner =
       sessionId: string;
     }
   | {
-      kind: 'unplaced';
+      kind: 'provisional';
     };
+
+/** A call placed with the step provisionally: its items wait for the turn's end. */
+interface ProvisionalCall extends BridgedCall {
+  readonly callId: string;
+  /** The step's events, where its result item goes if it stays the step's. */
+  readonly stepEvents: AcpEventBridge;
+}
 
 //#region Runner
 
@@ -287,6 +298,8 @@ export class AcpToolRunner implements AcpToolHost {
   private readonly waiting = new Map<string, () => void>();
   /** Set once a subagent is heard from this turn: calls may then be theirs. */
   private subagentsThisTurn = false;
+  /** Calls run as the step's provisionally, settled when the turn's items are taken. */
+  private provisional: ProvisionalCall[] = [];
   /** Ids already given to a call this session; an agent may not reuse one. */
   private readonly claimed = new Set<string>();
   /** What each call recorded, so a resumed step replays it (spec 27 § Resuming a step). */
@@ -332,7 +345,6 @@ export class AcpToolRunner implements AcpToolHost {
   unbind(): void {
     this.binding = undefined;
     this.announced.clear();
-    this.owners.clear();
   }
 
   /**
@@ -400,12 +412,13 @@ export class AcpToolRunner implements AcpToolHost {
   }
 
   /**
-   * Who made a call, settled once before it runs. The MCP request names no
-   * session, so a call is placed by the `tool_call` that announced it. While
-   * this turn has subagents, a call nobody has announced yet waits — for its
-   * announcement, at most a moment — and one still unplaced is nobody's: it
-   * never joins the step's items, since it may be a subagent's. A turn with no
-   * subagents places every call with the step, at once.
+   * Who made a call, settled before it runs. The MCP request names no session,
+   * so a call is placed by the `tool_call` that announced it. A turn with no
+   * subagents places every call with the step, at once. Once a subagent has
+   * spoken this turn, a call nobody has announced yet waits for its
+   * announcement — at most a moment — and one still unannounced runs as the
+   * step's provisionally: it is never dropped, and only at the turn's end,
+   * with every announcement in, is it given to a subagent that claimed it.
    */
   private async ownerOf(callId: string): Promise<CallOwner> {
     const known = this.owners.get(callId);
@@ -429,7 +442,7 @@ export class AcpToolRunner implements AcpToolHost {
     });
     return (
       this.owners.get(callId) ?? {
-        kind: 'unplaced',
+        kind: 'provisional',
       }
     );
   }
@@ -456,8 +469,25 @@ export class AcpToolRunner implements AcpToolHost {
     };
   }
 
-  /** The calls finished since the last take, in the order they ran. */
+  /**
+   * The calls finished since the last take, in the order they ran. A call run
+   * provisionally as the step's is settled now: a subagent that announced it
+   * since takes it — its result item goes to that nested agent, never the
+   * step's items — and otherwise it is the step's.
+   */
   takeFinished(): BridgedCall[] {
+    for (const call of this.provisional) {
+      const owner = this.owners.get(call.callId);
+      if (owner?.kind === 'subagent') {
+        call.stepEvents.childBridge(owner.sessionId)?.itemAppended(call.outputItem);
+        continue;
+      }
+      call.stepEvents.itemAppended(call.outputItem);
+      this.finished.push(call);
+    }
+    this.provisional = [];
+    // The turn's calls are settled: their owners are no longer needed.
+    this.owners.clear();
     const finished = this.finished;
     this.finished = [];
     return finished;
@@ -741,16 +771,23 @@ export class AcpToolRunner implements AcpToolHost {
       result: result.result,
       error: result.error,
     });
-    // Placed once, before it ran: a subagent's call is its own, and an unplaced
-    // one may be — neither joins the step's items, nor the step's item stream.
-    if (binding.owner.kind === 'step') {
-      this.finished.push({
-        wireName: call.name,
-        callItem,
-        outputItem,
+    const finished = {
+      wireName: call.name,
+      callItem,
+      outputItem,
+    };
+    // A provisional call's items wait for the turn's end (`takeFinished`).
+    if (binding.owner.kind === 'provisional') {
+      this.provisional.push({
+        ...finished,
+        callId,
+        stepEvents: binding.stepEvents,
       });
     }
-    if (binding.owner.kind !== 'unplaced') {
+    if (binding.owner.kind === 'step') {
+      this.finished.push(finished);
+    }
+    if (binding.owner.kind !== 'provisional') {
       binding.events.itemAppended(outputItem);
     }
     binding.events.toolEvent('tool_call_completed', {

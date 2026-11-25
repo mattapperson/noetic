@@ -320,7 +320,7 @@ describe('nested agents on the event bridge', () => {
 
 interface ChildCallOptions {
   /** When the subagent's `tool_call` arrives: before the MCP call, during it, or never. */
-  announce: 'before' | 'during' | 'never';
+  announce: 'before' | 'during' | 'after' | 'never';
   /** Whether a subagent speaks at all this turn. Default true. */
   subagent?: boolean;
   /** The tool needs approval, which the harness's `onHeld` gives. */
@@ -406,6 +406,9 @@ async function runChildCall(opts: ChildCallOptions): Promise<{
               announceCall();
             }
             await calling;
+            if (opts.announce === 'after') {
+              announceCall();
+            }
             return {
               stopReason: 'end_turn',
               items: [
@@ -513,13 +516,28 @@ describe("a subagent's bridged tool call", () => {
     expect(heldEvents[0]?.scope).toBeUndefined();
   });
 
-  it('a call nobody announced while subagents are about joins neither the items nor the item stream', async () => {
+  it("a call nobody announced while subagents are about is the step's: never dropped", async () => {
     const { items, events } = await runChildCall({
       announce: 'never',
     });
+    expect(items).toContain('from the child');
+    const appended = events.filter(
+      (e) => e.type.endsWith(':item_appended') && JSON.stringify(e.data).includes('from the child'),
+    );
+    expect(appended.length).toBe(1);
+    expect(appended[0]?.scope).toBeUndefined();
+  }, 10e3);
+
+  it('a call a subagent announces only after it ran is still its own, settled at the turn’s end', async () => {
+    const { items, events } = await runChildCall({
+      announce: 'after',
+    });
     expect(items).not.toContain('from the child');
-    const appended = events.filter((e) => e.type.endsWith(':item_appended'));
-    expect(JSON.stringify(appended)).not.toContain('from the child');
+    const appended = events.filter(
+      (e) => e.type.endsWith(':item_appended') && JSON.stringify(e.data).includes('from the child'),
+    );
+    expect(appended.length).toBe(1);
+    expect(appended[0]?.scope?.title).toBe('Explore');
   }, 10e3);
 });
 

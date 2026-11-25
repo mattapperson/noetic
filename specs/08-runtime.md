@@ -737,12 +737,17 @@ show one.
   generic `tool_call_started` / `tool_call_completed` (scoped), once each; a
   call it makes through the step's tool bridge is reported by the bridge, on
   its scope, and never joins the step's items. The bridge places a call by the
-  `tool_call` that announced it, once, before it runs — the MCP request names
-  no session. In a turn with no subagent every call is the step's at once;
-  once a subagent has spoken in the turn, a call nobody has announced yet
-  waits for its announcement (at most a moment), and one still unplaced joins
-  neither the step's items nor its item stream. A call the step's own agent
-  announces is the step's, whatever a subagent announces under the same id.
+  `tool_call` that announced it — the MCP request names no session. In a turn
+  with no subagent every call is the step's at once. Once a subagent has
+  spoken in the turn, a call nobody has announced yet waits for its
+  announcement (at most a moment); one still unannounced runs as the step's,
+  provisionally — it is never dropped — and is settled when the turn ends,
+  with every announcement in: a subagent that announced it by then takes it
+  (its result item goes to that nested agent), otherwise it is the step's and
+  joins the step's items and item stream then. Its `tool_call_started` /
+  `tool_call_completed` are reported on the step as it runs. A call the
+  step's own agent announces is the step's, whatever a subagent announces
+  under the same id.
   A call that needs approval or leaves its result open is held as the run's,
   its held event unscoped, naming the subagent in `scope`. When another host
   asks a still-unanswered hold again, the hold keeps its id and its answer
