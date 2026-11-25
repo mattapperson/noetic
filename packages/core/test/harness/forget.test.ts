@@ -7,7 +7,9 @@ import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
 import type { CallModelRequest, ContextData, ContextLayer, LLMResponse } from '@noetic-tools/types';
 import { frameworkCast, isNoeticError } from '@noetic-tools/types';
-import { callModel } from '../../src/builders/step-builders';
+import { callModel, runCode, step } from '../../src/builders/step-builders';
+import { connection } from '../../src/connections/handle';
+import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { executionsOf } from '../../src/harness/thread-record';
 import type { DispatchRecord } from '../../src/runtime/durable/spend-log';
@@ -1066,3 +1068,121 @@ describe('forget scope', () => {
 });
 
 //#endregion
+
+describe('forget and connection-pool leases', () => {
+  it('deletes the lease records a crashed run left, its parallel paths’ and old records’ included', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const harness = harnessOver(storage);
+    const later = Date.now() + 60e3;
+    await storage.set('noetic/connections/leases/browsers/job-1', {
+      id: 'l1',
+      expiresAt: later,
+      executionId: 'job-1',
+    });
+    // A model tool's lease held by a context under the run, keyed by that context's id.
+    await storage.set('noetic/connections/leases/browsers/ctx-under-job-1', {
+      id: 'l2',
+      expiresAt: later,
+      executionId: 'job-1',
+    });
+    // Written before leases named their run: found by holder.
+    await storage.set('noetic/connections/leases/team/browsers/job-1:path:p1', {
+      id: 'l3',
+      expiresAt: later,
+    });
+    await storage.set('noetic/connections/leases/browsers/job-2', {
+      id: 'l4',
+      expiresAt: later,
+      executionId: 'job-2',
+    });
+    await storage.set('noetic/connections/leases/browsers/job-10', {
+      id: 'l5',
+      expiresAt: later,
+    });
+
+    await harness.forget(
+      {
+        executionId: 'job-1',
+      },
+      {
+        patienceMs: 0,
+      },
+    );
+
+    expect(await storage.list('noetic/connections/leases/')).toEqual([
+      'noetic/connections/leases/browsers/job-2',
+      'noetic/connections/leases/browsers/job-10',
+    ]);
+  });
+
+  it('releases a lease this harness still holds for a failed run, and frees its connection', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const provider = createInMemoryConnection({
+      operations: {
+        'browser.ping': {
+          run: () => 'pong',
+        },
+      },
+      provision: () => undefined,
+    });
+    const harness = new AgentHarness({
+      name: 'pooled',
+      params: {},
+      connections: {
+        browsers: {
+          provider,
+          pool: {
+            max: 1,
+            waitMs: 20,
+          },
+        },
+      },
+      environment: {
+        storage: {
+          adapter: storage,
+        },
+      },
+    });
+    const ping = step.call({
+      id: 'leased',
+      connection: connection('browsers', undefined, {
+        fresh: 'run',
+      }),
+      op: 'browser.ping',
+    });
+    const failing = runCode<ContextData, undefined, undefined>({
+      id: 'fails-after-leasing',
+      execute: async (input, execCtx) => {
+        await execCtx.harness.run(ping, input, execCtx);
+        throw new Error('crashed after leasing');
+      },
+    });
+    const ctx = harness.createContext();
+    await expect(harness.run(failing, undefined, ctx)).rejects.toThrow('crashed after leasing');
+    // A failed run keeps its lease for a resume.
+    expect(harness.getConnectionStatus('browsers')[0]?.pool?.leased).toBe(1);
+    const [leaseKey] = await storage.list('noetic/connections/leases/');
+    assert(leaseKey);
+    expect(await storage.get(leaseKey)).toMatchObject({
+      executionId: ctx.id,
+    });
+
+    await harness.forget(
+      {
+        executionId: ctx.id,
+      },
+      {
+        patienceMs: 0,
+      },
+    );
+
+    expect(harness.getConnectionStatus('browsers')[0]?.pool?.leased).toBe(0);
+    expect(provider.provisioned[0]?.released).toBe(true);
+    expect(await storage.list('noetic/connections/leases/')).toEqual([]);
+    await harness.close();
+  });
+});

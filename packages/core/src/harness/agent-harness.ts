@@ -1980,6 +1980,7 @@ export class AgentHarness<
         this.sessions.delete(threadId);
       },
       layerIds: () => this.layerIds(),
+      releaseConnections: (executionId) => this.#connections.registry.releaseRun(executionId),
     };
   }
 

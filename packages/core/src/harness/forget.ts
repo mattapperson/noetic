@@ -13,6 +13,7 @@ import type {
   StoredExecution,
 } from '@noetic-tools/types';
 import { ExecutionPart, NoeticErrorImpl } from '@noetic-tools/types';
+import { poolLeasesOf } from '../connections/pool';
 import type { CheckpointStore } from '../runtime/durable/checkpoint-store';
 import type { SessionRecord, SessionStore } from '../runtime/durable/session-store';
 import { SESSION_PREFIX, sessionKey } from '../runtime/durable/session-store';
@@ -50,6 +51,8 @@ export interface ForgetHost {
   dropThread(threadId: string): void;
   /** Ids of the context layers this harness keeps durable state for. */
   layerIds(): ReadonlyArray<string>;
+  /** Release the pool leases this harness still holds for the run, freeing their connections. */
+  releaseConnections(executionId: string): Promise<void>;
 }
 
 //#endregion
@@ -184,6 +187,7 @@ async function forgetExecutionState(
   const storage = host.storage;
   for (const executionId of executionIds) {
     under.lease?.assert();
+    await host.releaseConnections(executionId);
     await host.clearCheckpoint(executionId);
     if (!storage) {
       continue;
@@ -196,6 +200,11 @@ async function forgetExecutionState(
       )
       .map((parsed) => parsed.key);
     await deleteAll(storage, keys);
+  }
+  // Pool leases a crashed run left: no harness holds them to release.
+  if (storage) {
+    under.lease?.assert();
+    await deleteAll(storage, await poolLeasesOf(storage, new Set(executionIds)));
   }
 }
 

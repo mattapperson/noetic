@@ -768,6 +768,9 @@ A pool's provider implements `provision`. A lease is held by one run or one
 parallel path and is never shared with another. The holding harness renews it
 every 15 s; one not renewed for 2 min is reclaimed, so a crashed process frees
 its browsers, and a process that resumes within that time keeps the same lease.
+A lease's record in the harness `StorageAdapter` names the run that holds it, so
+`harness.forget()` of the run releases a lease still held and deletes the records
+a crashed process left (`23-durable-execution` § Forgetting).
 Setup fields a profile marks `hostOnly` — the command or path of an app — come
 only from the pool's own `setup`, never from a workflow.
 

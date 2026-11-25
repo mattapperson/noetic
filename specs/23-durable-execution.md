@@ -548,6 +548,8 @@ The lease goes last, while the forget still holds it (below). A forget cut off p
 
 A key under `execution:` is read as the execution its part's suffix names (`:snapshot`, `:ledger:`, `:trail:`, `:held:`, `:intent:`, `:pending:`). Any other key belongs to the longest execution id that other keys name and that it starts with, else to the id before its first colon; so `execution:a:b:custom` is execution `a:b`'s when `a:b` has records of its own.
 
+An execution's forget also covers the connection-pool leases (`35-connections` § Pools and leases) of its run: a lease this harness still holds for it — a failed run keeps its lease for a resume — is released, which hands its connection back to the provider, and every stored lease record of the run is deleted, those a crashed process left included. A lease record names the run that holds it; one written before it did is the run's when its holder is the run (`<executionId>`) or one of its parallel paths (`<executionId>:path:…`). A thread's forget does this for each execution it forgets.
+
 Deleting goes through the `StorageAdapter`, so storage that keeps a large value elsewhere (a spilled object, `25-platform-packages` § Values larger than a row) deletes it with its key.
 
 ### Spend is settled before anything is deleted

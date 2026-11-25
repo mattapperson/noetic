@@ -44,6 +44,7 @@ import type {
   StreamChangedEventData,
   TriggerGaveUpEventData,
 } from '@noetic-tools/types';
+import { rootIdOf } from '../runtime/context-impl';
 import type { AttachedEntry, AttachedScope } from '../types/connection-entry';
 import { rootOf } from '../util/root-context';
 import { withholdSensitiveBlobs } from './blobs';
@@ -1066,6 +1067,8 @@ class Runtime implements ConnectionRuntime {
       scope: request.fresh ?? 'run',
       setup: request.setup ?? {},
       signal: request.scope.signal,
+      executionId:
+        request.rootId ?? (request.ctx ? rootIdOf(request.ctx) : request.scope.executionId),
     });
     try {
       this.negotiate(entry.name, held.connection.manifest, request);
