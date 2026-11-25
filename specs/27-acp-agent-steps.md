@@ -175,7 +175,7 @@ An agent is reached one of two ways:
 
 | Machine or transport | Use |
 |---|---|
-| `localMachine(agentId?, { keeper?, detachedTimeoutMs? })` (`@noetic-tools/acp/stdio`) | This machine. `launch` starts the agent through its keeper (§ A local agent outlives its host), `reach` serves the bridge on the keeper's own loopback port, `attach` reaches a kept agent again; `spawn` starts a child process. `keeper: false` (or no keeper script on disk, as in a single-file bundle) starts the agent as a child process and `reach` returns the bridge's own address. The default for every preset, loaded through a lazy `import()`. |
+| `localMachine(agentId?, { keeper?, detachedTimeoutMs?, wrap?, onStderr? })` (`@noetic-tools/acp/stdio`) | This machine. `launch` starts the agent through its keeper (§ A local agent outlives its host), `reach` serves the bridge on the keeper's own loopback port, `attach` reaches a kept agent again; `spawn` starts a child process. `keeper: false` (or no keeper script on disk, as in a single-file bundle) starts the agent as a child process and `reach` returns the bridge's own address. The default for every preset, loaded through a lazy `import()`. |
 | `webSocketMachine({ url, token, ca? })` (`@noetic-tools/acp/remote`) | A remote runner over WebSocket. Every upgrade carries the runner's bearer token; `ws://` is refused except to a loopback host, so a hop off the machine is TLS. |
 | `commandMachine({ command, args })` (`@noetic-tools/acp/remote`) | A remote runner started by a local command and spoken to over its stdio: `ssh host npx -y @noetic-tools/acp serve --stdio`, `docker exec -i ctr noetic-acp serve --stdio`. The command's own channel carries everything. |
 | `runnerMachine(openLink)` (`@noetic-tools/acp/remote`) | A remote runner over any `FrameLink`. |
@@ -204,6 +204,19 @@ a signal already aborted, rejects when the transport is opened, with
 the agent itself — a sandbox-wrapped command, a transport that rewrites lines —
 gets the same shutdown from `stopProcessTree(child, { graceMs? })`
 (`@noetic-tools/acp/stdio`), given a child spawned with `detached: true`.
+
+**A wrapped launch.** A host that must start the agent its own way — inside a
+sandbox (`sandbox-exec`, `bwrap`), with an environment it built, from a
+binary it ships — keeps the machine and changes the command:
+`localMachine(id, { wrap })`. `wrap(command, { bridges })` runs just before
+the agent starts. It receives the command the preset built, with `env` already
+the complete environment the agent would get (this process's, plus the
+preset's and the tool wiring's), and the bridge addresses `reach` handed out,
+so a sandbox can let exactly those loopback ports through. The command it
+returns runs with exactly its own `args`, `env` and `cwd` — nothing is merged
+back in — as the leader of its own process group, through the keeper or not,
+with the shutdown above. `onStderr` receives the agent's stderr, which
+otherwise goes to the host's.
 
 ### A local agent outlives its host
 
@@ -373,6 +386,7 @@ the whole environment.
 | `fs/write_text_file` | `ctx.fs.writeFile`, parent directories via `ctx.fs.mkdir` |
 | `terminal/create`·`output`·`wait_for_exit`·`kill`·`release` | A terminal registry over `ctx.shell.exec`: `onData` feeds an `outputByteLimit` ring buffer, one `AbortController` per terminal backs `kill`, and `ShellExecResult.exitCode` becomes the exit status |
 | `session/request_permission` | The permission resolver (below) |
+| `elicitation/create` | The step's `onElicitation` (§ Elicitation) |
 | `session/update` | The event bridge (below) |
 
 Advertised `ClientCapabilities` are computed from what the host can actually
@@ -527,6 +541,96 @@ specification requires clients to restrict content to what the agent advertised,
 so an unsupported block raises `AcpCapabilityError` before the turn is sent.
 
 An empty `prompt` means "use the step's runtime input as the prompt".
+
+### Session settings: `_meta` and the system prompt
+
+Two step settings shape the session the step opens. Both are sent on
+`session/new`, and on `session/load` when the step resumes or loads one. A
+reused live session is neither recreated nor reloaded, so it keeps the
+settings it was opened with; a step that names different ones fails with
+`ACP_SESSION_SETTING_CONFLICT`, as for `cwd`.
+
+- **`sessionMeta`** — an object sent verbatim as the request's `_meta`, the
+  protocol's extension slot. This is how a host passes agent-specific session
+  options without Noetic naming any agent: Claude Code's
+  `{ claudeCode: { options: { model, effort, tools, allowedTools, … } } }`, for
+  instance. Noetic neither reads nor validates it.
+- **`systemPrompt`** — trusted instructions for the session: a string, or
+  `{ text, mode }` with `mode` `'append'` (the default) or `'override'`. It is
+  sent as the protocol's `systemPrompt` (`{ mode, content: [text block] }`)
+  when the agent advertises `sessionCapabilities.systemPrompt` — and, for
+  `override`, `sessionCapabilities.systemPrompt.mode.override`. An agent that
+  advertises neither gets it through its preset's fallback, when the preset
+  has one: `claudeCode()` sends append mode as claude-agent-acp's
+  `_meta.systemPrompt.append` extension, which older bridges read
+  (`defineAcpAgent({ systemPromptMeta })` declares the same for any agent).
+  With no capability and no fallback the step fails with `AcpCapabilityError`
+  before the request goes out, so instructions are never silently dropped.
+
+`sessionMeta` and the fallback merge into one `_meta`; a key the step sets
+wins over the fallback's.
+
+### Elicitation
+
+An agent can ask the client for structured input mid-turn
+(`elicitation/create`, form or URL mode) — claude-agent-acp presents Claude
+Code's own `AskUserQuestion` this way to a client that can render forms. A
+step answers with `onElicitation(request, ctx, { agentId, stepId })`, which
+resolves to the protocol's response: `{ action: 'accept', content }`,
+`{ action: 'decline' }` or `{ action: 'cancel' }`.
+
+The client advertises `elicitation: { form: {} }` in `initialize` when the
+step that opens the connection gives `onElicitation`, or when
+`clientCapabilities.elicitation` is `true`; `false` withdraws it. A request on
+a connection whose current step has no handler, or whose handler throws, is
+answered `cancel`. Like the permission handler, the handler is per-turn: a
+reused session asks the step running now. `elicitation/complete`
+notifications are accepted and ignored.
+
+### Subagents
+
+An agent that runs subagents can expose each as a child session (the ACP
+subagents RFD). The client advertises `subagents: {}` when the step that opens
+the connection gives `onSubagentUpdate`, or when
+`clientCapabilities.subagents` is `true`.
+
+The connection tracks the children it is told about: a `subagent_update` on a
+session it owns (or on a known child — subagents nest) announces the child
+`sessionId`; codex-acp's earlier draft, `subagent_spawned` with
+`subagentSessionId`, is read the same way. From then on every
+`session/update` on a child session goes to
+`onSubagentUpdate(event, ctx, { agentId, stepId })` and **never** to the
+step's output: it reaches no text, reasoning, item or `acp_event` stream and
+no turn accumulator, so a subagent's text cannot leak into the step's answer.
+The announcement itself is a parent-session update, so it is also forwarded
+as usual (raw, as `acp.subagent_update`), and given to the handler.
+
+```ts
+interface AcpSubagentEvent {
+  sessionId: string;        // the child session
+  parentSessionId: string;  // the session that announced it
+  update: AcpSessionUpdate; // the update, verbatim
+  cancel(): Promise<void>;  // session/cancel on the child alone
+}
+```
+
+Permission and elicitation requests a subagent makes carry its session id and
+go through the step's permission tiers and `onElicitation` like any other.
+
+### What the session runs with
+
+`AcpTurnResult` carries, besides `reportedUsage`:
+
+- `configOptions` — the session's config options (model, effort, …) as they
+  stand at the end of the turn, after the step's `model` was applied, so a
+  host reads the selection it ran with from the `currentValue` of each select;
+- `currentModeId` — the mode it ended in (from `current_mode_update`, else the
+  session's mode state);
+- `responseMeta` — the `_meta` of the `session/prompt` answer, verbatim. It is
+  where agents report what the protocol has no field for (codex-acp's
+  `quota.token_count`), and Noetic does not read it.
+
+All three are on the turn's `response.completed` event too.
 
 ### Conversation history
 
@@ -873,8 +977,8 @@ serves it). Runtime import graph clean; install graph not.
   the stable 1.x entry rejects an `acp` server), and an agent that advertises
   it — none of
   Claude Code, Codex (`acp: false`), Gemini CLI, opencode or pi-acp does yet.
-- Protocol features still in draft upstream (`session/resume`, `session/list`,
-  `elicitation/*`) arrive with a version bump of `@agentclientprotocol/sdk`.
+- Protocol features still in draft upstream (`session/resume`, `session/list`)
+  arrive with a version bump of `@agentclientprotocol/sdk`.
   Its 2.x line drops `ClientSideConnection` for a builder API
   (`client({ name }).connectWith(...)`), so moving to it is a rewrite of the
   connection driver, not a version bump.
