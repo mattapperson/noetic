@@ -17,6 +17,13 @@ const HeldReasonSchema = z.enum([
   'question',
 ]);
 
+/** A nested agent (`AgentScope`). */
+const AgentScopeSchema = z.object({
+  id: z.string(),
+  parentId: z.string().optional(),
+  title: z.string().optional(),
+});
+
 /** A question put to a person (`HeldQuestion`). */
 const HeldQuestionSchema = z.object({
   message: z.string(),
@@ -41,6 +48,8 @@ export const HeldCallSchema = z.object({
   request: z.unknown().optional(),
   /** The question, on a call held with `reason: 'question'`. */
   question: HeldQuestionSchema.optional(),
+  /** The nested agent that asked, when not the step's own. */
+  scope: AgentScopeSchema.optional(),
   /** A coding agent's call: `callId` is the agent's id, and this the id a decision names. */
   heldAs: z.string().optional(),
 });

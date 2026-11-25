@@ -294,6 +294,18 @@ export interface AcpChildUpdate {
   readonly update: acp.SessionNotification['update'];
   /** True for the announcement (`subagent_update` / `subagent_spawned`) on the parent. */
   readonly announcement: boolean;
+  /**
+   * The child and every subagent above it, outermost first, as last announced:
+   * enough to place it under its whole parent chain on its first activity.
+   */
+  readonly lineage: ReadonlyArray<AcpChildInfo>;
+}
+
+/** @public One subagent as its announcements describe it. */
+export interface AcpChildInfo {
+  readonly sessionId: string;
+  readonly title?: string;
+  readonly description?: string;
 }
 
 /** @public What identifies an agent's question beyond its params. */

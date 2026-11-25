@@ -1,4 +1,4 @@
-import type { Context, SteeringDecision } from '@noetic-tools/types';
+import type { AgentScope, Context, SteeringDecision } from '@noetic-tools/types';
 import { SteeringAction } from '@noetic-tools/types';
 import type { HeldRecord, HoldHost } from './held-calls';
 import {
@@ -204,6 +204,8 @@ export async function awaitApproval(params: {
   ctx: Context;
   /** False when the turn must stay live while the call is held. Default true. */
   park?: boolean;
+  /** The nested agent asking, shown on the held call. */
+  scope?: AgentScope;
 }): Promise<ToolApproval> {
   const holds = heldCallsOf(params.harness);
   const scope = heldScopeOf(params.ctx);
@@ -232,6 +234,11 @@ export async function awaitApproval(params: {
         args: params.toolArgs,
         argsHash: heldArgsHash(params.toolName, params.toolArgs),
         reason: 'approval',
+        ...(params.scope === undefined
+          ? {}
+          : {
+              scope: params.scope,
+            }),
         ...(e.due.dueAt === undefined
           ? {}
           : {

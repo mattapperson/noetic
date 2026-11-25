@@ -2679,6 +2679,7 @@ export class AgentHarness<
       callId: request.callId,
       ctx: request.ctx,
       park: request.park,
+      scope: request.scope,
     });
     return approval.decision;
   }

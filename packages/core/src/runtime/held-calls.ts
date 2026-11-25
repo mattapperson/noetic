@@ -75,6 +75,14 @@ const HeldRecordSchema = z.object({
       url: z.string().optional(),
     })
     .optional(),
+  /** The nested agent that asked, when not the step's own. */
+  scope: z
+    .object({
+      id: z.string(),
+      parentId: z.string().optional(),
+      title: z.string().optional(),
+    })
+    .optional(),
   resolution: ResolutionSchema.optional(),
 });
 
@@ -285,6 +293,11 @@ export function toHeldCall(record: HeldRecord): HeldCall {
       ? {}
       : {
           question: record.question,
+        }),
+    ...(record.scope === undefined
+      ? {}
+      : {
+          scope: record.scope,
         }),
   };
 }

@@ -15,6 +15,7 @@ import type {
   AcpClientHost,
   AcpConnectOptions,
   AcpContentBlock,
+  AcpCreateElicitationRequest,
   AcpKeepAlive,
   AcpLiveSession,
   AcpNewSessionOptions,
@@ -230,7 +231,10 @@ function buildSteerer(
  * would not survive the turn stopping, so the turn stays live while the request is
  * held.
  */
-function buildApprover(ctx: Context<ContextData>): AcpPermissionSteerer | undefined {
+function buildApprover(
+  ctx: Context<ContextData>,
+  events: AcpEventBridge,
+): AcpPermissionSteerer | undefined {
   const approve = ctx.harness.approve?.bind(ctx.harness);
   if (!approve) {
     return undefined;
@@ -242,6 +246,8 @@ function buildApprover(ctx: Context<ContextData>): AcpPermissionSteerer | undefi
       callId: request.toolCall.toolCallId,
       ctx,
       park: false,
+      // A subagent's request is held as the run's, named as its nested agent's.
+      scope: events.scopeFor(request.sessionId),
     });
     if (decision.action === SteeringAction.Allow) {
       return {
@@ -290,7 +296,7 @@ function bindHostToStep<TContext, I, O>(
 ): void {
   host.permissions = opts.step.permissions;
   host.steerPermission = buildSteerer(opts.ctx, opts.layers);
-  host.approvePermission = buildApprover(opts.ctx);
+  host.approvePermission = buildApprover(opts.ctx, opts.events);
   // Bind the executing context into the handler so the protocol client never
   // has to know about `Context` — it just asks a question and gets an answer.
   const handler = opts.step.onPermissionRequest;
@@ -303,7 +309,8 @@ function bindHostToStep<TContext, I, O>(
     : undefined;
   // An agent's question is a question for a person: held like any other (spec 27
   // § Questions the agent asks), answered by whoever answers held calls.
-  host.onElicitation = opts.questions.ask;
+  host.onElicitation = (request, info) =>
+    opts.questions.ask(request, info, opts.events.scopeFor(sessionOfQuestion(request)));
   host.onSessionUpdate = opts.onUpdate;
   host.onChildUpdate = opts.onChildUpdate;
   host.onClientActivity = opts.onActivity;
@@ -491,6 +498,12 @@ function sessionIsGone(error: unknown): boolean {
     return false;
   }
   return Reflect.get(error, 'code') === RESOURCE_NOT_FOUND;
+}
+
+/** The session a question names, when it names one (form and URL questions do). */
+function sessionOfQuestion(request: AcpCreateElicitationRequest): string | undefined {
+  const sessionId = Reflect.get(request, 'sessionId');
+  return typeof sessionId === 'string' ? sessionId : undefined;
 }
 
 /** Keeping a connection is always explicit; the default closes it with the step. */
@@ -1185,9 +1198,7 @@ async function runAcpStep<TContext, I, O>(params: {
       if (reloading) {
         return;
       }
-      if (!update.announcement) {
-        tools?.observeChild(update.sessionId, update.update);
-      }
+      tools?.observeChild(update.sessionId, update.update);
       events.forwardChild(update);
     },
     onActivity: (activity: AcpClientActivity) => {

@@ -11,6 +11,7 @@ import type {
   AcpSession,
   AcpTurnResult,
   AgentScope,
+  HeldCall,
 } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
@@ -61,6 +62,12 @@ function announce(child: string, state?: Record<string, unknown>): AcpChildUpdat
     sessionId: child,
     parentSessionId: 'root',
     announcement: true,
+    lineage: [
+      {
+        sessionId: child,
+        title: 'Explore',
+      },
+    ],
     update: {
       sessionUpdate: 'subagent_update',
       sessionId: child,
@@ -81,8 +88,25 @@ function own(child: string, update: AcpChildUpdate['update']): AcpChildUpdate {
     sessionId: child,
     parentSessionId: 'root',
     announcement: false,
+    lineage: [
+      {
+        sessionId: child,
+        title: 'Explore',
+      },
+    ],
     update,
   };
+}
+
+/** Something the child does this turn: what shows a nested agent. */
+function work(child: string): AcpChildUpdate {
+  return own(child, {
+    sessionUpdate: 'agent_thought_chunk',
+    content: {
+      type: 'text',
+      text: 'thinking',
+    },
+  });
 }
 
 const RESULT = {
@@ -98,12 +122,67 @@ function lifecycle(events: Captured[]): string[] {
 }
 
 describe('nested agents on the event bridge', () => {
+  it('an announcement alone shows nothing: a child that does no work this turn is not a nested agent', () => {
+    const { bridge: b, events } = bridge();
+    b.begin();
+    b.forwardChild(announce('idle-child'));
+    b.finalize(RESULT);
+    expect(events.filter((e) => e.scope)).toEqual([]);
+  });
+
+  it('a grandchild that speaks first opens under its whole parent chain', () => {
+    const { bridge: b, events } = bridge();
+    b.begin();
+    b.forwardChild({
+      sessionId: 'grand',
+      parentSessionId: 'kid',
+      announcement: false,
+      lineage: [
+        {
+          sessionId: 'kid',
+          title: 'Plan',
+        },
+        {
+          sessionId: 'grand',
+          title: 'Search',
+        },
+      ],
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: {
+          type: 'text',
+          text: 'found it',
+        },
+      },
+    });
+    const started = events.filter((e) => e.type.endsWith(':agent_started'));
+    const [kid, grand] = started.map((e) => e.scope);
+    expect(started.map((e) => e.data.title)).toEqual([
+      'Plan',
+      'Search',
+    ]);
+    expect(kid?.parentId).toBeUndefined();
+    expect(grand?.parentId).toBe(kid?.id);
+  });
+
+  it('a request from a child is resolved to its nested agent', () => {
+    const { bridge: b } = bridge();
+    b.begin();
+    b.forwardChild(announce('c1'));
+    const scope = b.scopeFor('c1');
+    expect(scope?.title).toBe('Explore');
+    expect(b.scopeFor('root')).toBeUndefined();
+    expect(b.scopeFor(undefined)).toBeUndefined();
+  });
+
   it('opens nothing for an update that arrives after the turn ended', () => {
     const { bridge: b, events } = bridge();
     b.begin();
     b.forwardChild(announce('c1'));
+    b.forwardChild(work('c1'));
     b.finalize(RESULT);
     b.forwardChild(announce('c2'));
+    b.forwardChild(work('c2'));
     b.forwardChild(
       own('c1', {
         sessionUpdate: 'agent_message_chunk',
@@ -134,6 +213,7 @@ describe('nested agents on the event bridge', () => {
         state: 'running',
       }),
     );
+    b.forwardChild(work('c1'));
     b.finalize(RESULT);
     expect(lifecycle(events).at(-1)).toBe('agent_completed:completed');
   });
@@ -142,6 +222,7 @@ describe('nested agents on the event bridge', () => {
     const { bridge: b, events } = bridge();
     b.begin();
     b.forwardChild(announce('c1'));
+    b.forwardChild(work('c1'));
     const scoped = events.filter((e) => e.scope && e.type.startsWith('h:'));
     expect(scoped.length).toBeGreaterThan(0);
     expect(scoped.every((e) => e.data.agentId === undefined)).toBe(true);
@@ -151,9 +232,11 @@ describe('nested agents on the event bridge', () => {
     const first = bridge();
     first.bridge.begin();
     first.bridge.forwardChild(announce('c1'));
+    first.bridge.forwardChild(work('c1'));
     const second = bridge();
     second.bridge.begin();
     second.bridge.forwardChild(announce('c1'));
+    second.bridge.forwardChild(work('c1'));
     expect(first.events.find((e) => e.scope)?.scope?.id).not.toBe(
       second.events.find((e) => e.scope)?.scope?.id,
     );
@@ -234,8 +317,11 @@ describe('nested agents on the event bridge', () => {
   });
 });
 
-describe("a subagent's bridged tool call", () => {
-  it("is its nested agent's: scoped events, and never in the step's items", async () => {
+async function runChildCall(announced: boolean): Promise<{
+  items: string;
+  events: Captured[];
+}> {
+  {
     const harness = new AgentHarness({
       name: 'h',
       params: {},
@@ -271,13 +357,17 @@ describe("a subagent's bridged tool call", () => {
               throw new Error('no tools served');
             }
             connect.host.onChildUpdate?.(announce('c1'));
-            connect.host.onChildUpdate?.(
-              own('c1', {
-                sessionUpdate: 'tool_call',
-                toolCallId: 'child-call',
-                title: 'mcp__noetic__echo',
-              }),
-            );
+            if (announced) {
+              connect.host.onChildUpdate?.(
+                own('c1', {
+                  sessionUpdate: 'tool_call',
+                  toolCallId: 'child-call',
+                  title: 'mcp__noetic__echo',
+                }),
+              );
+            } else {
+              connect.host.onChildUpdate?.(work('c1'));
+            }
             await tools.call({
               name: 'echo',
               args: {
@@ -326,9 +416,152 @@ describe("a subagent's bridged tool call", () => {
       undefined,
       ctx,
     );
-    expect(JSON.stringify(ctx.itemLog.items)).not.toContain('from the child');
+    return {
+      items: JSON.stringify(ctx.itemLog.items),
+      events,
+    };
+  }
+}
+
+describe("a subagent's bridged tool call", () => {
+  it("is its nested agent's: scoped events, one lifecycle, never in the step's items", async () => {
+    const { items, events } = await runChildCall(true);
+    expect(items).not.toContain('from the child');
     const appended = events.filter((e) => e.type.endsWith(':item_appended'));
     expect(appended.length).toBeGreaterThan(0);
     expect(appended.every((e) => e.scope !== undefined)).toBe(true);
+    const lifecycle = events.filter(
+      (e) => /:tool_call_(started|completed)$/.test(e.type) && e.data.callId === 'child-call',
+    );
+    expect(lifecycle.map((e) => e.type.split(':')[1])).toEqual([
+      'tool_call_started',
+      'tool_call_completed',
+    ]);
+  });
+
+  it('a call nobody announced while subagents are about joins neither the items nor the item stream', async () => {
+    const { items, events } = await runChildCall(false);
+    expect(items).not.toContain('from the child');
+    const appended = events.filter((e) => e.type.endsWith(':item_appended'));
+    expect(JSON.stringify(appended)).not.toContain('from the child');
+  }, 10e3);
+});
+
+describe("a subagent's requests to a person", () => {
+  it('are held as the run’s, named as its nested agent’s', async () => {
+    const held: HeldCall[] = [];
+    const harness = new AgentHarness({
+      name: 'h',
+      params: {},
+      onHeld: (call) => {
+        held.push(call);
+        return call.reason === 'question'
+          ? {
+              action: 'deny',
+            }
+          : {
+              action: 'allow',
+            };
+      },
+    });
+    const ctx = harness.createContext();
+    const heldEvents: Captured[] = [];
+    frameworkCast<{
+      _broadcaster: unknown;
+    }>(ctx)._broadcaster = {
+      emit(event: Captured) {
+        if (event.type.endsWith(':tool_call_held')) {
+          heldEvents.push(event);
+        }
+      },
+    };
+    const agent: AcpAgent = {
+      specificationVersion: 'acp-v1',
+      agentId: 'fake',
+      async connect(connect): Promise<AcpAgentConnection> {
+        const session: AcpSession = {
+          sessionId: 'root',
+          availableCommands: [],
+          async prompt(): Promise<AcpTurnResult> {
+            connect.host.onChildUpdate?.(announce('c1'));
+            await connect.host.approvePermission?.({
+              sessionId: 'c1',
+              toolCall: {
+                toolCallId: 'bash-1',
+                title: 'Bash',
+              },
+              options: [
+                {
+                  optionId: 'ok',
+                  kind: 'allow_once',
+                  name: 'Allow',
+                },
+              ],
+            });
+            await connect.host.onElicitation?.(
+              {
+                mode: 'form',
+                sessionId: 'c1',
+                message: 'Which?',
+                requestedSchema: {
+                  type: 'object',
+                  properties: {},
+                },
+              },
+              {},
+            );
+            return {
+              stopReason: 'end_turn',
+              items: [],
+              text: 'done',
+            };
+          },
+          async cancel() {},
+          async setMode() {},
+          async setModel() {},
+        };
+        return {
+          agentCapabilities: {},
+          authMethods: [],
+          protocolVersion: 1,
+          fingerprintFor: (): string => 'fake',
+          async authenticate() {},
+          async newSession() {
+            return session;
+          },
+          async loadSession() {
+            return session;
+          },
+          async close() {},
+        };
+      },
+    };
+    await execute(
+      step.acpAgent({
+        id: 'parent',
+        agent,
+        prompt: 'go',
+      }),
+      undefined,
+      ctx,
+    );
+    expect(
+      held.map((call) => [
+        call.reason,
+        call.scope?.title,
+      ]),
+    ).toEqual([
+      [
+        'approval',
+        'Explore',
+      ],
+      [
+        'question',
+        'Explore',
+      ],
+    ]);
+    // The held events themselves are the run's: every host that answers sees them.
+    expect(heldEvents.length).toBe(2);
+    expect(heldEvents.every((e) => e.scope === undefined)).toBe(true);
   });
 });

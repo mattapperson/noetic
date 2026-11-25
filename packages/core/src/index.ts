@@ -573,6 +573,7 @@ export type { LayerTraceSpan, Span, TraceExporter } from '@noetic-tools/types';
 
 /** @public */
 export type {
+  AgentScope,
   FrameworkStreamEvent,
   HarnessResponse,
   SdkStreamEvent,

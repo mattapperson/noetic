@@ -193,8 +193,14 @@ export class AcpRelay {
   private readonly unscoped = new Map<Id, Pending>();
   /** Each descendant session, by id, to the root session it belongs to. */
   private readonly owners = new Map<string, string>();
-  /** The last line that announced each descendant, to tell a fresh host of it. */
+  /**
+   * The latest line that announced each descendant, kept in the order the
+   * descendants were first announced (a parent before its children), to tell
+   * a fresh host of them.
+   */
   private readonly announcements = new Map<string, string>();
+  /** Each descendant's immediate parent session. */
+  private readonly parents = new Map<string, string>();
   /** Updates for sessions not placed yet, held until one is announced. */
   private readonly provisional = new Map<string, string[]>();
   private initialized?: unknown;
@@ -352,11 +358,10 @@ export class AcpRelay {
     // A host that never saw the root's children announced — they were started
     // by an earlier turn — is told of them first, so it can place their
     // traffic. Parents come before the children they announced.
-    const already = new Set(missed);
+    // Every one, even if the journal repeats it: a journal entry may come
+    // after a grandchild's, and a parent must be placed first.
     for (const announcement of this.ancestryOf(sessionId)) {
-      if (!already.has(announcement)) {
-        this.send.toHost(announcement);
-      }
+      this.send.toHost(announcement);
     }
     for (const update of missed) {
       this.send.toHost(update);
@@ -554,7 +559,7 @@ export class AcpRelay {
     this.deliver(session, raw);
     const child = announcedChild(params);
     if (child) {
-      this.adoptChild(child, rootId, raw);
+      this.adoptChild(child, sessionId, rootId, raw);
     }
   }
 
@@ -597,16 +602,16 @@ export class AcpRelay {
   //#region Subagents
 
   /** A child session, announced under `rootId`'s tree, now belongs to that root. */
-  private adoptChild(child: string, rootId: string, announcement: string): void {
+  private adoptChild(child: string, parent: string, rootId: string, announcement: string): void {
     if (child === rootId || this.sessions.has(child)) {
       return;
     }
     // Re-set so a re-announced child counts as the newest.
     this.owners.delete(child);
     this.owners.set(child, rootId);
-    if (!this.announcements.has(child)) {
-      this.announcements.set(child, announcement);
-    }
+    this.parents.set(child, parent);
+    // `set` on a known key keeps its place: first-announced order, latest line.
+    this.announcements.set(child, announcement);
     // Its waiting requests become its root's before anything is trimmed, so
     // a child with a request pending is never the one forgotten.
     this.adoptRequests(child, this.session(rootId));
@@ -637,11 +642,22 @@ export class AcpRelay {
       if (this.owners.size <= MAX_DESCENDANTS) {
         return;
       }
-      if (!this.isWaitedOn(child, rootId)) {
+      if (!this.isWaitedOn(child, rootId) && !this.isParentOfKept(child)) {
         this.owners.delete(child);
         this.announcements.delete(child);
+        this.parents.delete(child);
       }
     }
+  }
+
+  /** Whether a descendant still kept was announced under `child`: its chain must stay. */
+  private isParentOfKept(child: string): boolean {
+    for (const [kept, parent] of this.parents) {
+      if (parent === child && this.owners.has(kept)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private isWaitedOn(child: string, rootId: string): boolean {

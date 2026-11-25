@@ -162,6 +162,34 @@ describe('AcpRelay subagents', () => {
     ]);
   });
 
+  it('keeps the whole chain of a grandchild that is waited on, and replays it parents first', () => {
+    const r = rig();
+    const first = openTurn(r);
+    r.agent(announce('s1', 'p'));
+    r.agent(announce('p', 'g'));
+    r.agent(request(77, 'session/request_permission', 'g'));
+    r.agent({
+      jsonrpc: '2.0',
+      id: first,
+      result: {
+        stopReason: 'end_turn',
+      },
+    });
+    for (let i = 0; i < 1000; i += 1) {
+      r.agent(announce('s1', `sib${i}`));
+    }
+    r.relay.detach();
+    const handed = reattachAndResume(r);
+    const announced = handed
+      .map((message) => JSON.stringify(message))
+      .filter((line) => line.includes('subagent_update'));
+    const parentAt = announced.findIndex((line) => line.includes('"sessionId":"p"'));
+    const grandAt = announced.findIndex((line) => line.includes('"sessionId":"g"'));
+    expect(parentAt).toBeGreaterThanOrEqual(0);
+    expect(grandAt).toBeGreaterThan(parentAt);
+    expect(handed).toContainEqual(request(77, 'session/request_permission', 'g'));
+  });
+
   it('never forgets a child whose request is pending, and trims it once answered', () => {
     const r = rig();
     openTurn(r);
@@ -196,6 +224,7 @@ describe('AcpRelay subagents', () => {
     r.agent(update('s1', 'c'));
     r.agent(update('c1', 'd'));
     expect(reattachAndResume(r)).toEqual([
+      announce('s1', 'c1'),
       update('s1', 'a'),
       announce('s1', 'c1'),
       update('c1', 'b'),
@@ -285,7 +314,10 @@ describe('AcpRelay subagents', () => {
     r.agent(announce('c1', 'g1'));
     r.agent(update('g1', 'deep'));
     r.agent(request(50, 'fs/read_text_file', 'g1'));
+    // The chain first, parents before children, then the turn as it happened.
     expect(reattachAndResume(r)).toEqual([
+      announce('s1', 'c1'),
+      announce('c1', 'g1'),
       announce('s1', 'c1'),
       announce('c1', 'g1'),
       update('g1', 'deep'),
@@ -300,6 +332,7 @@ describe('AcpRelay subagents', () => {
     r.relay.detach();
     r.agent(update('c1', 'drafted'));
     expect(reattachAndResume(r)).toEqual([
+      announceDraft('s1', 'c1'),
       announceDraft('s1', 'c1'),
       update('c1', 'drafted'),
     ]);

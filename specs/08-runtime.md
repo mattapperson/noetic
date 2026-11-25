@@ -729,10 +729,22 @@ show one.
   Every flat transcript built from the full stream does the same: a chat
   reply (`29-chat-platform-integration`) and a served session's updates to its
   editor (`31-acp-server`) carry the run's own output only.
+- **It shows when it works.** A nested agent appears with its first activity
+  in a turn — an update, a request, a call — opened under its whole parent
+  chain, ancestors first. Being announced alone shows nothing: a subagent that
+  does no work in a turn is not one of its nested agents.
 - **Everything a nested agent does is its own.** Its tool calls are the
-  generic `tool_call_started` / `tool_call_completed` (scoped); a call it
-  makes through the step's tool bridge reports on its scope and never joins
-  the step's items; its file and terminal calls are reported on its scope.
+  generic `tool_call_started` / `tool_call_completed` (scoped), once each; a
+  call it makes through the step's tool bridge is reported by the bridge, on
+  its scope, and never joins the step's items. The bridge places a call by the
+  `tool_call` that announced it; while subagents are about, a call nobody
+  announced gets a moment for its announcement, and one still unplaced joins
+  neither the step's items nor its item stream. Its file and terminal calls
+  are reported on its scope.
+- **Its questions are the run's to answer.** A permission request or a
+  question a nested agent raises is held like any other (§ Held tool calls),
+  its event unscoped so every host that answers held calls sees it; the
+  `HeldCall` names the asker in `scope`.
 - **Each nested agent brackets its own output** with `response.created` /
   `response.completed`, and its output indexes are its own, so a consumer
   folding one scope never collides with another.
@@ -789,15 +801,15 @@ window for the same agent — and its child's output is the run's output, as a
 | `{name}:stream_pipe_error` | Emitted when SDK stream piping fails. Data: `{ error }` |
 | `{name}:spend_pending` | Emitted when a paid call is left with no settled bill, or `restore()` finds one (`23-durable-execution` § Paid dispatches). Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }`, or `{ id, unreadable: true, unbounded: true }` for a record that no longer reads |
 | `{name}:spend_settled` | Emitted when a pending paid call is settled or written off. Data: `{ id, cost, writtenOff? }` |
-| `{name}:agent_started` | A nested agent started (§ Nested agents). Scoped. Data: `{ stepId, agentId, title?, description? }` |
-| `{name}:agent_status` | A nested agent reported its status. Scoped. Data: `{ stepId, agentId, status, stopReason? }` |
-| `{name}:agent_completed` | The turn that ran a nested agent ended. Scoped. Data: `{ stepId, agentId, status }` |
+| `{name}:agent_started` | A nested agent started (§ Nested agents). Scoped. Data: `{ stepId, title?, description? }` |
+| `{name}:agent_status` | A nested agent reported its status. Scoped. Data: `{ stepId, status, stopReason? }` |
+| `{name}:agent_completed` | The turn that ran a nested agent ended. Scoped. Data: `{ stepId, status }` |
 | `{name}:drain_started` | Emitted when a graceful stop begins (see Graceful Stop). Data: `{ executionId, deadline, inFlight }` |
 | `{name}:drain_finished` | Emitted when a graceful stop ends, just before the cancel. Data: `{ executionId, reason, durationMs, finished, cutOff }` |
 
 ### Streaming Scope
 
-Events from the entire step composition tree flow through `HarnessResult`. All callModel steps encountered during execution (including within loops, conditionals, inParallel paths, and spawns) emit SDK stream events, as do agent steps; an agent step's subagents emit them scoped (§ Nested agents). Non-callModel steps emit framework lifecycle events only.
+Events from the entire step composition tree flow through `HarnessResult`. All callModel steps encountered during execution (including within loops, conditionals, inParallel paths, and spawns) emit SDK stream events, as do agent steps; an agent step's subagents emit them scoped (§ Nested agents). Every other step emits framework lifecycle events only.
 
 ### Event Emission Control
 
@@ -1094,6 +1106,8 @@ const harness = new AgentHarness({
 - **It never blocks the turn.** The harness does not wait on the handler: the call waits on its record, as it would for any answer, and a turn may park meanwhile. A handler that throws is logged; the call stays held.
 - **The signal.** It aborts when the call is settled any way: a decision passed to `execute()`, a deadline, a steer applied at the `held` point, a cancelled or interrupted turn, an agent that stopped waiting, or `harness.close()`. On storage with `swap`, another harness may settle the call and finish its turn: while any call is watched, the harness reads their records again every two seconds, and settles as `answer` each one that is gone, answered, or held now for another question: another harness settled it, and this one cannot tell how, so a turn the other harness cancelled reads as answered too. Each emits `{name}:tool_call_settled` on the stream the call was announced on, except `close()`, which only aborts. An answer the handler itself returns settles the call the same way.
 - **After a restart.** A handler lives in the process that saw the call held. A turn parked on a held call in a process that died has no handler waiting on it; a host lists such calls with `pending()` on start and answers them with `execute()`.
+
+A held call raised by a nested agent carries `scope` (`AgentScope`, § Nested agents): the run still holds it and any host answers it, and the scope says who is waiting.
 
 `HeldCall`, `HeldCallSettled`, `HeldCallHandler`, `HeldCallContext` and `HeldQuestion` are exported from `@noetic-tools/core` and `@noetic-tools/types`. `readHeldCallEvent(event)` reads a stream event as `{ type: 'held', call: HeldCall }` or `{ type: 'settled', settled: HeldCallSettled }`, validated — every reason, a question's `question` included — and `undefined` for any other event, so a host that follows the stream rather than `onHeld` never parses the data by hand.
 

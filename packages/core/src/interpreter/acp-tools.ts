@@ -237,6 +237,19 @@ export function mergeBridgedItems(
 
 //#endregion
 
+/** Who made a bridged call: the step's own agent, a subagent, or nobody known. */
+type CallOwner =
+  | {
+      kind: 'step';
+    }
+  | {
+      kind: 'subagent';
+      sessionId: string;
+    }
+  | {
+      kind: 'unplaced';
+    };
+
 //#region Runner
 
 /**
@@ -259,6 +272,12 @@ export class AcpToolRunner implements AcpToolHost {
   private readonly announced = new Map<string, string>();
   /** Calls a subagent announced, by id, with its child session. */
   private readonly childCalls = new Map<string, string>();
+  /** Calls the step's own session announced. */
+  private readonly stepCalls = new Set<string>();
+  /** Set once any subagent has been heard from: calls may then be theirs. */
+  private subagents = false;
+  /** Calls placed with no session: kept out of the step's items. */
+  private readonly unplaced = new Set<string>();
   /** Ids already given to a call this session; an agent may not reuse one. */
   private readonly claimed = new Set<string>();
   /** What each call recorded, so a resumed step replays it (spec 27 § Resuming a step). */
@@ -335,13 +354,15 @@ export class AcpToolRunner implements AcpToolHost {
       return;
     }
     this.announced.set(update.toolCallId, update.title);
+    this.stepCalls.add(update.toolCallId);
   }
 
   /**
-   * Note a subagent's `tool_call`: a bridged call it makes is its nested
-   * agent's — its events go there, and it stays out of the step's items.
+   * Note a subagent's update. Its `tool_call` makes a bridged call it makes its
+   * nested agent's — its events go there, and it stays out of the step's items.
    */
   observeChild(sessionId: string, update: SessionUpdate): void {
+    this.subagents = true;
     if (update.sessionUpdate !== 'tool_call') {
       return;
     }
@@ -349,10 +370,45 @@ export class AcpToolRunner implements AcpToolHost {
     this.childCalls.set(update.toolCallId, sessionId);
   }
 
+  /**
+   * Who made a call. The MCP request names no session, so the call is placed
+   * by the `tool_call` that announced it: the step's own session, or a
+   * subagent's. While subagents are about, a call nobody announced yet gets a
+   * moment for its announcement; one still unplaced is nobody's — it never
+   * joins the step's items, since it may be a subagent's.
+   */
+  private async ownerOf(callId: string): Promise<CallOwner> {
+    const placed = (): CallOwner | undefined => {
+      const sessionId = this.childCalls.get(callId);
+      if (sessionId !== undefined) {
+        return {
+          kind: 'subagent',
+          sessionId,
+        };
+      }
+      if (this.stepCalls.has(callId) || !this.subagents) {
+        return {
+          kind: 'step',
+        };
+      }
+      return undefined;
+    };
+    const now = placed();
+    if (now) {
+      return now;
+    }
+    await new Promise((resolve) => setTimeout(resolve, ANNOUNCEMENT_GRACE_MS));
+    return (
+      placed() ?? {
+        kind: 'unplaced',
+      }
+    );
+  }
+
   /** The binding a call reports through: its subagent's nested agent, or the step's. */
-  private bindingFor(binding: AcpToolBinding, callId: string): AcpToolBinding {
-    const sessionId = this.childCalls.get(callId);
-    const events = sessionId === undefined ? undefined : binding.events.childBridge(sessionId);
+  private bindingFor(binding: AcpToolBinding, owner: CallOwner): AcpToolBinding {
+    const events =
+      owner.kind === 'subagent' ? binding.events.childBridge(owner.sessionId) : undefined;
     return events
       ? {
           ...binding,
@@ -398,8 +454,12 @@ export class AcpToolRunner implements AcpToolHost {
         isError: true,
       };
     }
+    const owner = await this.ownerOf(callId);
+    if (owner.kind === 'unplaced') {
+      this.unplaced.add(callId);
+    }
     try {
-      return await this.runInRound(this.bindingFor(binding, callId), call, callId);
+      return await this.runInRound(this.bindingFor(binding, owner), call, callId);
     } catch (e) {
       this.failed = true;
       if (this.binding === binding) {
@@ -638,15 +698,19 @@ export class AcpToolRunner implements AcpToolHost {
       result: result.result,
       error: result.error,
     });
-    // A subagent's call is its own: never in the step's items.
-    if (!this.childCalls.has(callId)) {
+    // A subagent's call is its own, and an unplaced one may be: neither joins
+    // the step's items, nor its item stream.
+    const steps = !this.childCalls.has(callId) && !this.unplaced.has(callId);
+    if (steps) {
       this.finished.push({
         wireName: call.name,
         callItem,
         outputItem,
       });
     }
-    binding.events.itemAppended(outputItem);
+    if (steps || this.childCalls.has(callId)) {
+      binding.events.itemAppended(outputItem);
+    }
     binding.events.toolEvent('tool_call_completed', {
       name: call.name,
       callId,

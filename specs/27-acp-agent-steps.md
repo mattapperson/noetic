@@ -306,9 +306,11 @@ the one ordered record of the root's turn, and sent again with the root's
 waiting requests when a host takes the turn with `_noetic/keeper/turn`. Each
 line is sent as the agent wrote it, so session ids are preserved, and the
 host's answers reach the agent by request id. A host that takes the root —
-by `_noetic/keeper/turn` or by prompting it — is first sent the announcement
-of each child the keeper knows under it, parents first, so a child an earlier
-turn started is placed before its traffic arrives. Updates for a session the
+by `_noetic/keeper/turn` or by prompting it — is first sent the latest
+announcement of each child the keeper knows under it, in the order they were
+first announced (a parent before its children), even when the turn's record
+repeats one, so a child an earlier turn started is placed before its traffic
+arrives. Updates for a session the
 keeper cannot place yet are held — a bounded number per session and a bounded
 number of sessions — and placed in order once the session is announced or
 becomes known; they are dropped if it never is. A request from a session the
@@ -316,8 +318,9 @@ keeper cannot place is asked of every host that attaches until it is
 answered, and moves to its root's waiting requests if the session is
 announced later, so the agent never waits on a host that was not asked. The
 keeper remembers at most a thousand descendants; past that it forgets the
-oldest, never one with a request still waiting — those may keep it over the
-cap until their requests are answered, and are trimmed then. A child's
+oldest, never one with a request still waiting nor one a kept descendant was
+announced under (its chain must stay whole) — those may keep it over the cap
+until their requests are answered, and are trimmed then. A child's
 waiting requests become its root's before anything is trimmed.
 
 ### The remote runner
