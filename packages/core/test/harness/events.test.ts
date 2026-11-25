@@ -120,6 +120,85 @@ describe('an event delivered twice', () => {
   });
 });
 
+describe('a finished message delivered again while another turn runs', () => {
+  it('is not run again, and is answered from the record once the thread rests', async () => {
+    const storage = createInMemoryStorage();
+    let calls = 0;
+    let release: (() => void) | undefined;
+    const harness = new AgentHarness({
+      name: 'events',
+      params: {},
+      agentGraph: agent,
+      environment: {
+        storage: {
+          adapter: storage,
+        },
+      },
+      _testCallModel: async () => {
+        calls += 1;
+        if (calls === 2) {
+          // The second turn takes a while.
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+        return {
+          items: [
+            assistantMessage(`answer-${calls}`),
+          ],
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+          },
+        };
+      },
+    });
+    const scope = {
+      threadId: 't',
+    };
+    await harness.execute('first', {
+      ...scope,
+      messageId: 'm-1',
+    });
+    expect((await harness.getAgentResponse(scope)).text).toBe('answer-1');
+
+    const replayed: unknown[] = [];
+    const collectReplays = async (): Promise<void> => {
+      for await (const event of harness.getFullStream(scope)) {
+        if (event.type === 'events:turn_replayed') {
+          replayed.push(event.data);
+        }
+      }
+    };
+    void collectReplays();
+    await harness.execute('second', {
+      ...scope,
+      messageId: 'm-2',
+    });
+    await until(() => calls === 2);
+    // The sender of the first message retries it while the second is running.
+    await harness.execute('first', {
+      ...scope,
+      messageId: 'm-1',
+    });
+    expect(replayed).toEqual([]);
+    assert(release);
+    release();
+    await until(() => replayed.length === 1);
+    expect(replayed).toEqual([
+      {
+        messageIds: [
+          'm-1',
+        ],
+        text: 'answer-1',
+      },
+    ]);
+    // Two turns ran, not three.
+    expect(calls).toBe(2);
+    await harness.close();
+  });
+});
+
 describe('a message delivered again after its turn finished', () => {
   it('is answered with the recorded answer, and nothing runs', async () => {
     const m = model('a');

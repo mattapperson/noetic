@@ -25,6 +25,9 @@ import { invalidConnectionError, unknownConnectionError } from './errors';
 import type { ConnectionRuntime } from './registry';
 import { isPlainRecord } from './values';
 
+/** How many times an event is read before a trigger gives up on turning it into a turn. */
+const ENTRY_ATTEMPTS = 3;
+
 //#region Types
 
 /** One event a trigger hands to the harness as a turn. */
@@ -250,6 +253,8 @@ export class TriggerRunner {
   private readonly threads = new Map<string, Promise<void>>();
   /** Events being stored right now, whose turns do not exist yet. */
   private handling = 0;
+  /** How often reading an event into an inbox entry has failed, by inbox key. */
+  private readonly entryTries = new Map<string, number>();
 
   constructor(private readonly options: TriggerRunnerOptions) {
     for (const trigger of options.triggers) {
@@ -589,12 +594,21 @@ export class TriggerRunner {
     try {
       entry = await this.entryFor(trigger, init);
     } catch (e) {
-      // A filter or input that throws on one event gives up on it rather than
-      // re-reading it from the same cursor forever.
+      // It may be the event (a filter that throws on it) or the moment (a blob
+      // that could not be stored just now). So it is tried again: the cursor is not
+      // moved, the sender is told the event was not stored, and the stream is read
+      // again from where it was. After a few tries it is given up on, rather than
+      // re-read from the same cursor forever.
+      const tries = (this.entryTries.get(inboxKey) ?? 0) + 1;
+      if (tries < ENTRY_ATTEMPTS) {
+        this.entryTries.set(inboxKey, tries);
+        throw e;
+      }
+      this.entryTries.delete(inboxKey);
       this.report(trigger.id, e);
       const error = e instanceof Error ? e.message : String(e);
       this.gaveUp(trigger, init, {
-        attempts: 0,
+        attempts: tries,
         error,
       });
       await storage.set(seenKey, {
@@ -603,6 +617,7 @@ export class TriggerRunner {
       await this.advance(trigger, init.cursor);
       return;
     }
+    this.entryTries.delete(inboxKey);
     if (!entry) {
       await this.advance(trigger, init.cursor);
       return;

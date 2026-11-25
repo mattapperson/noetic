@@ -185,6 +185,40 @@ async function runInvokeTool<TContext, I, O>(
     (baseCtx instanceof ContextImpl ? baseCtx.currentDispatch()?.path : undefined) ??
     orderedCallId(runRootOf(baseCtx), baseCtx, step.id);
 
+  const held = {
+    callId: holdId,
+    name: step.tool.name,
+    args: parsedArgs,
+    argsHash: heldArgsHash(step.tool.name, parsedArgs),
+  };
+  const holds = heldCallsOf(harness);
+  const holdScope = heldScopeOf(baseCtx);
+
+  // The body already ran, and left its result for a person to give: the turn
+  // parked on it, or was cut off, and this is the step coming back. Running the
+  // body again would ask the question a second time.
+  const left = await holds.load(holdScope, holdId);
+  if (left?.reason === 'result' && left.argsHash === held.argsHash) {
+    const result = await heldResult(
+      {
+        harness,
+        ctx: baseCtx,
+        stepId: step.id,
+      },
+      left,
+    );
+    emitToolUi({
+      ctx: baseCtx,
+      tool: step.tool,
+      callId: step.id,
+      phase: 'result',
+      args: parsedArgs,
+      output: result,
+    });
+    emitCompleted(false, typeof result === 'string' ? result : JSON.stringify(result));
+    return frameworkCast<O>(result);
+  }
+
   // A durable call a host died inside had its approval before it started. What a
   // person is asked now is how it ended, not whether it may run.
   const wasCutOff =
@@ -210,15 +244,6 @@ async function runInvokeTool<TContext, I, O>(
       refuse(approval.decision);
     }
   }
-
-  const held = {
-    callId: holdId,
-    name: step.tool.name,
-    args: parsedArgs,
-    argsHash: heldArgsHash(step.tool.name, parsedArgs),
-  };
-  const holds = heldCallsOf(harness);
-  const holdScope = heldScopeOf(baseCtx);
 
   // A durable tool is not repeated unasked (spec 23a § Tool calls in a round). An
   // intent with no result means a host died while it ran: a person says what happened.
@@ -250,7 +275,11 @@ async function runInvokeTool<TContext, I, O>(
   if (durable && mayWriteHolds(baseCtx)) {
     await holds.arm(holdScope, holdId, held.argsHash);
   }
-  // The tool reported back, with a result or an error: its outcome is known.
+  // The tool reported back with an error: its outcome is known, and it may be tried
+  // again. A result is another matter. It is on record only once the step's own
+  // ledger entry is written, after this returns, so the intent stays until the
+  // run's records are cleared: a host that dies in between resumes to a held
+  // call, not to the tool running a second time unasked.
   const disarm = async (): Promise<void> => {
     if (durable && mayWriteHolds(baseCtx)) {
       await holds.disarm(holdScope, holdId);
@@ -280,7 +309,6 @@ async function runInvokeTool<TContext, I, O>(
           args: parsedArgs,
         })
       : await execResult;
-    await disarm();
     // The tool did its part and left the result for a person to give.
     const result = isToolHold(ran)
       ? await heldResult(

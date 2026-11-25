@@ -181,6 +181,22 @@ export interface HeldApprovalHarness extends ApprovalHarness {
   >;
 }
 
+/** The requests a tool is waiting on inside its own `execute`, by harness. */
+const waiting = new WeakMap<object, Set<string>>();
+
+/**
+ * Note that a tool gated with `approval: 'channel'` waits on `requestId`. Call the
+ * function it returns when the wait ends, however it ends.
+ */
+export function noteWaiting(harness: object, requestId: string): () => void {
+  const ids = waiting.get(harness) ?? new Set<string>();
+  waiting.set(harness, ids);
+  ids.add(requestId);
+  return () => {
+    ids.delete(requestId);
+  };
+}
+
 /** True for the error a harness throws when a decision has no call to go to. */
 function isRefusal(error: unknown): boolean {
   if (!isNoeticError(error)) {
@@ -258,6 +274,12 @@ export async function answerApproval(params: {
 }): Promise<boolean> {
   if (await answerHeld(params)) {
     return true;
+  }
+  // A decision sent on the channel reaches whoever listens, and nobody may be: a
+  // send that succeeds is not a call that took it. Only a tool that is waiting on
+  // this request, in this process, makes it delivered.
+  if (waiting.get(params.harness)?.has(params.decision.requestId) !== true) {
+    return false;
   }
   return resolveApproval(params);
 }

@@ -541,8 +541,19 @@ export class AcpToolRunner implements AcpToolHost {
       wireName: call.name,
       args,
     });
+    const replayed = record.take();
+    if (replayed && mayWriteHolds(binding.ctx)) {
+      // A host that died after recording this result, and before dropping the call's
+      // intent or its answered hold, left them behind. The record says it is done.
+      const holds = heldCallsOf(binding.ctx.harness);
+      const executionId = heldScopeOf(binding.ctx);
+      await holds.disarm(executionId, record.id);
+      if (await holds.load(executionId, record.id)) {
+        await holds.close(executionId, record.id);
+      }
+    }
     const result =
-      record.take() ??
+      replayed ??
       (await this.settle(binding, record, {
         signal: call.signal,
         params: {

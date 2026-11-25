@@ -325,6 +325,14 @@ export class TurnLease implements LedgerFence {
       return;
     }
     if (!won) {
+      // An earlier renewal may have landed though its swap threw: storage then holds
+      // a later `heldUntil` than this harness remembers, under its own name and term.
+      const stored = await readLease(this.opts.storage, this.threadId).catch(() => undefined);
+      const own = stored?.record;
+      if (own && own.term === this.record.term && own.holder === this.record.holder) {
+        this.record = own;
+        return;
+      }
       this.markLost('another harness took the lease');
       return;
     }

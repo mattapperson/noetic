@@ -374,7 +374,9 @@ describe('model-requested calls', () => {
     });
     expect(await output).toContain('5');
     expect(f.runs).toHaveLength(1);
-    expect(warnings).toEqual([]);
+    // Held with nobody to ask: the host is told once where the call waits.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('harness.pending()');
     expect(approvalAttr(f)).toBe('approved');
     expect(await f.harness.pending(scope)).toEqual([]);
   });
@@ -514,7 +516,9 @@ describe('invokeTool', () => {
     expect(await result).toEqual({
       sum: 3,
     });
-    expect(warnings).toEqual([]);
+    // Held with nobody to ask: the host is told once where the call waits.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('harness.pending()');
     expect(approvalAttr(f)).toBe('approved');
   });
 

@@ -139,7 +139,7 @@ export default { fetch: (request: Request) => receive(request) };
 
 It answers `200` when the event is stored, `503` when it could not be (so the provider sends it again), `401` when `verify` refuses or throws, `400` when `toEvent` throws, `204` when `toEvent` returns `undefined`, and `405` for anything but a POST. A delivery that arrives twice with the same event id starts one turn.
 
-Pass `harness` so the endpoint starts it before it emits. A source refuses an event while no trigger is listening to store it, which is the state of a Worker on its first request. `standardWebhookVerifier` throws when it is built if the secret is not base64.
+Pass `harness` so the endpoint starts it before it emits. Until the harness has started, no trigger is listening, and a source keeps an emitted event in memory only. On a Worker that memory is gone after the request, so without `harness` the first request of a cold Worker could answer `200` for an event nothing stored. `standardWebhookVerifier` throws when it is built if the secret is not base64.
 
 ### Waking parked turns
 

@@ -894,6 +894,10 @@ The decisions in one list are all read before any is acted on, so a list with a 
 
 **Ids.** A model's call is held under its call id. An `invokeTool` step's call is held under its dispatch path, or, on a run with no ledger, an id made from the step and the call's order in the run, so two calls of one step are two questions. The approver is still shown the step's id as `callId`. Every hold is announced with `{name}:tool_call_held`, whichever path made it.
 
+A harness with no approver warns once per tool when it first holds a call, saying where held calls are listed and how they are answered: nothing else would tell a host that expected a prompt why the call never finishes.
+
+**A step's own tool.** An `invokeTool` step whose tool left its result open (`hold()`) and whose turn then parked, or was cut off, does not run the tool's body again when it comes back: it finds the hold and waits on it, so the question is asked once. A `durable: true` tool run by a step keeps its intent after it returns, until the run's records are cleared, because its result is on record only when the step's own ledger entry is written; a host that dies in between resumes to a call held as `outcome`.
+
 **No approver and nowhere to hold.** A call that needs approval, with no approver and no id to hold it under, is refused. It is never run with a warning.
 
 **A cancelled turn leaves no question behind.** When the host aborts a turn, its held calls are cleared.

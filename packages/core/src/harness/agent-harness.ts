@@ -1284,6 +1284,11 @@ export class AgentHarness<
         ctx.ledger?.acceptVersionLoss(typeof accept === 'string' ? accept : undefined);
       }
       await record?.begin(ctx, messageIds);
+      // A turn on record can be cut off from here on. A host that sleeps between
+      // requests has to know when to come back and look (see `turnDueAt`).
+      if (record && this.leaseOptions) {
+        await this.announceWakeTimeQuietly();
+      }
       return ctx;
     };
 
@@ -1512,8 +1517,9 @@ export class AgentHarness<
    * When a routine `wake()` would have something to do for the thread's turn: a
    * parked turn at its deadline, a turn cut off by a crash at once. Never before
    * another harness's lease on it runs out, since a wake before then does nothing.
-   * Undefined for a turn that waits on something other than time, one that is
-   * stuck or stopped, and one this harness is running.
+   * Undefined for a turn that waits on something other than time, and one that is
+   * stuck or stopped. A turn this harness is running is due one lease period from
+   * now: the time to come back if the process running it is gone.
    */
   private async turnDueAt(threadId: string, now: number): Promise<number | undefined> {
     const turn = (await this.sessionStore?.load(threadId))?.turn;
@@ -1527,7 +1533,10 @@ export class AgentHarness<
     // (One that is parked may still be closing out in this process: it counts.)
     const runner = this.sessions.get(threadId)?.runner;
     if (!turn.parked && runner && runner.getStatus().kind !== 'idle') {
-      return undefined;
+      // Running here. Should this process die, the turn is cut off, and it can be
+      // picked up once the lease it held has run out: that is when to look again.
+      // The turn ending, or parking, replaces this time with the real one.
+      return this.leaseOptions ? now + this.leaseOptions.ttlMs + LEASE_WAIT_MARGIN_MS : undefined;
     }
     const due = turn.parked?.until ?? now;
     const heldUntil = this.leaseOptions
@@ -1937,7 +1946,17 @@ export class AgentHarness<
     if ((await record.turn())?.messageIds.includes(message.id)) {
       return true;
     }
-    return (await record.answerFor(message.id)) !== undefined;
+    if ((await record.answerFor(message.id)) === undefined) {
+      return false;
+    }
+    // Its turn finished earlier, and another is running now. It is not run again,
+    // and it is not left unanswered: once the thread rests it is delivered again,
+    // and answered from the record then (`turn_replayed` carries the answer).
+    void runner
+      .whenIdle()
+      .then(() => this.deliver(session, message))
+      .catch(() => undefined);
+    return true;
   }
 
   /**

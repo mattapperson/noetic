@@ -258,7 +258,7 @@ A webhook is the host's business: core has no webhook concept (`35-connections` 
 | `503` | `harness.start()` or `emit` rejected: the event is not stored, and the provider should send it again. |
 | `200` | `emit` resolved, which is when every listening trigger has stored the event. |
 
-A source's `emit` rejects when no trigger is there to store the event, which is the state of a Worker whose harness has not started. Given `harness`, the endpoint awaits `harness.start()` before it emits, so the first request of a cold Worker stores its event. `start()` is idempotent.
+Before the harness has started, no trigger is listening: a source then holds an emitted event in memory for its first listener and `emit` resolves, though nothing durable has the event, and a Worker's memory does not outlive the request. Given `harness`, the endpoint awaits `harness.start()` before it emits, so the first request of a cold Worker stores its event. `start()` is idempotent.
 
 `standardWebhookVerifier({ secret, toleranceMs?, now? })` throws when it is built with a secret that is not base64, not on each delivery. It is a `verify` for Standard Webhooks signatures on Web Crypto. It does not drop a repeated `webhook-id`; a trigger's inbox dedupes by event id, so `toEvent` uses the `webhook-id` as the event's id.
 

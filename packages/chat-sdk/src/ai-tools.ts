@@ -2,7 +2,7 @@ import type { Tool, ToolExecutionContext } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import type { ZodTypeAny } from 'zod';
 import { z } from 'zod';
-import { approvalDecisions, approvalRequests } from './approvals';
+import { approvalDecisions, approvalRequests, noteWaiting } from './approvals';
 
 const DEFAULT_APPROVAL_TIMEOUT = 300_000; // 5 minutes for a human to click a button
 
@@ -198,25 +198,31 @@ async function awaitApproval(params: {
     ctx,
   );
 
-  while (true) {
-    const decision = await pending;
-    if (decision.requestId === requestId) {
-      if (!decision.approved) {
-        const reason = decision.reason ? `: ${decision.reason}` : '';
-        throw new Error(`Tool call '${params.name}' was rejected by the user${reason}.`);
+  // So `answerApproval` can tell a click that reached a waiting call from a stale one.
+  const done = noteWaiting(harness, requestId);
+  try {
+    while (true) {
+      const decision = await pending;
+      if (decision.requestId === requestId) {
+        if (!decision.approved) {
+          const reason = decision.reason ? `: ${decision.reason}` : '';
+          throw new Error(`Tool call '${params.name}' was rejected by the user${reason}.`);
+        }
+        return;
       }
-      return;
+      // Another gated call's decision woke us. Re-park immediately — the gap
+      // is a microtask, and external sends arrive from I/O macrotasks, so a
+      // decision cannot slip through it.
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new Error(`Tool call '${params.name}' timed out waiting for approval.`);
+      }
+      pending = harness.recv(approvalDecisions, ctx, {
+        timeout: remaining,
+      });
     }
-    // Another gated call's decision woke us. Re-park immediately — the gap
-    // is a microtask, and external sends arrive from I/O macrotasks, so a
-    // decision cannot slip through it.
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) {
-      throw new Error(`Tool call '${params.name}' timed out waiting for approval.`);
-    }
-    pending = harness.recv(approvalDecisions, ctx, {
-      timeout: remaining,
-    });
+  } finally {
+    done();
   }
 }
 

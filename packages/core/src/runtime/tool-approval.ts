@@ -30,6 +30,20 @@ export interface ToolApproval {
   decision: SteeringDecision;
 }
 
+const warnedHeld = new WeakMap<HoldHost, Set<string>>();
+
+function warnHeldUnasked(harness: HoldHost, toolName: string): void {
+  const names = warnedHeld.get(harness) ?? new Set<string>();
+  warnedHeld.set(harness, names);
+  if (names.has(toolName)) {
+    return;
+  }
+  names.add(toolName);
+  console.warn(
+    `[noetic] tool '${toolName}' needs approval and harness '${harness.config.name}' has no approver, so its calls are held until someone answers. List them with harness.pending() and answer with a decision item passed to harness.execute(), or set AgentHarness({ approveToolCall }) to ask as each call is made.`,
+  );
+}
+
 //#endregion
 
 //#region Helpers
@@ -140,6 +154,9 @@ export async function askApproval(params: {
         `'${params.toolName}' needs approval, and there is no approver and no call id to hold it under`,
       );
     }
+    // Held, and nothing will ask anyone: a host that expected a prompt sees a
+    // call that never finishes. Say where the call is and how it is answered.
+    warnHeldUnasked(params.harness, params.toolName);
     throw new HoldSignal();
   }
   let decision: SteeringDecision;

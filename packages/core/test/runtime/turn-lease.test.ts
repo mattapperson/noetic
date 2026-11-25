@@ -832,3 +832,99 @@ describe('aborting a thread that waits for a lease', () => {
     await harness.close();
   });
 });
+
+describe('a renewal that landed though storage reported a failure', () => {
+  it('is not taken for another harness having the lease', async () => {
+    const inner = createInMemoryStorage(SWAP);
+    let failNext = false;
+    const flaky: StorageAdapter = {
+      ...inner,
+      get: (key) => inner.get(key),
+      set: (key, value) => inner.set(key, value),
+      delete: (key) => inner.delete(key),
+      list: (prefix) => inner.list(prefix),
+      swap: async (key, prev, next) => {
+        const won = await inner.swap?.(key, prev, next);
+        if (failNext) {
+          failNext = false;
+          // The write is in storage. The answer never reached the caller.
+          throw new Error('connection reset');
+        }
+        return won === true;
+      },
+    };
+    assert(canSwap(flaky));
+    const clock: Clock = {
+      t: 0,
+    };
+    const lease = await TurnLease.take(leaseOptions(flaky, 'a', clock), 't');
+    let lost: string | undefined;
+    lease.keep((reason) => {
+      lost = reason;
+    });
+    clock.t = 10;
+    failNext = true;
+    await lease.renew();
+    // It remembers the old deadline; storage holds the new one, under its name.
+    clock.t = 20;
+    await lease.renew();
+    await lease.release();
+    expect(lost).toBeUndefined();
+    // And the lease it handed back is free for the next taker.
+    expect((await TurnLease.take(leaseOptions(flaky, 'b', clock), 't')).term).toBe(2);
+  });
+});
+
+describe('the wake time of a turn that is running', () => {
+  it('is one lease period ahead, for a host to come back to if the process is gone', async () => {
+    const storage = createInMemoryStorage(SWAP);
+    let release: (() => void) | undefined;
+    const harness = new AgentHarness({
+      name: 'watchdog',
+      params: {},
+      agentGraph: runCode<ContextData, string, string>({
+        id: 'slow',
+        execute: async () => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return 'done';
+        },
+      }),
+      environment: {
+        storage: {
+          adapter: storage,
+          lease: {
+            ttlMs: 5e3,
+          },
+        },
+      },
+    });
+    const times: Array<number | undefined> = [];
+    harness.onWakeTimeChange((at) => {
+      times.push(at);
+    });
+    const scope = {
+      threadId: 't',
+    };
+    const before = Date.now();
+    await harness.execute('go', scope);
+    for (let i = 0; i < 500 && release === undefined; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    assert(release);
+    const during = await harness.getNextWakeTime();
+    assert(during !== undefined);
+    // After the lease has run out, and not long after.
+    expect(during).toBeGreaterThanOrEqual(before + 5e3);
+    expect(during).toBeLessThanOrEqual(Date.now() + 5e3 + 2e3);
+    // The host was told as the turn began, not only when it ends.
+    expect(times.some((at) => at !== undefined && at >= before + 5e3)).toBe(true);
+
+    release();
+    expect((await harness.getAgentResponse(scope)).text).toBe('done');
+    expect(await harness.getNextWakeTime()).toBeUndefined();
+    expect(times.at(-1)).toBeUndefined();
+    await harness.close();
+  });
+});

@@ -699,14 +699,29 @@ describe('triggers', () => {
     });
     await runner.start();
     await sleep(5);
-    await source.emit({
-      type: 'deploy.failed',
-      id: 'poison',
-      payload: {
-        service: 'api',
-      },
-      cursor: '1',
-    });
+    // The event is tried again before it is given up on: the sender is told it was
+    // not stored, sends it again, and the third time it is taken and set aside.
+    let refusals = 0;
+    for (let stored = false; !stored && refusals < 20; ) {
+      stored = await source
+        .emit({
+          type: 'deploy.failed',
+          id: 'poison',
+          payload: {
+            service: 'api',
+          },
+          cursor: '1',
+        })
+        .then(
+          () => true,
+          () => false,
+        );
+      if (!stored) {
+        refusals += 1;
+        await sleep(5);
+      }
+    }
+    expect(refusals).toBeGreaterThanOrEqual(2);
     await source.emit({
       type: 'deploy.failed',
       id: 'next',
@@ -719,7 +734,9 @@ describe('triggers', () => {
     expect(delivered).toEqual([
       'next',
     ]);
-    expect(errors).toHaveLength(2);
+    // The filter's failure, once it was final, and the failed turn; a stream that
+    // ended on the way may be reported too.
+    expect(errors.length).toBeGreaterThanOrEqual(2);
     expect(await storage.get('noetic/connections/triggers/failures/cursor')).toBe('2');
     expect(await storage.list('noetic/connections/triggers/failures/inbox/')).toEqual([]);
     await runner.close();

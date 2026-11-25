@@ -261,6 +261,89 @@ describe('a question a long task asks', () => {
 });
 
 describe('an invokeTool step', () => {
+  it('asks its question once, though the turn parks on it and another process wakes it', async () => {
+    // Regression: the woken step ran the tool's body again, asking a second time.
+    let asked = 0;
+    const ask = tool({
+      name: 'ask_person',
+      description: 'Ask a person.',
+      input: z.object({
+        question: z.string(),
+      }),
+      output: z.string(),
+      execute: async ({ question }) => {
+        asked += 1;
+        return hold({
+          request: {
+            question,
+          },
+        });
+      },
+    });
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const build = (): AgentHarness =>
+      new AgentHarness({
+        name: 'routes',
+        params: {},
+        agentGraph: runCode<ContextData, string, string>({
+          id: 'flow',
+          execute: async (_input, execCtx) =>
+            String(
+              await execCtx.harness.run(
+                invokeTool({
+                  id: 'ask',
+                  tool: ask,
+                }),
+                {
+                  question: 'Ship it?',
+                },
+                execCtx,
+              ),
+            ),
+        }),
+        environment: {
+          storage: {
+            adapter: storage,
+            lease: {
+              waitMs: 0,
+            },
+            park: {
+              graceMs: 0,
+              autoWake: false,
+            },
+          },
+        },
+      });
+    const thread = {
+      threadId: 't',
+    };
+    const first = build();
+    await first.execute('go', {
+      ...thread,
+      messageId: 'm-1',
+    });
+    assert((await first.getAgentResponse(thread)).parked);
+    await first.close();
+
+    const second = build();
+    const [held] = await second.pending(thread);
+    assert(held);
+    expect(held.reason).toBe('result');
+    await second.execute(
+      {
+        type: 'noetic:decision',
+        callId: held.callId,
+        output: 'Yes, ship it.',
+      },
+      thread,
+    );
+    expect((await second.getAgentResponse(thread)).text).toBe('Yes, ship it.');
+    expect(asked).toBe(1);
+    await second.close();
+  });
+
   it("takes a person's answer as the result of a tool that returned hold()", async () => {
     let asked = 0;
     const ask = tool({

@@ -327,9 +327,15 @@ describe('a call the approver holds', () => {
   it('with no approver at all, is held the same way', async () => {
     const { runs, harness } = setup(LOOKUP_THEN_REFUND);
     const h = harness();
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
     await h.execute('refund A1', THREAD);
     const held = await heldCall(h);
     expect(held.name).toBe('refund');
+    // Nothing will ask anyone, so the host is told where the call is waiting.
+    const said = warn.mock.calls.map((call) => String(call[0])).filter((m) => m.includes('refund'));
+    warn.mockRestore();
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('harness.pending()');
 
     await decide(h, THREAD, {
       callId: held.callId,

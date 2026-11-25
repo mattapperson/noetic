@@ -219,6 +219,28 @@ describe('answerApproval', () => {
     ).rejects.toThrow('storage is down');
   });
 
+  test('is false for a stale click though the channel is open: sent is not taken', async () => {
+    const sent: unknown[] = [];
+    // A real harness's decision channel stays open for its whole life.
+    const open = frameworkCast<HeldApprovalHarness>({
+      pending: async () => [],
+      execute: async () => expect.unreachable('the harness holds no such call'),
+      getChannelHandle: () => ({
+        closed: false,
+        send: (value: unknown) => {
+          sent.push(value);
+        },
+      }),
+    });
+    expect(
+      await answerApproval({
+        harness: open,
+        decision: click,
+      }),
+    ).toBe(false);
+    expect(sent).toEqual([]);
+  });
+
   test('does not hand a decision to a harness that cannot list held calls', async () => {
     const executed: unknown[] = [];
     // Its `execute` would take the decision for a message and start a turn.

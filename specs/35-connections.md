@@ -401,8 +401,13 @@ the harness runs:
 After the last try the trigger gives up on the event: the harness emits
 `{name}:trigger_gave_up` with the connection, the trigger, the event, how many
 tries it had and the last error, the event is marked seen so it is not delivered
-again, and nothing more is kept. The same event is emitted, with `attempts: 0`,
-when the trigger's own `filter`, `input` or `thread` throws on an event. Trying it again is the sender's business: a
+again, and nothing more is kept. Reading an event into a turn can fail before there is a turn to try: the
+trigger's own `filter`, `input` or `thread` throws, or a blob in the payload
+could not be stored. That may be the event or it may be the moment, so the
+event is read three times in all. The first two times its `emit` rejects, the
+cursor does not move, and the stream is read again from where it was. The third
+time the trigger gives up on it as above, with the number of tries. After that,
+trying it again is the sender's business: a
 host that wants another go emits the event again under a new id. An event cut
 off by the process ending, before its tries ran out, stays in the inbox and is delivered again at the next start.
 
