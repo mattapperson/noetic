@@ -111,7 +111,7 @@ callModel({
 
 The agent harness assembles the View before calling the model: context layer items (`role: developer`) banded around the conversation history. The `instructions` field is not a View item — it is sent as the request's separate `instructions` field, followed by the text of any `role: system` messages pulled out of the View.
 
-`AgentHarness.execute` accepts a plain string, one item, or an item array. Use an `InputMessageItem` when the input needs structured content; its `content` array supports `input_text`, `input_image`, and `input_file` parts.
+`AgentHarness.execute` accepts a plain string, one item, or an item array. Use an `InputMessageItem` when the input needs structured content; its `content` array supports `input_text`, `input_image`, `input_file`, and `input_video` parts. Set `videoUrl` to a URL or base64 data URL and choose an OpenRouter model with video input support.
 
 ### invokeTool
 

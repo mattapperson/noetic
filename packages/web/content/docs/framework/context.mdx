@@ -291,7 +291,10 @@ Content arrays use these discriminated variants:
 | `input_text` | `text: string` | User-provided text |
 | `input_image` | `imageUrl: string`, `detail?: 'auto' \| 'low' \| 'high'` | User-provided image |
 | `input_file` | `fileData?: string`, `fileId?: string \| null`, `fileUrl?: string`, `filename?: string` | User-provided file |
+| `input_video` | `videoUrl: string` | User-provided video |
 | `refusal` | `refusal: string` | Model refusal message |
+
+Use an HTTPS URL or a base64 data URL in `videoUrl`. Choose an OpenRouter model that accepts video input. Direct URL support varies by provider.
 
 ## Per-Layer Usage Breakdown
 

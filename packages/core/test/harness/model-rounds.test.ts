@@ -16,7 +16,7 @@ import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import type { SessionCtxExtension } from '../../src/runtime/message-queue';
 import { MessageQueue } from '../../src/runtime/message-queue';
 import type { FakeOpenRouter } from '../_helpers';
-import { startFakeOpenRouter } from '../_helpers';
+import { assistantMessage, startFakeOpenRouter } from '../_helpers';
 
 //#region Fixtures
 
@@ -162,6 +162,45 @@ afterEach(() => {
 });
 
 //#endregion
+
+describe('model input', () => {
+  it.each([
+    'https://example.com/clip.mp4',
+    'data:video/mp4;base64,AAAA',
+  ])('sends a video-only user message with %s', async (videoUrl) => {
+    const { server, harness } = setup(undefined, () => [
+      assistantMessage('done', 'msg_done'),
+    ]);
+    await harness(createInMemoryStorage()).callModel({
+      model: 'test/model',
+      items: [
+        {
+          id: 'clip',
+          type: 'message',
+          role: 'user',
+          status: 'completed',
+          content: [
+            {
+              type: 'input_video',
+              videoUrl,
+            },
+          ],
+        },
+      ],
+    });
+    expect(server.rounds[0]?.input).toEqual([
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_video',
+            video_url: videoUrl,
+          },
+        ],
+      },
+    ]);
+  });
+});
 
 describe('durable model rounds', () => {
   it('resumes a tool loop cut off mid-round without re-running finished rounds', async () => {

@@ -56,7 +56,7 @@ describe('toItems', () => {
     ]);
   });
 
-  test('maps attachments to input_image and input_file parts', () => {
+  test('maps attachments to input_image, input_file, and input_video parts', () => {
     const items = toItems([
       chatMessage({
         id: 'm3',
@@ -71,6 +71,10 @@ describe('toItems', () => {
             type: 'file',
             url: 'https://x/doc.pdf',
             name: 'doc.pdf',
+          },
+          {
+            type: 'video',
+            url: 'https://x/clip.mp4',
           },
           {
             type: 'file',
@@ -93,6 +97,10 @@ describe('toItems', () => {
         type: 'input_file',
         fileUrl: 'https://x/doc.pdf',
         filename: 'doc.pdf',
+      },
+      {
+        type: 'input_video',
+        videoUrl: 'https://x/clip.mp4',
       },
     ]);
   });
