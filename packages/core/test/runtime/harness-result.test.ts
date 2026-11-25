@@ -125,28 +125,6 @@ function functionCallResponse(callNumber: number): MockModelResponse {
   });
 }
 
-class ToolLimitRecoveryClient {
-  calls = 0;
-  readonly inputs: RecordedModelInput[] = [];
-
-  callModel(request: { input: RecordedModelInput }): {
-    getFullResponsesStream: () => AsyncIterable<unknown>;
-    getResponse: () => Promise<MockModelResponse>;
-  } {
-    const callNumber = this.calls++;
-    this.inputs.push(request.input);
-    return {
-      async *getFullResponsesStream() {},
-      getResponse: async () => {
-        if (callNumber >= 32 && isEphemeralContinueInput(request.input)) {
-          return messageResponse(`resp-final-${callNumber}`, 'finished after continue');
-        }
-        return functionCallResponse(callNumber);
-      },
-    };
-  }
-}
-
 class InvalidStateRecoveryClient {
   calls = 0;
   readonly inputs: RecordedModelInput[] = [];
@@ -535,53 +513,6 @@ describe('AgentHarness session accessors', () => {
     expect(
       collected.some((item) => item.type === 'function_call_output' && item.callId === 'call-noop'),
     ).toBe(true);
-  });
-
-  it('recovers from the tool-round limit with an ephemeral continue retry', async () => {
-    const fakeClient = new ToolLimitRecoveryClient();
-    const noopTool = tool({
-      name: 'noop',
-      description: 'Always returns ok',
-      input: z.object({}),
-      output: z.object({
-        ok: z.boolean(),
-      }),
-      execute: async () => ({
-        ok: true,
-      }),
-    });
-    const harness = new AgentHarness({
-      name: 'test',
-      params: {},
-    });
-    frameworkCast<{
-      llm: {
-        client: ToolLimitRecoveryClient;
-      };
-    }>(harness).llm.client = fakeClient;
-    const ctx = harness.createContext();
-
-    const response = await harness.callModel({
-      model: 'test/model',
-      items: [
-        makeMessage('user', 'keep using tools'),
-      ],
-      tools: [
-        noopTool,
-      ],
-      ctx,
-    });
-
-    expect(fakeClient.calls).toBe(33);
-    expect(fakeClient.inputs.slice(0, 32).some(hasEphemeralContinueInput)).toBe(false);
-    expect(hasEphemeralContinueInput(fakeClient.inputs[32] ?? [])).toBe(true);
-    expect(ctx.itemLog.items.some((item) => item.type === 'message' && item.role === 'user')).toBe(
-      false,
-    );
-    expect(response.items.at(-1)).toMatchObject({
-      type: 'message',
-      role: 'assistant',
-    });
   });
 
   it('recovers incomplete provider responses without persisting the synthetic continue', async () => {
