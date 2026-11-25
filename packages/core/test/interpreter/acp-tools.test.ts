@@ -867,6 +867,43 @@ describe('mergeBridgedItems', () => {
         : [],
     );
 
+  it('never matches a pair it added: two unrecorded calls to one tool both stay', () => {
+    const { items: merged } = mergeBridgedItems(
+      [],
+      [
+        bridged('echo', 'g-1', 'first'),
+        bridged('echo', 'g-2', 'second'),
+      ],
+    );
+    expect(callIds(merged)).toEqual([
+      'g-1',
+      'g-2',
+    ]);
+    expect(JSON.stringify(merged)).toContain('first');
+    expect(JSON.stringify(merged)).toContain('second');
+  });
+
+  it('claims exact ids before titles, each record once', () => {
+    const { items: merged } = mergeBridgedItems(
+      [
+        callItem('a', 'mcp__noetic__echo'),
+        outputItem('a', 'agent a'),
+        callItem('b', 'mcp__noetic__echo'),
+        outputItem('b', 'agent b'),
+      ],
+      [
+        // By title it would take `a`; its own id is `b`.
+        bridged('echo', 'b', 'bridge b'),
+        bridged('echo', 'x', 'bridge x'),
+      ],
+    );
+    expect(callIds(merged)).toEqual([
+      'x',
+      'b',
+    ]);
+    expect(JSON.stringify(merged)).not.toContain('agent');
+  });
+
   it('replaces the agent pair in place by exact title, keeping the bridge id', () => {
     const { items: merged } = mergeBridgedItems(
       [

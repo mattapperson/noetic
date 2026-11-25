@@ -210,6 +210,13 @@ function wrongAnswerKind(
     : 'the call waits for an approval, not a result';
 }
 
+/** Whether two records of one call differ in nothing but who they name as asking. */
+function onlyScopeChanged(before: HeldRecord, after: HeldRecord): boolean {
+  const { scope: _before, ...restBefore } = before;
+  const { scope: _after, ...restAfter } = after;
+  return JSON.stringify(restBefore) === JSON.stringify(restAfter);
+}
+
 function sameResolution(a: HeldRecord['resolution'], b: HeldRecord['resolution']): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -336,7 +343,7 @@ export class HeldCalls {
   }
 
   /** Answers being taken, by execution and call, so two never overlap. */
-  private readonly answering = new Map<string, Promise<void>>();
+  private readonly answering = new Map<string, Promise<unknown>>();
 
   /** Every held call of an execution. */
   async list(executionId: string): Promise<HeldRecord[]> {
@@ -379,7 +386,17 @@ export class HeldCalls {
    * writes over an answer: a compare-and-set that loses re-reads. Resolves
    * with the record as it now stands.
    */
-  async rescope(
+  rescope(
+    executionId: string,
+    callId: string,
+    scope: HeldRecord['scope'],
+  ): Promise<HeldRecord | undefined> {
+    // In line with this process's answers to the call: on storage without
+    // `swap`, nothing else keeps a rescope from writing over one.
+    return this.exclusive(executionId, callId, () => this.rescopeOne(executionId, callId, scope));
+  }
+
+  private async rescopeOne(
     executionId: string,
     callId: string,
     scope: HeldRecord['scope'],
@@ -595,12 +612,15 @@ export class HeldCalls {
       resolution: HeldResolution;
     },
   ): Promise<void> {
-    // One answer at a time per call. Storage with `swap` settles a race between
-    // processes; without it nothing else stops two answers here from both landing.
-    const key = `${executionId}\u0000${answer.callId}`;
-    const turn = (this.answering.get(key) ?? Promise.resolve())
-      .catch(() => undefined)
-      .then(() => this.resolveOne(executionId, answer));
+    // One change at a time per call. Storage with `swap` settles a race between
+    // processes; without it nothing else stops two writes here from both landing.
+    return this.exclusive(executionId, answer.callId, () => this.resolveOne(executionId, answer));
+  }
+
+  /** Run `change` after every earlier change to the same call in this process. */
+  private exclusive<T>(executionId: string, callId: string, change: () => Promise<T>): Promise<T> {
+    const key = `${executionId}\u0000${callId}`;
+    const turn = (this.answering.get(key) ?? Promise.resolve()).catch(() => undefined).then(change);
     this.answering.set(key, turn);
     const forget = (): void => {
       if (this.answering.get(key) === turn) {
@@ -655,8 +675,14 @@ export class HeldCalls {
         return;
       }
       // Only who it names as asking changed (another host restated it): answer again.
-      if (now && now.resolution === undefined && retries > 0) {
-        return await this.resolveOne(executionId, answer, retries - 1);
+      if (now && now.resolution === undefined && onlyScopeChanged(record, now)) {
+        if (retries > 0) {
+          return await this.resolveOne(executionId, answer, retries - 1);
+        }
+        throw refused(callId, 'the call kept changing while it was being answered; try again');
+      }
+      if (now && now.resolution === undefined) {
+        throw refused(callId, 'the call was replaced while it was being answered');
       }
       throw refused(callId, 'the call was already answered differently');
     }

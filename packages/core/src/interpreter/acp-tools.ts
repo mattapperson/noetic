@@ -45,6 +45,7 @@ import {
   heldScopeOf,
   mayWriteHolds,
   noticeHeld,
+  toHeldCall,
   waitOnHeldCalls,
 } from '../runtime/held-calls';
 import { createToolResultItem, executeToolCall, resolveWireJsonSchema } from '../runtime/tool-call';
@@ -213,37 +214,85 @@ export function mergeBridgedItems(
   /** Bridge `callId`s now standing where an agent record with another id was. */
   adopted: string[];
 } {
+  // Only the agent's own records are matched — never a pair this merge added —
+  // exact ids before titles, each record claimed once.
+  const slotOf = matchBridgedCalls(items, calls);
   const adopted: string[] = [];
-  const merged = [
-    ...items,
-  ];
-  const claimed = new Set<string>();
-  const unclaimedCall = (match: (item: FunctionCallItem) => boolean): number =>
-    merged.findIndex((item) => isFunctionCall(item) && !claimed.has(item.callId) && match(item));
-  for (const call of calls) {
-    const byId = unclaimedCall((item) => item.callId === call.callItem.callId);
-    const index = byId >= 0 ? byId : unclaimedCall((item) => namesBridgedCall(item, call.wireName));
-    const found = index >= 0 ? merged[index] : undefined;
-    if (!found || !isFunctionCall(found)) {
-      merged.push(call.callItem, call.outputItem);
+  const byRecord = new Map<string, BridgedCall>();
+  for (const [call, index] of slotOf) {
+    const record = items[index];
+    if (!record || !isFunctionCall(record)) {
       continue;
     }
-    claimed.add(found.callId);
-    if (found.callId !== call.callItem.callId) {
+    byRecord.set(record.callId, call);
+    if (record.callId !== call.callItem.callId) {
       adopted.push(call.callItem.callId);
     }
-    const outputIndex = merged.findIndex((item) => isOutputFor(item, found.callId));
-    merged[index] = call.callItem;
-    if (outputIndex >= 0) {
-      merged[outputIndex] = call.outputItem;
-    } else {
-      merged.splice(index + 1, 0, call.outputItem);
+  }
+  const merged: Item[] = [];
+  const placedOutput = new Set<string>();
+  for (const item of items) {
+    if (isFunctionCall(item) && byRecord.has(item.callId)) {
+      const call = byRecord.get(item.callId);
+      if (call) {
+        merged.push(call.callItem);
+        if (!items.some((other) => isOutputFor(other, item.callId))) {
+          merged.push(call.outputItem);
+          placedOutput.add(item.callId);
+        }
+      }
+      continue;
+    }
+    const replacing = [
+      ...byRecord.entries(),
+    ].find(([recordId]) => isOutputFor(item, recordId));
+    if (replacing && !placedOutput.has(replacing[0])) {
+      merged.push(replacing[1].outputItem);
+      placedOutput.add(replacing[0]);
+      continue;
+    }
+    merged.push(item);
+  }
+  for (const call of calls) {
+    if (!slotOf.has(call)) {
+      merged.push(call.callItem, call.outputItem);
     }
   }
   return {
     items: merged,
     adopted,
   };
+}
+
+/**
+ * Which of the agent's own records each bridged call stands for: by exact id
+ * first, then by the first unclaimed record whose title names its tool. A
+ * call with no record is absent.
+ */
+function matchBridgedCalls(
+  items: ReadonlyArray<Item>,
+  calls: ReadonlyArray<BridgedCall>,
+): Map<BridgedCall, number> {
+  const slotOf = new Map<BridgedCall, number>();
+  const claimed = new Set<number>();
+  const claim = (call: BridgedCall, match: (item: FunctionCallItem) => boolean): void => {
+    const index = items.findIndex(
+      (item, at) => !claimed.has(at) && isFunctionCall(item) && match(item),
+    );
+    if (index >= 0) {
+      claimed.add(index);
+      slotOf.set(call, index);
+    }
+  };
+  for (const call of calls) {
+    claim(call, (item) => item.callId === call.callItem.callId);
+  }
+  for (const call of calls) {
+    if (!slotOf.has(call)) {
+      claim(call, (item) => namesBridgedCall(item, call.wireName));
+    }
+  }
+  return slotOf;
 }
 
 //#endregion
@@ -269,10 +318,12 @@ type CallOwner =
 interface SettledCall extends BridgedCall {
   readonly callId: string;
   /**
-   * Set for a call run as the step's provisionally: its result item waits for
-   * the turn's end, published on these step events if it stays the step's.
+   * Set while the call's result item is not yet on the stream: published on
+   * these step events, in queue order, when the turn's calls are taken.
    */
-  readonly provisional?: AcpEventBridge;
+  readonly pending?: AcpEventBridge;
+  /** Its owner is not settled yet: a subagent announcing it by then takes it. */
+  readonly provisional?: boolean;
 }
 
 //#region Runner
@@ -498,16 +549,12 @@ export class AcpToolRunner implements AcpToolHost {
   takeFinished(): BridgedCall[] {
     const taken: BridgedCall[] = [];
     for (const call of this.finished) {
-      if (!call.provisional) {
-        taken.push(call);
-        continue;
-      }
-      const owner = this.owners.get(call.callId);
+      const owner = call.provisional ? this.owners.get(call.callId) : undefined;
       if (owner?.kind === 'subagent') {
-        call.provisional.childBridge(owner.sessionId)?.itemAppended(call.outputItem);
+        call.pending?.childBridge(owner.sessionId)?.itemAppended(call.outputItem);
         continue;
       }
-      call.provisional.itemAppended(call.outputItem);
+      call.pending?.itemAppended(call.outputItem);
       taken.push(call);
     }
     this.finished = [];
@@ -661,12 +708,65 @@ export class AcpToolRunner implements AcpToolHost {
       signal: AbortSignal;
     },
   ): ReturnType<typeof executeToolCall> {
+    const { signal } = call;
+    const callId = call.params.callId;
+    try {
+      return await this.settleHeld(binding, record, call, signal);
+    } finally {
+      // However the call ends, it is no longer waiting on a person.
+      if (callId !== undefined) {
+        this.holding.delete(callId);
+      }
+    }
+  }
+
+  /**
+   * The nested agent a call is now known to be from — read when each hold opens,
+   * since an announcement can land while the call is running.
+   */
+  private latestScope(binding: CallBinding, callId: string | undefined): AgentScope | undefined {
+    const owner = callId === undefined ? undefined : this.owners.get(callId);
+    return owner?.kind === 'subagent'
+      ? binding.stepEvents.scopeFor(owner.sessionId)
+      : binding.scope;
+  }
+
+  private async settleHeld(
+    binding: CallBinding,
+    record: BridgedCallRecord,
+    call: {
+      params: Parameters<typeof executeToolCall>[0];
+      signal: AbortSignal;
+    },
+    signal: AbortSignal,
+  ): ReturnType<typeof executeToolCall> {
     const { ctx } = binding;
-    const { params, signal } = call;
-    let result = await executeToolCall(params);
+    const params = {
+      ...call.params,
+    };
+    const withLatestScope = (): Parameters<typeof executeToolCall>[0] => {
+      const scope = this.latestScope(binding, params.callId);
+      return scope
+        ? {
+            ...params,
+            scope,
+          }
+        : params;
+    };
+    let result = await executeToolCall(withLatestScope());
     let announced: string | undefined;
     while (result.held !== undefined) {
-      const { held } = result;
+      let held = result.held;
+      // The call may have turned out to be a subagent's since its hold opened.
+      const scope = this.latestScope(binding, params.callId);
+      if (scope && held.scope?.id !== scope.id && mayWriteHolds(ctx)) {
+        const renamed = await heldCallsOf(ctx.harness).rescope(
+          heldScopeOf(ctx),
+          held.callId,
+          scope,
+        );
+        held = renamed ? toHeldCall(renamed) : held;
+      }
       // Said once per question, under the id the agent's other events carry.
       if (announced !== held.reason) {
         announced = held.reason;
@@ -721,9 +821,8 @@ export class AcpToolRunner implements AcpToolHost {
           error: true,
         };
       }
-      result = await executeToolCall(params);
+      result = await executeToolCall(withLatestScope());
     }
-    this.holding.delete(params.callId ?? '');
     const stored = await record.store(result);
     if (!mayWriteHolds(ctx)) {
       return result;
@@ -810,23 +909,43 @@ export class AcpToolRunner implements AcpToolHost {
       callItem,
       outputItem,
     };
-    // One queue, in the order calls finished: a provisional call's items wait
-    // for the turn's end (`takeFinished`); a subagent's are never the step's.
-    if (binding.owner.kind === 'provisional') {
+    // One queue, in the order calls finished. A subagent's call is never the
+    // step's. A provisional call stays open only while a subagent has spoken
+    // this turn — then its item waits for the turn's end, and any step result
+    // after it waits behind it, so the stream keeps the order calls finished.
+    // The owner as it stands now: a subagent may have announced the call while
+    // it ran.
+    const owner: CallOwner =
+      binding.owner.kind === 'provisional'
+        ? (this.owners.get(callId) ?? binding.owner)
+        : binding.owner;
+    if (owner.kind === 'subagent') {
+      (binding.stepEvents.childBridge(owner.sessionId) ?? binding.events).itemAppended(outputItem);
+    } else {
+      const open = owner.kind === 'provisional' && this.subagentsThisTurn;
+      if (owner.kind === 'provisional' && !open) {
+        this.owners.set(callId, {
+          kind: 'step',
+        });
+      }
+      const behind = open || this.finished.some((settled) => settled.pending !== undefined);
       this.finished.push({
         ...finished,
         callId,
-        provisional: binding.stepEvents,
+        ...(open
+          ? {
+              provisional: true,
+            }
+          : {}),
+        ...(behind
+          ? {
+              pending: binding.stepEvents,
+            }
+          : {}),
       });
-    }
-    if (binding.owner.kind === 'step') {
-      this.finished.push({
-        ...finished,
-        callId,
-      });
-    }
-    if (binding.owner.kind !== 'provisional') {
-      binding.events.itemAppended(outputItem);
+      if (!behind) {
+        binding.stepEvents.itemAppended(outputItem);
+      }
     }
     binding.events.toolEvent('tool_call_completed', {
       name: call.name,

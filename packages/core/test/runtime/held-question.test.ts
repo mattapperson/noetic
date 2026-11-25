@@ -495,3 +495,84 @@ describe('naming who asks, racing an answer', () => {
     expect(record?.scope?.id).toBe('another-host');
   });
 });
+
+describe('naming who asks on storage without compare-and-set', () => {
+  it('a rescope and an answer in one process take turns: the answer survives', async () => {
+    const storage = createInMemoryStorage();
+    const set = storage.set.bind(storage);
+    let release: () => void = () => undefined;
+    let paused = false;
+    const holds = new HeldCalls(
+      {
+        ...storage,
+        async set<T>(key: string, value: T): Promise<void> {
+          // Hold the rescope's write until the answer has been submitted.
+          if (!paused && JSON.stringify(value).includes('late-scope')) {
+            paused = true;
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+          }
+          await set(key, value);
+        },
+      },
+      () => 0,
+    );
+    await holds.open('exec', question('q5'));
+    const renaming = holds.rescope('exec', 'q5', {
+      id: 'late-scope',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const answering = holds.resolve('exec', {
+      callId: 'q5',
+      resolution: {
+        action: 'deny',
+      },
+    });
+    release();
+    await Promise.all([
+      renaming,
+      answering,
+    ]);
+    const record = await holds.load('exec', 'q5');
+    expect(record?.resolution?.action).toBe('deny');
+  });
+
+  it('an answer racing a replacement with other arguments is refused, never applied to it', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const swap = storage.swap?.bind(storage);
+    let raced = false;
+    const holds = new HeldCalls(
+      {
+        ...storage,
+        async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
+          if (!raced) {
+            raced = true;
+            // Another host replaces the hold with one for other arguments.
+            await storage.set(key, {
+              ...question('q6'),
+              args: {
+                message: 'something else',
+              },
+            });
+          }
+          return (await swap?.(key, prev, next)) ?? false;
+        },
+      },
+      () => 0,
+    );
+    await holds.open('exec', question('q6'));
+    const error = await holds
+      .resolve('exec', {
+        callId: 'q6',
+        resolution: {
+          action: 'deny',
+        },
+      })
+      .catch((e: unknown) => e);
+    assert(isNoeticError(error));
+    expect(error.message).toContain('replaced');
+  });
+});

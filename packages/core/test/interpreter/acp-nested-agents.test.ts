@@ -329,6 +329,10 @@ interface ChildCallOptions {
   failAfter?: boolean;
   /** The agent gives up on the call while its owner is still being settled. */
   abortDuringWait?: boolean;
+  /** An approver that takes a while, then leaves the call to a person. */
+  slowApprover?: boolean;
+  /** After the first call, the step announces and makes a call of its own. */
+  stepCallAfter?: boolean;
 }
 
 async function runChildCall(opts: ChildCallOptions): Promise<{
@@ -349,6 +353,16 @@ async function runChildCall(opts: ChildCallOptions): Promise<{
           action: 'allow',
         };
       },
+      ...(opts.slowApprover
+        ? {
+            approveToolCall: async () => {
+              await new Promise((resolve) => setTimeout(resolve, 30));
+              return {
+                action: 'hold' as const,
+              };
+            },
+          }
+        : {}),
     });
     const ctx = harness.createContext();
     const events: Captured[] = [];
@@ -369,6 +383,10 @@ async function runChildCall(opts: ChildCallOptions): Promise<{
       needsApproval: opts.approval === true,
       execute: async ({ text }) => {
         runs += 1;
+        // Long enough for an announcement sent mid-call to land while it runs.
+        if (opts.announce === 'during') {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+        }
         return text;
       },
     });
@@ -421,6 +439,24 @@ async function runChildCall(opts: ChildCallOptions): Promise<{
             await calling;
             if (opts.announce === 'after') {
               announceCall();
+            }
+            if (opts.stepCallAfter) {
+              connect.host.onSessionUpdate?.({
+                sessionId: 'root',
+                update: {
+                  sessionUpdate: 'tool_call',
+                  toolCallId: 'step-call',
+                  title: 'mcp__noetic__echo',
+                },
+              });
+              await tools.call({
+                name: 'echo',
+                args: {
+                  text: 'from the step',
+                },
+                agentCallId: 'step-call',
+                signal: new AbortController().signal,
+              });
             }
             if (opts.failAfter) {
               throw new Error('the agent fell over');
@@ -519,6 +555,43 @@ describe("a subagent's bridged tool call", () => {
       'Explore',
     ]);
   });
+
+  it('a call announced by a subagent while its approver decides is held naming that subagent', async () => {
+    const { held } = await runChildCall({
+      announce: 'during',
+      subagent: false,
+      approval: true,
+      slowApprover: true,
+    });
+    expect(
+      held.map((call) => [
+        call.reason,
+        call.scope?.title,
+      ]),
+    ).toEqual([
+      [
+        'approval',
+        'Explore',
+      ],
+    ]);
+  });
+
+  it("a step's call after an unsettled one waits behind it: results keep the order they finished", async () => {
+    const { items, events } = await runChildCall({
+      announce: 'never',
+      stepCallAfter: true,
+    });
+    expect(items.indexOf('from the child')).toBeLessThan(items.indexOf('from the step'));
+    const order = events
+      .filter((e) => e.type.endsWith(':item_appended') && !e.scope)
+      .map((e) => JSON.stringify(e.data))
+      .filter((data) => data.includes('from the'))
+      .map((data) => (data.includes('from the child') ? 'child' : 'step'));
+    expect(order).toEqual([
+      'child',
+      'step',
+    ]);
+  }, 10e3);
 
   it('a failed turn still publishes what its finished calls returned', async () => {
     const { events } = await runChildCall({
