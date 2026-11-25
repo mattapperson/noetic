@@ -2,20 +2,22 @@
 // turn ends, minus any the next turn takes as its input.
 
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import type { Context, Item } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
 import { ThreadRecord } from '../../src/harness/thread-record';
 import { createSessionStore } from '../../src/runtime/durable/session-store';
+import type { LedgerFence } from '../../src/runtime/durable/turn-lease';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import type { QueuedMessage } from '../../src/runtime/message-queue';
 import { makeMessage } from '../_helpers';
 
 //#region Fixtures
 
-function makeRecord(): ThreadRecord {
+function makeRecord(storage = createInMemoryStorage()): ThreadRecord {
   return new ThreadRecord(
     {
-      store: createSessionStore(createInMemoryStorage()),
+      store: createSessionStore(storage),
       restore: async () => null,
       clearCheckpoint: async () => {},
       parseItems: (raw) => frameworkCast<Item[]>(raw),
@@ -37,6 +39,22 @@ function message(id: string, deliveryMode: QueuedMessage['deliveryMode']): Queue
 const ctx = frameworkCast<Context>({
   id: 'exec-1',
 });
+
+/** A fence at a fixed term, as a turn lease gives the record. */
+function fenceAt(term: number): LedgerFence {
+  return {
+    term,
+    assert: () => {},
+    verify: async () => {},
+    lose: (reason) =>
+      new NoeticErrorImpl({
+        kind: 'lease_lost',
+        executionId: ctx.id,
+        term,
+        reason,
+      }),
+  };
+}
 
 //#endregion
 
@@ -107,6 +125,57 @@ describe('ThreadRecord steers', () => {
 
     expect((await record.steers()).map((steer) => steer.id)).toEqual([
       'other',
+    ]);
+  });
+
+  it('removes the kept steers a turn drops in the write that records it', async () => {
+    const record = makeRecord();
+    await record.keepSteer(message('gone', 'between-rounds'));
+    await record.keepSteer(message('input', 'between-rounds'));
+    await record.keepSteer(message('stays', 'between-rounds'));
+
+    await record.begin(
+      ctx,
+      [
+        'input',
+      ],
+      [
+        'gone',
+      ],
+    );
+
+    expect((await record.steers()).map((steer) => steer.id)).toEqual([
+      'stays',
+    ]);
+    expect((await record.turn())?.messageIds).toEqual([
+      'input',
+    ]);
+  });
+
+  it('drops nothing when another harness took the turn at a higher term', async () => {
+    const storage = createInMemoryStorage();
+    const newer = makeRecord(storage);
+    await newer.keepSteer(message('gone', 'between-rounds'));
+    newer.hold(fenceAt(2));
+    await newer.begin(ctx, []);
+
+    const stale = makeRecord(storage);
+    stale.hold(fenceAt(1));
+    const error = await stale
+      .begin(
+        ctx,
+        [],
+        [
+          'gone',
+        ],
+      )
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(NoeticErrorImpl);
+    assert(error instanceof NoeticErrorImpl);
+    expect(error.noeticError.kind).toBe('lease_lost');
+    expect((await stale.steers()).map((steer) => steer.id)).toEqual([
+      'gone',
     ]);
   });
 });

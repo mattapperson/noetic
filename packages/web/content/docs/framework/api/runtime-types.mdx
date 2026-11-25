@@ -28,6 +28,7 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
   getStatus(scope?: SessionScope): HarnessStatus;
   getQueueSize(scope?: SessionScope): number;
   seedSessionHistory(threadId: string, items: ReadonlyArray<Item>): void;
+  getStoredThread(threadId: string): Promise<StoredThread | undefined>;
   setRootCwd(nextCwd: string): void;
 
   run<I, O>(step: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O>;
@@ -136,6 +137,7 @@ declare interface RerenderRequest {
 | `getStatus(scope?)` | Session status snapshot ([`HarnessStatus`](#harnessstatus)). Pass `{ executionId }` for a `run()` execution's [`ExecutionStatus`](#executionstatus). |
 | `getQueueSize(scope?)` | Messages currently queued on the session. |
 | `seedSessionHistory(threadId, items)` | Pre-populate a session's accumulated history with prior items. Used by resume flows. |
+| `getStoredThread(threadId)` | What the thread's stored record holds: `undefined` when none, else `{ threadId, hasHistory, turn? }`. Decide whether to seed history from this. |
 | `setRootCwd(nextCwd)` | Update the harness root cwd (e.g., from a TUI `! cd`). |
 | `run(step, input, ctx)` | Run a step with the given input and context. |
 | `detachedSpawn(step, input, parentCtx, overrides?)` | Launch a step concurrently, returning a `DetachedHandle`. Optional `overrides.threadId` / `overrides.resourceId` / `overrides.cwdInit` decouple the child's session-scoped state from the parent's. |
@@ -189,6 +191,14 @@ interface ExecuteOptions {
   contextLayers?: ContextLayer[];
   deliveryMode?: DeliveryMode;
   messageId?: string;
+  /** What the turn does with steers its stored record kept: 'apply' (default) or 'drop'. */
+  keptSteers?: 'apply' | 'drop';
+}
+
+interface StoredThread {
+  readonly threadId: string;
+  readonly hasHistory: boolean;
+  readonly turn?: StoredTurn;
 }
 
 interface SessionScope {

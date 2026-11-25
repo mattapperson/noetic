@@ -30,6 +30,7 @@ import { runEvery } from '../connections/settle';
 import { pendingTasksOf, resumableWaitsOf } from '../interpreter/connection-steps';
 import { turnEndingIn } from '../interpreter/turn-ending';
 import { AcpSessionStore } from '../runtime/acp-session-store';
+import { emitFrameworkEvent } from '../runtime/broadcaster-utils';
 import { stubOf } from '../runtime/durable/step-ledger';
 import type { HeldAnswerRequest } from '../runtime/held-calls';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
@@ -152,6 +153,7 @@ import type {
   HarnessResponse,
   HarnessStatus,
   Item,
+  KeptSteers,
   LLMResponse,
   OnSteerParams,
   PendingSpend,
@@ -171,6 +173,7 @@ import type {
   StepsInput,
   StepsOutput,
   StorageAdapter,
+  StoredThread,
   StoredTurn,
   StreamEvent,
   StreamingItem,
@@ -243,6 +246,34 @@ function keepForLater(
 
 /** A thread's turn in flight, as its record stores it. */
 type StoredTurnRecord = NonNullable<Awaited<ReturnType<ThreadRecord['turn']>>>;
+
+/** A stored turn as a host sees it (`turnOptions`, `getStoredThread`). */
+function storedTurnOf(
+  threadId: string,
+  turn: StoredTurnRecord,
+  cut: StoredTurn['cut'],
+): StoredTurn {
+  return {
+    threadId,
+    executionId: turn.executionId,
+    messageIds: turn.messageIds,
+    ...(turn.version === undefined
+      ? {}
+      : {
+          version: turn.version,
+        }),
+    ...(turn.parked
+      ? {
+          parked: turn.parked,
+        }
+      : {}),
+    ...(cut
+      ? {
+          cut,
+        }
+      : {}),
+  };
+}
 
 //#endregion
 
@@ -1389,26 +1420,27 @@ export class AgentHarness<
         graph,
       );
       this.setTurnTools(ctx, perTurnOptions.tools ?? [], connectionTools);
-      // Steers the last harness accepted but never applied go back in the queue;
-      // ones already in the conversation are skipped when offered.
-      for (const steer of (await record?.steers()) ?? []) {
-        const queued = session.runner.queue.peekAll().some((m) => m.id === steer.id);
-        if (!queued && !messageIds.includes(steer.id)) {
-          // With the options it was sent with, when this process is the one it was sent to.
-          const options = session.keptOptions.get(steer.id) ?? steer.options;
-          session.keptOptions.delete(steer.id);
-          session.runner.queue.enqueue({
-            ...steer,
-            options,
-          });
-        }
-      }
+      const dropped = record
+        ? await this.takeKeptSteers(session, record, messageIds, perTurnOptions.keptSteers)
+        : [];
       // A stuck turn the host chose to go on with may discard what no longer matches.
       const accept = (await record?.turn())?.accept;
       if (accept && ctx instanceof ContextImpl) {
         ctx.ledger?.acceptVersionLoss(typeof accept === 'string' ? accept : undefined);
       }
-      await record?.begin(ctx, messageIds);
+      await record?.begin(ctx, messageIds, dropped);
+      // Told only once the record no longer holds them.
+      for (const messageId of dropped) {
+        emitFrameworkEvent({
+          broadcaster: session.runner.broadcaster,
+          agentName: this.config.name,
+          eventType: 'steer_dropped',
+          data: {
+            messageId,
+            reason: 'kept_steers',
+          },
+        });
+      }
       // A turn on record can be cut off from here on. A host that sleeps between
       // requests has to know when to come back and look (see `turnDueAt`).
       if (record && this.leaseOptions) {
@@ -1743,6 +1775,68 @@ export class AgentHarness<
     }
   }
 
+  /**
+   * Put the steers the thread's record kept, and this process does not already
+   * hold, back in the queue (spec 23a § Sessions). With `keptSteers: 'drop'` they
+   * are not queued: their ids come back, for the turn's `begin` to remove from
+   * the record. Ones already in the conversation are skipped when offered.
+   */
+  private async takeKeptSteers(
+    session: Session,
+    record: ThreadRecord,
+    messageIds: ReadonlyArray<string>,
+    keptSteers: KeptSteers | undefined,
+  ): Promise<string[]> {
+    const dropped: string[] = [];
+    for (const steer of await record.steers()) {
+      const queued = session.runner.queue.peekAll().some((m) => m.id === steer.id);
+      if (queued || messageIds.includes(steer.id)) {
+        continue;
+      }
+      // With the options it was sent with, when this process is the one it was sent to.
+      const options = session.keptOptions.get(steer.id);
+      session.keptOptions.delete(steer.id);
+      // A message this process kept for a parked turn still has its sender here.
+      if (keptSteers === 'drop' && options === undefined) {
+        dropped.push(steer.id);
+        continue;
+      }
+      session.runner.queue.enqueue({
+        ...steer,
+        options: options ?? steer.options,
+      });
+    }
+    return dropped;
+  }
+
+  /**
+   * What the thread's stored record holds (spec 23a § Sessions): whether it has
+   * history and the turn it has in flight, cut off or parked. Undefined when the
+   * thread has no record, or the harness keeps none. A host that keeps its own
+   * copy of the conversation seeds history only when none is stored.
+   * @public
+   */
+  async getStoredThread(threadId: string): Promise<StoredThread | undefined> {
+    // Through the session's own record, when there is one: a seed it queued lands first.
+    const record = await (
+      this.sessions.get(threadId)?.record ?? this.threadRecord(threadId)
+    )?.stored();
+    if (!record) {
+      return undefined;
+    }
+    const turn = record.turn;
+    const cut = turn && !turn.parked ? this.cuts?.markOf(threadId, turn) : undefined;
+    return {
+      threadId,
+      hasHistory: record.items.length > 0,
+      ...(turn
+        ? {
+            turn: storedTurnOf(threadId, turn, cut),
+          }
+        : {}),
+    };
+  }
+
   /** The options a stored turn is woken with when the wake names none: `turnOptions`, or none. */
   private async storedTurnOptions(
     threadId: string,
@@ -1752,26 +1846,7 @@ export class AgentHarness<
     if (!this.turnOptionsFor) {
       return {};
     }
-    return await this.turnOptionsFor({
-      threadId,
-      executionId: turn.executionId,
-      messageIds: turn.messageIds,
-      ...(turn.version === undefined
-        ? {}
-        : {
-            version: turn.version,
-          }),
-      ...(turn.parked
-        ? {
-            parked: turn.parked,
-          }
-        : {}),
-      ...(cut
-        ? {
-            cut,
-          }
-        : {}),
-    });
+    return await this.turnOptionsFor(storedTurnOf(threadId, turn, cut));
   }
 
   /**

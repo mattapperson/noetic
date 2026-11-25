@@ -251,7 +251,7 @@ Framework events emitted during execution:
 | `{name}:turn_aborted` | A session turn was aborted or errored. Data: `{ turnId, reason }`. |
 | `{name}:steer_accepted` | A steer was queued while a turn runs. Data: `{ messageId, turnId, deliveryMode }`. |
 | `{name}:steer_pending` | A steer is waiting for the round's tool calls to finish. Emitted once per steer. Data: `{ messageId, waitingOn }`. |
-| `{name}:steer_dropped` | A layer dropped a steer; no turn will answer it. Data: `{ messageId, point }`. |
+| `{name}:steer_dropped` | A layer dropped a steer, or a turn started with `keptSteers: 'drop'` dropped one its stored record kept; no turn will answer it. Data: `{ messageId, point }` from a layer, `{ messageId, reason: 'kept_steers' }` from the record. |
 | `{name}:inbox_injected` | Steers were added before a model call. Data: `{ round, count, messageIds }`. |
 | `{name}:model_call_steered` | A steer stopped the round's stream at an item boundary. Data: `{ round, itemCount }`. |
 | `{name}:step_started` | Before each step executes. |
@@ -366,6 +366,7 @@ When the harness is constructed with a durable `environment.storage.adapter` (an
 | `recordedToolCalls(executionId)` | The tool calls a resume of the execution [brings back on its own](/docs/framework/durability#which-calls-a-resume-brings-back), each `settled` when its result is on record. |
 | `getAuditTrail(scope)` | [The trail](/docs/framework/durability#the-trail) of a thread or an execution: each finished step with its flow version, lease holder and receipt. |
 | `forget(scope, options?)` | [Forget](/docs/framework/durability#forgetting-a-thread-or-an-execution) a thread (`{ threadId }`) or an execution (`{ executionId }`): settle its pending spend, then delete every record the harness keeps for it. `options`: `keepTrail`, `patienceMs`, `waitMs`, `subprocesses`. Resolves a `ForgetReport` `{ threadId?, executionIds, spend }`. Refused with `lease_lost` while a turn runs. |
+| `getStoredThread(threadId)` | What the thread's [stored record](/docs/framework/durability#sessions) holds: `undefined` when it has none, else `{ threadId, hasHistory, turn? }` with `turn` the stored turn (as `turnOptions` sees it). |
 | `listStoredThreads(options?)` | Every thread with a record, a turn lease or display output stored. `{ prefix }` narrows the ids. |
 | `listStoredExecutions(options?)` | Every execution with anything stored: `{ executionId, parts, resumable }`. `{ prefix }` narrows the ids. |
 | `cancel(ctx, options?)` | Cancel a running execution: abort `ctx` and every live descendant context (parallel paths, spawn children), then run context-layer teardown — `onComplete` with `outcome: 'aborted'`, then `dispose` — bottom-up. Layer hooks already running on a context (`recall`, `store`, `beforeToolCall`, `afterModelCall`, `onDecision`) finish, up to their timeouts, before that context's teardown starts. A no-op on an already-cancelled context. `options` is the reason as a string, or `{ reason?, drainMs? }`; `drainMs` makes it a [graceful stop](#graceful-stop). Resolves with the drain's `DrainReport` when a drain ran, `undefined` otherwise. |

@@ -2188,6 +2188,8 @@ A turn resumed under another `version` keeps the steps that still match. If the 
 harness.forget(scope: { threadId } | { executionId }, options?: { keepTrail?: boolean; patienceMs?: number; waitMs?: number; subprocesses?: SubprocessAdapter[] }): Promise<ForgetReport>;
 // ForgetReport: { threadId?, executionIds: string[], spend: SpendSettlement[] }
 harness.listStoredThreads(options?: { prefix?: string }): Promise<string[]>;
+harness.getStoredThread(threadId: string): Promise<StoredThread | undefined>;
+// StoredThread: { threadId, hasHistory, turn?: StoredTurn } — decide whether to seedSessionHistory without reading keys
 harness.listStoredExecutions(options?: { prefix?: string }): Promise<StoredExecution[]>;
 // StoredExecution: { executionId, parts: ExecutionPart[], resumable }  — parts: snapshot|ledger|trail|held|intent|pending|child|other
 ```
@@ -2262,6 +2264,7 @@ Each tool call in a model round is recorded as it finishes, so a resumed round r
 harness.wake(scope?: { threadId?: string; options?: ExecuteOptions }): Promise<string[]>;
 // AgentHarness({ turnOptions?: (turn: StoredTurn) => ExecuteOptions | Promise<ExecuteOptions> }) — options for a woken turn when wake() names none
 // ExecuteOptions.tools?: Tool[] — tools for one turn, ahead of the harness's own
+// ExecuteOptions.keptSteers?: 'apply' | 'drop' — 'drop': the turn removes steers its stored record kept (fenced) and emits steer_dropped { messageId, reason: 'kept_steers' } per steer
 harness.getNextWakeTime(): Promise<number | undefined>;   // earliest parked deadline or next cron() tick
 harness.onWakeTimeChange(listener: (at: number | undefined) => void | Promise<void>): () => void; // told when that time changes; a parking turn waits for it
 harness.waitForIdle(): Promise<void>;                     // due scheduled events are read; every turn finished or parked

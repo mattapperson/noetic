@@ -4,7 +4,13 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
-import type { CallModelRequest, ContextData, Item, LLMResponse } from '@noetic-tools/types';
+import type {
+  CallModelRequest,
+  ContextData,
+  Item,
+  LLMResponse,
+  StreamEvent,
+} from '@noetic-tools/types';
 import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { callModel, runCode, step } from '../../src/builders/step-builders';
@@ -46,6 +52,20 @@ function armed(parking: Parking): {
 }
 
 //#endregion
+
+/** Collects `stream` into `into` until an event of type `last`. */
+async function collectUntil(
+  stream: AsyncIterable<StreamEvent>,
+  last: string,
+  into: StreamEvent[],
+): Promise<void> {
+  for await (const event of stream) {
+    into.push(event);
+    if (event.type === last) {
+      return;
+    }
+  }
+}
 
 describe('Parking', () => {
   it('parks when the only step in flight is waiting, at its deadline', async () => {
@@ -396,6 +416,104 @@ describe('a parked turn', () => {
     expect(stored?.turn).toBeUndefined();
     expect(await harness.getNextWakeTime()).toBeUndefined();
     await harness.close();
+  });
+
+  describe("a wake with keptSteers: 'drop'", () => {
+    const later = {
+      threadId: 't',
+      messageId: 'm-2',
+    };
+
+    /** Parks the flow, then sends it a message that waits in storage for the parked turn. */
+    async function parkWithMessage(fixture: Fixture, m: Model): Promise<AgentHarness> {
+      const harness = harnessOver({
+        ...fixture,
+        m,
+      });
+      await harness.execute('hello', delivery);
+      assert((await harness.getAgentResponse(scope)).parked);
+      await harness.execute('later', later);
+      const stored = await fixture.storage.get<{
+        steers?: {
+          id: string;
+        }[];
+      }>('session:t');
+      expect(stored?.steers?.map((kept) => kept.id)).toEqual([
+        'm-2',
+      ]);
+      return harness;
+    }
+
+    function droppedIn(events: ReadonlyArray<StreamEvent>): unknown[] {
+      return events
+        .filter((event) => event.type === 'parking:steer_dropped')
+        .map((event) => ('data' in event ? event.data : undefined));
+    }
+
+    it('drops a message another process kept for the turn', async () => {
+      const fixture = fixtureOn(SWAP);
+      await (await parkWithMessage(fixture, model('a'))).close();
+
+      const second = model('b');
+      const harness = harnessOver({
+        ...fixture,
+        m: second,
+      });
+      const events: StreamEvent[] = [];
+      const watching = collectUntil(harness.getFullStream(scope), 'parking:turn_completed', events);
+      fixture.mailbox.push('approved');
+      expect(
+        await harness.wake({
+          ...scope,
+          options: {
+            keptSteers: 'drop',
+          },
+        }),
+      ).toEqual([
+        't',
+      ]);
+      expect((await harness.getAgentResponse(scope)).text).toBe('b-1');
+      await watching;
+
+      expect(droppedIn(events)).toEqual([
+        {
+          messageId: 'm-2',
+          reason: 'kept_steers',
+        },
+      ]);
+      await harness.waitForIdle();
+      // Only the answer was asked for: the dropped message started no turn.
+      expect(second.calls).toBe(1);
+      expect((await harness.getStoredThread('t'))?.turn).toBeUndefined();
+      await harness.close();
+    });
+
+    it('keeps a message this process was sent, which runs once the turn ends', async () => {
+      const fixture = fixtureOn(SWAP);
+      const m = model('a');
+      const harness = await parkWithMessage(fixture, m);
+
+      fixture.mailbox.push('approved');
+      await harness.wake({
+        ...scope,
+        options: {
+          keptSteers: 'drop',
+        },
+      });
+      await harness.getAgentResponse(scope);
+      await harness.waitForIdle();
+
+      // The plan, the answer, and the kept message's own turn.
+      expect(m.calls).toBe(3);
+      expect(
+        (
+          await fixture.storage.get<{
+            steers?: unknown[];
+          }>('session:t')
+        )?.steers ?? [],
+      ).toEqual([]);
+      await harness.close();
+    });
   });
 
   it('a woken turn with nothing to receive parks again', async () => {

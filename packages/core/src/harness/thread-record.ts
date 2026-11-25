@@ -197,11 +197,18 @@ export class ThreadRecord {
   /**
    * Record the turn about to run on `ctx`, before any of it runs. Kept steers it
    * delivers as input stop being steers: re-delivering the turn re-sends them.
+   * Kept steers named in `dropped` are removed in the same write (`keptSteers: 'drop'`).
    */
-  begin(ctx: Context, messageIds: ReadonlyArray<string>): Promise<void> {
+  begin(
+    ctx: Context,
+    messageIds: ReadonlyArray<string>,
+    dropped: ReadonlyArray<string> = [],
+  ): Promise<void> {
     return this.updateHeld(ctx, (record) => ({
       ...record,
-      steers: record.steers?.filter((steer) => !messageIds.includes(steer.id)),
+      steers: record.steers?.filter(
+        (steer) => !messageIds.includes(steer.id) && !dropped.includes(steer.id),
+      ),
       executions: withExecution(record.executions, ctx.id),
       ...this.withLayers(record),
       turn: {
@@ -400,6 +407,11 @@ export class ThreadRecord {
   /** The executions of every turn the thread began, oldest first, the one in flight last. */
   executions(): Promise<string[]> {
     return this.run(async () => executionsOf(await this.load()));
+  }
+
+  /** The stored record, read after every write issued before it. */
+  stored(): Promise<SessionRecord | undefined> {
+    return this.run(() => this.load());
   }
 
   /** The turn in flight, cut off or parked, when one is recorded. */
