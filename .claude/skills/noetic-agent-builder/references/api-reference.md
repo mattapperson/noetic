@@ -1874,10 +1874,10 @@ interface DecideRequest {
   >;
   questions: DecideQuestions;
   samples?: number;          // estimated path only; default 1
+  longContext?: boolean;     // native path only; default false
   signal?: AbortSignal;
 }
 
-  longContext?: boolean;     // native path only; default false
 interface DecideResponse {
   answers: Readonly<Record<string, DecideAnswer>>;
   source: 'native' | 'estimated';
@@ -1895,6 +1895,8 @@ For decision models the OpenRouter adapter calls the native decisions API; for a
 |--------|-------------|
 | `getAgentResponse(scope?)` | Resolves once the session drains its queue. |
 | `getItemStream(scope?)` | Cumulative item snapshots across every turn. |
+| `getSessionOutput(scope?)` | Display output from storage: the latest snapshot of every item the thread streamed, unfinished included. Recorded when the harness has `interactive: true`; readable from any harness over the same storage. Throws `OutputStoreError`. |
+| `saveSessionOutput(items, scope)` | Save display snapshots (objects with a string `type`) by id; resolves the whole output. Model history untouched. |
 | `getTextStream(scope?)` / `getReasoningStream(scope?)` | Text / reasoning deltas. |
 | `getFullStream(scope?)` | Raw SDK + framework events. |
 | `abort(scope?)` | Cancel in-flight turn; queued messages preserved. `{ drainMs }` drains first and resolves with the `DrainReport` (see Cancellation). |

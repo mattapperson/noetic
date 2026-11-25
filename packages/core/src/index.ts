@@ -295,6 +295,10 @@ export { DEFAULT_PARK_GRACE_MS } from './runtime/durable/parking';
 /** @public */
 export { DEFAULT_LEASE_TTL_MS } from './runtime/durable/turn-lease';
 /** @public */
+export type { OutputSnapshot } from './runtime/output-store';
+/** @public */
+export { OutputStore, OutputStoreError } from './runtime/output-store';
+/** @public */
 export { getRegistry, lookupStep, registerStep } from './runtime/step-registry';
 
 //#endregion
@@ -386,11 +390,11 @@ export type {
   Tool,
   ToolChoice,
   ToolContextDeclaration,
+  ToolModelOutput,
   UsageCharge,
 } from '@noetic-tools/types';
 /** @public */
 export {
-  ToolModelOutput,
   isServerToolSpec,
   isStandardJsonSchema,
   isZodSchema,

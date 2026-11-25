@@ -171,6 +171,15 @@ export interface AgentHarnessOpts<
 > {
   name: string;
   /**
+   * Keep each thread's streamed output for display (spec 08 § Display output):
+   * `getSessionOutput()` then returns every item the thread streamed, unfinished
+   * ones included, from this harness or a later one over the same storage. A root
+   * context from `createContext()` also joins its thread, so `run()` on it streams
+   * like a turn. Display output is kept apart from checkpoints and is never
+   * resumed from. Default false.
+   */
+  interactive?: boolean;
+  /**
    * Root step tree executed for every turn submitted via `execute()`. The custom items
    * it declares (a `workflow()` step's brand) type `getItemStream`, `getFullStream`,
    * and `getAgentResponse` (spec 34).

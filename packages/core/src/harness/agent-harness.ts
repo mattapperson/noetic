@@ -27,6 +27,8 @@ import { AcpSessionStore } from '../runtime/acp-session-store';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import { stubOf } from '../runtime/durable/step-ledger';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
+import type { OutputSnapshot } from '../runtime/output-store';
+import { OutputStore } from '../runtime/output-store';
 import { awaitApproval } from '../runtime/tool-approval';
 import { ConnectionGate } from './connection-gate';
 import type { LayerStateStore, RecallCache } from './deps/context';
@@ -435,6 +437,12 @@ export class AgentHarness<
   private readonly pendingCheckpoints = new Map<string, Promise<boolean>>();
   private readonly defaultDeliveryMode: DeliveryMode;
   private readonly sessions = new Map<string, Session>();
+  /** Whether threads keep their streamed output for display (`opts.interactive`). */
+  readonly interactive: boolean;
+  /** Where display output is kept: the harness's storage, or memory without one. */
+  private readonly outputStorage: StorageAdapter;
+  /** The display output each thread of an interactive harness records, by thread id. */
+  private readonly outputs = new Map<string, OutputStore>();
   /**
    * @internal Live ACP connections. Reached by the interpreter via
    * `frameworkCast`; use {@link listAcpSessions}, {@link getAcpSession},
@@ -529,6 +537,7 @@ export class AgentHarness<
   readonly itemSchemas: ItemSchemaRegistry;
 
   constructor(opts: AgentHarnessOpts<TParams, TItem>) {
+    this.interactive = opts.interactive ?? false;
     const validatedParams = opts.paramsSchema ? opts.paramsSchema.parse(opts.params) : opts.params;
     const environment = opts.environment;
     const storageEnv = environment?.storage;
@@ -547,6 +556,7 @@ export class AgentHarness<
       approveToolCall: opts.approveToolCall,
       now: opts.now,
     };
+    this.outputStorage = this.config.storage ?? createInMemoryStorage();
     const adapters = resolveEnvironmentAdapters(environment);
     this.fs = adapters.fs;
     this.shell = adapters.shell;
@@ -736,6 +746,9 @@ export class AgentHarness<
   async close(): Promise<void> {
     this.parkWatchers?.stopAll();
     await runEvery([
+      ...[
+        ...this.outputs.values(),
+      ].map((output) => () => output.flush()),
       () => this.#connections.close(),
       () => this.closeAcpSessions(),
     ]);
@@ -962,6 +975,40 @@ export class AgentHarness<
   ): AsyncIterable<StreamingItem | CustomStreamingItem<DeclaredItems<TItem>>> {
     const session = this.requireSession(scope);
     return frameworkCast(buildItemStream(session.runner.broadcaster, this.itemSchemas));
+  }
+
+  /**
+   * A thread's display output (spec 08 § Display output): the latest snapshot of
+   * every item it streamed, unfinished ones included, read from storage. An
+   * `interactive` harness records it; any harness over the same storage reads it.
+   * For showing a thread again, never for resuming one.
+   *
+   * @throws OutputStoreError when storage fails, or holds something else under the key.
+   * @public
+   */
+  getSessionOutput(scope?: SessionScope): Promise<OutputSnapshot[]> {
+    return this.outputOf(scope?.threadId ?? DEFAULT_THREAD_ID).read();
+  }
+
+  /**
+   * Save display snapshots for a thread, each replacing the stored one with its
+   * id, and resolve the thread's whole display output. For a protocol adapter
+   * that shows a thread in its own item shapes. Model history is untouched.
+   *
+   * @throws OutputStoreError when `items` are not snapshots (objects with a string
+   *   `type`), or storage fails.
+   * @public
+   */
+  saveSessionOutput(items: ReadonlyArray<unknown>, scope: SessionScope): Promise<OutputSnapshot[]> {
+    return this.outputOf(scope.threadId ?? DEFAULT_THREAD_ID).write(items);
+  }
+
+  /** The thread's recording store on an interactive harness, else one that only reads and writes. */
+  private outputOf(threadId: string): OutputStore {
+    this.getOrCreateSession(threadId);
+    return (
+      this.outputs.get(threadId) ?? new OutputStore(this.outputStorage, threadId, this.itemSchemas)
+    );
   }
 
   getTextStream(scope?: SessionScope): AsyncIterable<string> {
@@ -1401,6 +1448,11 @@ export class AgentHarness<
       return result;
     };
 
+    if (this.interactive) {
+      const output = new OutputStore(this.outputStorage, threadId, this.itemSchemas);
+      this.outputs.set(threadId, output);
+      session.runner.broadcaster.observe((event) => output.record(event));
+    }
     this.sessions.set(threadId, session);
     if (record) {
       void record.usage().then((usage) => session.runner.seedUsage(usage));
@@ -2276,7 +2328,13 @@ export class AgentHarness<
     }
     try {
       await entry.ready;
-      return await execute(s, input, ctx);
+      const result = await execute(s, input, ctx);
+      if (entry.depth === 1) {
+        // Inside the `try`: a run whose display output could not be saved fails,
+        // so it is not taken for a finished run to replay from.
+        await this.outputs.get(ctx.threadId)?.flush();
+      }
+      return result;
     } catch (error) {
       entry.failed = true;
       throw error;
@@ -2297,7 +2355,19 @@ export class AgentHarness<
         }
         // The turn's own connections end with it; a resume attaches them again.
         await this.#connections.release(ctx.id);
+        if (entry.failed) {
+          await this.saveOutputOfFailedRun(ctx.threadId);
+        }
       }
+    }
+  }
+
+  /** Keep what a failed run streamed. The run's own error is the one that is thrown. */
+  private async saveOutputOfFailedRun(threadId: string): Promise<void> {
+    try {
+      await this.outputs.get(threadId)?.flush();
+    } catch (error) {
+      console.warn('[noetic] could not save the display output of a failed run:', error);
     }
   }
 
@@ -2500,6 +2570,7 @@ export class AgentHarness<
     return new ContextImpl({
       ...rest,
       id: executionId,
+      ...this.interactiveThread(resolved, executionId),
       harness: this,
       channelStore: this.channelStore,
       layers: effectiveLayers,
@@ -2510,6 +2581,32 @@ export class AgentHarness<
       checkpointFn: (c) => this.checkpoint(c),
       ledger,
     });
+  }
+
+  /**
+   * On an interactive harness, a root context a host builds joins its thread: it
+   * gets the thread's broadcaster, so `run()` on it streams, and is recorded, like
+   * a session turn. A context with no `threadId` is its own thread, named by its id.
+   */
+  private interactiveThread(
+    opts: {
+      parent?: Context;
+      threadId?: string;
+      _broadcaster?: EventBroadcaster;
+    },
+    executionId: string,
+  ): {
+    threadId?: string;
+    _broadcaster?: EventBroadcaster;
+  } {
+    if (!this.interactive || opts.parent || opts._broadcaster) {
+      return {};
+    }
+    const threadId = opts.threadId ?? executionId;
+    return {
+      threadId,
+      _broadcaster: this.getOrCreateSession(threadId).runner.broadcaster,
+    };
   }
 
   send<T>(channel: Channel<T>, value: NoInfer<T>, ctx: Context): Promise<void> {

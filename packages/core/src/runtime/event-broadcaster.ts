@@ -7,6 +7,8 @@ interface Waiter {
   reject: (err: unknown) => void;
 }
 
+type Observer = (event: StreamEvent) => void;
+
 interface EventBroadcasterOpts {
   maxBufferSize?: number;
 }
@@ -39,15 +41,32 @@ export class EventBroadcaster {
   private err?: Error;
   private readonly iterators: Set<BroadcastIterator> = new Set();
   private hasHadConsumers = false;
+  private readonly observers: Set<Observer> = new Set();
 
   constructor(opts?: EventBroadcasterOpts) {
     this.maxBufferSize = opts?.maxBufferSize ?? DEFAULT_MAX_BUFFER_SIZE;
   }
 
-  /** Push an event to all active iterators and the replay buffer. */
+  /**
+   * Hear every event as it is emitted, whether or not a consumer is attached: the
+   * replay buffer stops filling once every consumer has left, an observer does not.
+   * Nothing is replayed to it. Returns the function that stops it.
+   */
+  observe(observer: Observer): () => void {
+    this.observers.add(observer);
+    return () => {
+      this.observers.delete(observer);
+    };
+  }
+
+  /** Push an event to every observer, all active iterators and the replay buffer. */
   emit(event: StreamEvent): void {
     if (this.isDone) {
       return;
+    }
+
+    for (const observer of this.observers) {
+      observer(event);
     }
 
     // Skip buffering when all consumers have departed
