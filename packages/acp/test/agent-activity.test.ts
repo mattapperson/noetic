@@ -12,6 +12,7 @@ import assert from 'node:assert';
 import type * as acp from '@agentclientprotocol/sdk';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { ContextData } from '@noetic-tools/context';
+import { plan } from '@noetic-tools/context';
 import { AgentHarness, execute, step, toolWithGenerator } from '@noetic-tools/core';
 import type { AgentScope, LLMResponse, Step } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
@@ -276,6 +277,17 @@ async function callBridgedTool(
     },
   });
   await client.close();
+}
+
+/** Collect a turn's events until it ends. */
+async function readTurn(stream: AsyncIterable<unknown>, events: Captured[]): Promise<void> {
+  for await (const event of stream) {
+    const captured = frameworkCast<Captured>(event);
+    events.push(captured);
+    if (/:turn_(completed|aborted)$/.test(captured.type)) {
+      return;
+    }
+  }
 }
 
 //#endregion
@@ -565,5 +577,117 @@ describe("an agent step's activity, over the wire", () => {
         }),
       ]);
     }
+  });
+});
+
+describe("a plan layer's plan in an agent step, over the wire", () => {
+  it('is told live as the agent writes it through the tool bridge', async () => {
+    const calls: Array<{
+      name: string;
+      args: Record<string, unknown>;
+    }> = [
+      {
+        name: 'plan_enterPlanMode',
+        args: {},
+      },
+      {
+        name: 'plan_updatePrd',
+        args: {
+          content: '# Plan',
+        },
+      },
+    ];
+    const listed: string[] = [];
+    const agent = scriptedAgent(async (conn, sessionId, servers) => {
+      const server = servers.find((candidate) => candidate.name === 'noetic');
+      assert(server && 'type' in server && server.type === 'http');
+      const client = new Client({
+        name: 'scripted',
+        version: '0.0.0',
+      });
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(server.url), {
+          requestInit: {
+            headers: Object.fromEntries(
+              server.headers.map((header) => [
+                header.name,
+                header.value,
+              ]),
+            ),
+          },
+        }),
+      );
+      listed.push(...(await client.listTools()).tools.map((tool) => tool.name));
+      for (const [index, call] of calls.entries()) {
+        const toolCallId = `toolu_${index}`;
+        await update(conn, sessionId, {
+          sessionUpdate: 'tool_call',
+          toolCallId,
+          title: `mcp__noetic__${call.name}`,
+          kind: 'other',
+          rawInput: call.args,
+        });
+        await client.callTool({
+          name: call.name,
+          arguments: call.args,
+          _meta: {
+            'claudecode/toolUseId': toolCallId,
+          },
+        });
+      }
+      await client.close();
+      await update(conn, sessionId, {
+        sessionUpdate: 'agent_message_chunk',
+        content: {
+          type: 'text',
+          text: 'Planned.',
+        },
+      });
+    });
+    const harness = new AgentHarness({
+      name: 'layer-plan',
+      params: {},
+      approveToolCall: () => ({
+        action: 'allow',
+      }),
+      contextLayers: [
+        plan(),
+      ],
+      agentGraph: frameworkCast<
+        NonNullable<ConstructorParameters<typeof AgentHarness>[0]['agentGraph']>
+      >(
+        step.acpAgent<ContextData, unknown, string>({
+          id: 'planner',
+          agent: defineAcpAgent({
+            agentId: 'scripted',
+            command: {
+              command: 'scripted',
+            },
+            machine: loopbackMachine(agent),
+            tools: claudeToolWiring,
+            toolIdOf: claudeToolId,
+          }),
+          prompt: 'plan it',
+        }),
+      ),
+    });
+    const events: Captured[] = [];
+    const reading = readTurn(harness.getFullStream(), events);
+    await harness.execute('go');
+    await reading;
+    await harness.close();
+
+    expect(listed).toContain('plan_updatePrd');
+    const planned = events.findIndex((event) => event.type === 'layer-plan:plan_updated');
+    const written = events.findIndex(
+      (event) =>
+        event.type === 'layer-plan:tool_call_completed' && event.data.toolId === 'plan/updatePrd',
+    );
+    expect(events[planned]?.data.plan).toEqual({
+      markdown: '# Plan',
+    });
+    // Live: as the tool writes it, before its call completes.
+    expect(planned).toBeGreaterThan(-1);
+    expect(planned).toBeLessThan(written);
   });
 });

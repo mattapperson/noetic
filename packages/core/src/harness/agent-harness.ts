@@ -34,6 +34,7 @@ import { emitFrameworkEvent } from '../runtime/broadcaster-utils';
 import { stubOf } from '../runtime/durable/step-ledger';
 import type { HeldAnswerRequest } from '../runtime/held-calls';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
+import { LayerPlanReporter, reportingLayerPlans } from '../runtime/layer-plans';
 import type { OutputSnapshot } from '../runtime/output-store';
 import { OutputStore } from '../runtime/output-store';
 import { awaitApproval } from '../runtime/tool-approval';
@@ -543,6 +544,8 @@ export class AgentHarness<
   readonly #connections: ConnectionGate;
 
   readonly layerStateStore: LayerStateStore;
+  /** Tells the plans the context layers keep, as their state changes. */
+  private readonly layerPlans = new LayerPlanReporter();
   /** Per-harness memoization cache for `recallMode: 'eventual'` layers. */
   readonly recallCache: RecallCache;
   /** Per-harness pinned anchor output and epoch bookkeeping, keyed by cache lineage. */
@@ -640,12 +643,17 @@ export class AgentHarness<
       onWarning: (warning) => this.recordChannelWarning(warning),
     });
     this.traceExporter = resolveTraceExporter(opts.traceExporter);
-    this.layerStateStore = noteDurableLayers(
-      storageEnv?.layerStateStore ??
-        createLayerStateStore((layerId, hook, error) => {
-          console.warn(`[noetic] context layer '${layerId}' ${hook} error:`, error);
-        }),
-      this.durableLayerIds,
+    // Every write to a layer that keeps a plan tells it live (spec 08 § Tool
+    // calls, plans and agent settings).
+    this.layerStateStore = reportingLayerPlans(
+      noteDurableLayers(
+        storageEnv?.layerStateStore ??
+          createLayerStateStore((layerId, hook, error) => {
+            console.warn(`[noetic] context layer '${layerId}' ${hook} error:`, error);
+          }),
+        this.durableLayerIds,
+      ),
+      this.layerPlans,
     );
     this.recallCache = createRecallCache();
     this.contextCache = createContextCacheStore();
@@ -2956,6 +2964,7 @@ export class AgentHarness<
     }
     this.initializedExecutions.add(ctx.id);
     const keep = this.restoredExecutions.delete(ctx.id);
+    this.layerPlans.watch(ctx, layers);
     await initLayers({
       layers,
       ctx: this.toExecCtx(ctx),
@@ -3180,6 +3189,7 @@ export class AgentHarness<
   }
 
   async initLayers(layers: ContextLayer[], ctx: Context, storage: StorageAdapter): Promise<void> {
+    this.layerPlans.watch(ctx, layers);
     await initLayers({
       layers,
       ctx: this.toExecCtx(ctx),
@@ -3370,6 +3380,7 @@ export class AgentHarness<
       ctx: this.toExecCtx(ctx),
       store: this.layerStateStore,
     });
+    this.layerPlans.forget(ctx.id);
   }
 
   //#region Checkpoint boundaries

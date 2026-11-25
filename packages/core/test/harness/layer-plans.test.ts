@@ -9,7 +9,7 @@ import { plan } from '@noetic-tools/context';
 import type { ContextLayer, LLMResponse } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import { reportLayerPlans } from '../../src/runtime/layer-plans';
+import { LayerPlanReporter, reportingLayerPlans } from '../../src/runtime/layer-plans';
 
 //#region Helpers
 
@@ -18,7 +18,7 @@ interface Emitted {
   data: Record<string, unknown>;
 }
 
-/** A model that makes one tool call per round, then answers. */
+/** A model that makes one tool call per round, by its wire name as a real model does, then answers. */
 function scriptedModel(
   calls: ReadonlyArray<{
     name: string;
@@ -112,30 +112,30 @@ describe("the plan layer's plan, on a callModel step", () => {
       };
     }>(harness).llm.client = scriptedModel([
       {
-        name: 'plan/enterPlanMode',
+        name: 'plan_enterPlanMode',
         args: {},
       },
       {
-        name: 'plan/updatePrd',
+        name: 'plan_updatePrd',
         args: {
           content: '# Plan\n\n- read the spec',
         },
       },
       // The same PRD again is no change.
       {
-        name: 'plan/updatePrd',
+        name: 'plan_updatePrd',
         args: {
           content: '# Plan\n\n- read the spec',
         },
       },
       {
-        name: 'plan/updatePrd',
+        name: 'plan_updatePrd',
         args: {
           content: '# Plan\n\n- read the spec\n- write the code',
         },
       },
       {
-        name: 'plan/exitPlanMode',
+        name: 'plan_exitPlanMode',
         args: {
           action: 'cancel',
         },
@@ -172,7 +172,7 @@ describe("the plan layer's plan, on a callModel step", () => {
   });
 });
 
-describe('reportLayerPlans', () => {
+describe('LayerPlanReporter', () => {
   function layerWith(read: ContextLayer['plan']): ContextLayer {
     return frameworkCast<ContextLayer>({
       id: 'tasks',
@@ -183,109 +183,148 @@ describe('reportLayerPlans', () => {
     });
   }
 
-  it('tells a plan under another id as the old one removed and the new one updated', () => {
+  function watchedCtx(layers: ContextLayer[]): {
+    harness: AgentHarness;
+    ctx: ReturnType<AgentHarness['createContext']>;
+    emitted: Emitted[];
+    reporter: LayerPlanReporter;
+  } {
     const harness = new AgentHarness({
       name: 'h',
       params: {},
     });
     const ctx = harness.createContext();
     const emitted: Emitted[] = [];
-    const emit = (type: string, data: Record<string, unknown>) => {
-      emitted.push({
-        type,
-        data,
-      });
+    Reflect.set(ctx, '_broadcaster', {
+      emit(event: Emitted) {
+        emitted.push(event);
+      },
+    });
+    const reporter = new LayerPlanReporter();
+    reporter.watch(ctx, layers);
+    return {
+      harness,
+      ctx,
+      emitted,
+      reporter,
     };
-    const layer = layerWith((state: unknown) =>
-      frameworkCast<{
-        id: string;
-        entries: [];
-      }>(state),
-    );
-    harness.setLayerState(ctx.id, 'tasks', {
+  }
+
+  const asPlan = (state: unknown) =>
+    frameworkCast<{
+      id: string;
+      entries: [];
+    }>(state);
+
+  it("tells a write to a watched layer's state as it lands, whichever path made it", () => {
+    const layer = layerWith(asPlan);
+    const { harness, ctx, emitted, reporter } = watchedCtx([
+      layer,
+    ]);
+    const store = reportingLayerPlans(harness.layerStateStore, reporter);
+    store.set(ctx.id, 'tasks', {
       id: 'a',
       entries: [],
     });
-    reportLayerPlans({
-      ctx,
-      layers: [
-        layer,
-      ],
-      emit,
-    });
-    harness.setLayerState(ctx.id, 'tasks', {
-      id: 'b',
-      entries: [],
-    });
-    reportLayerPlans({
-      ctx,
-      layers: [
-        layer,
-      ],
-      emit,
-    });
-    expect(emitted).toEqual([
-      {
-        type: 'plan_updated',
-        data: {
+    expect(
+      emitted.map((event) => [
+        event.type,
+        event.data,
+      ]),
+    ).toEqual([
+      [
+        'h:plan_updated',
+        {
           plan: {
             id: 'a',
             entries: [],
           },
         },
-      },
-      {
-        type: 'plan_removed',
-        data: {
+      ],
+    ]);
+    // The store underneath has the state.
+    expect(harness.layerStateStore.get(ctx.id, 'tasks')).toEqual({
+      id: 'a',
+      entries: [],
+    });
+  });
+
+  it('tells a plan under another id as the old one removed and the new one updated, and an unchanged one never', () => {
+    const { ctx, emitted, reporter } = watchedCtx([
+      layerWith(asPlan),
+    ]);
+    reporter.changed(ctx.id, 'tasks', {
+      id: 'a',
+      entries: [],
+    });
+    reporter.changed(ctx.id, 'tasks', {
+      id: 'a',
+      entries: [],
+    });
+    reporter.changed(ctx.id, 'tasks', {
+      id: 'b',
+      entries: [],
+    });
+    reporter.changed(ctx.id, 'tasks', undefined);
+    expect(
+      emitted.map((event) => [
+        event.type,
+        event.data,
+      ]),
+    ).toEqual([
+      [
+        'h:plan_updated',
+        {
+          plan: {
+            id: 'a',
+            entries: [],
+          },
+        },
+      ],
+      [
+        'h:plan_removed',
+        {
           id: 'a',
         },
-      },
-      {
-        type: 'plan_updated',
-        data: {
+      ],
+      [
+        'h:plan_updated',
+        {
           plan: {
             id: 'b',
             entries: [],
           },
         },
-      },
+      ],
+      [
+        'h:plan_removed',
+        {
+          id: 'b',
+        },
+      ],
     ]);
   });
 
-  it('tells nothing for a layer with no state, one whose plan throws, or no layers', () => {
-    const harness = new AgentHarness({
-      name: 'h',
-      params: {},
-    });
-    const ctx = harness.createContext();
-    const emitted: string[] = [];
-    const emit = (type: string) => {
-      emitted.push(type);
-    };
-    reportLayerPlans({
-      ctx,
-      layers: undefined,
-      emit,
-    });
-    reportLayerPlans({
-      ctx,
-      layers: [
-        layerWith(() => ({
-          entries: [],
-        })),
-      ],
-      emit,
-    });
-    harness.setLayerState(ctx.id, 'tasks', {});
-    reportLayerPlans({
-      ctx,
-      layers: [
-        layerWith(() => {
-          throw new Error('unreadable');
-        }),
-      ],
-      emit,
-    });
+  it('tells nothing for an unwatched execution or layer, a layer whose plan throws, or after forget', () => {
+    const { ctx, emitted, reporter } = watchedCtx([
+      layerWith(() => {
+        throw new Error('unreadable');
+      }),
+    ]);
+    reporter.watch(ctx, [
+      frameworkCast<ContextLayer>({
+        id: 'plain',
+        slot: 0,
+        scope: 'execution',
+        hooks: {},
+      }),
+    ]);
+    reporter.watch(ctx, undefined);
+    reporter.changed(ctx.id, 'tasks', {});
+    reporter.changed(ctx.id, 'plain', {});
+    reporter.changed('elsewhere', 'tasks', {});
+    reporter.forget(ctx.id);
+    reporter.changed(ctx.id, 'tasks', {});
     expect(emitted).toEqual([]);
   });
 });

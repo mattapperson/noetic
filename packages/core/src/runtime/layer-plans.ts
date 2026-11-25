@@ -1,14 +1,20 @@
 /**
  * A context layer that keeps the agent's plan (`ContextLayer.plan`) reports
- * it with the events an agent step's agent reports its plan with:
- * `plan_updated` when it changes, `plan_removed` when it goes (spec 08
- * § Tool calls, plans and agent settings). The harness reads each such layer's
- * plan after every tool call, since a plan changes only through the layer's
- * tools, and tells each change once.
+ * it live, with the events an agent step's agent reports its plan with:
+ * `plan_updated` the moment the layer's state changes its plan, `plan_removed`
+ * when the plan goes (spec 08 § Tool calls, plans and agent settings).
+ *
+ * The harness wraps its layer-state store with {@link reportingLayerPlans}, so
+ * every write — a layer tool a model or an agent calls, a code step's layer
+ * function, a `store()` hook, `init` restoring a plan — is seen as it lands.
+ * An execution's layers are known from when they are initialized
+ * ({@link LayerPlanReporter.watch}) until they are disposed.
  */
 
-import type { AgentHarnessContract, AgentPlan, Context, ContextLayer } from '@noetic-tools/types';
+import type { LayerStateStore } from '@noetic-tools/context';
+import type { AgentPlan, Context, ContextLayer } from '@noetic-tools/types';
 import { hashString } from '@noetic-tools/types';
+import { emitFrameworkEvent, getBroadcaster } from './broadcaster-utils';
 import { ContextImpl } from './context-impl';
 
 //#region Types
@@ -19,35 +25,20 @@ interface Told {
   readonly id?: string;
 }
 
-/** Parameters for {@link reportLayerPlans}. */
-export interface ReportLayerPlansParams {
-  ctx: Context;
-  layers: ReadonlyArray<ContextLayer> | undefined;
-  /** Emits one framework event, through the step's `emit` filter. */
-  emit: (eventType: string, data: Record<string, unknown>) => void;
+/** One execution whose layers keep a plan: where to tell it, and which layers. */
+interface Watched {
+  readonly ctx: Context;
+  readonly layers: Map<string, ContextLayer>;
+  readonly told: Map<string, Told>;
 }
 
 //#endregion
 
 //#region Helpers
 
-/** What each harness last told, by execution and layer. */
-const TOLD = new WeakMap<AgentHarnessContract, Map<string, Told>>();
-
-function toldFor(harness: AgentHarnessContract): Map<string, Told> {
-  const known = TOLD.get(harness);
-  if (known) {
-    return known;
-  }
-  const told = new Map<string, Told>();
-  TOLD.set(harness, told);
-  return told;
-}
-
-/** The layer's plan now; null when it holds none, or its `plan` throws. */
-function currentPlan(layer: ContextLayer, ctx: Context): AgentPlan | null {
+/** The layer's plan in `state`; null when it holds none, or its `plan` throws. */
+function planIn(layer: ContextLayer, state: unknown): AgentPlan | null {
   const read = layer.plan;
-  const state = ctx.harness.getLayerState(ctx.id, layer.id);
   if (!read || state === undefined) {
     return null;
   }
@@ -80,42 +71,97 @@ function idData(id: string | undefined): Record<string, string> {
 
 //#region Public API
 
-/** Tell each change of the plans the step's layers keep, once. */
-export function reportLayerPlans(params: ReportLayerPlansParams): void {
-  const { ctx, layers, emit } = params;
-  const planned = (layers ?? []).filter((layer) => layer.plan !== undefined);
-  if (planned.length === 0) {
-    return;
+/** Tells each change of the plans an execution's layers keep, once, as it lands. */
+export class LayerPlanReporter {
+  private readonly watched = new Map<string, Watched>();
+
+  /**
+   * Start telling the plans `layers` keep for `ctx`'s execution. Call before
+   * the layers' `init`, so a plan it restores is told too. Layers added later
+   * (a `withContext` step) join the execution's set.
+   */
+  watch(ctx: Context, layers: ReadonlyArray<ContextLayer> | undefined): void {
+    const planned = (layers ?? []).filter((layer) => layer.plan !== undefined);
+    if (planned.length === 0) {
+      return;
+    }
+    const existing = this.watched.get(ctx.id);
+    const entry: Watched = existing ?? {
+      ctx,
+      layers: new Map(),
+      told: new Map(),
+    };
+    for (const layer of planned) {
+      entry.layers.set(layer.id, layer);
+    }
+    this.watched.set(ctx.id, entry);
   }
-  const told = toldFor(ctx.harness);
-  for (const layer of planned) {
-    const key = `${ctx.id}\u0000${layer.id}`;
-    const last = told.get(key);
-    const plan = currentPlan(layer, ctx);
+
+  /** The execution's layers are gone: tell nothing more for it. */
+  forget(executionId: string): void {
+    this.watched.delete(executionId);
+  }
+
+  /** A layer's state was written: tell its plan if it changed. */
+  changed(executionId: string, layerId: string, state: unknown): void {
+    const entry = this.watched.get(executionId);
+    const layer = entry?.layers.get(layerId);
+    if (!entry || !layer) {
+      return;
+    }
+    const plan = planIn(layer, state);
     const hash = plan === null ? undefined : hashString(JSON.stringify(plan));
+    const last = entry.told.get(layerId);
     if (hash === last?.hash) {
-      continue;
+      return;
     }
     // Another plan, or none, in place of the one told: that one is gone.
     if (last && (plan === null || plan.id !== last.id)) {
-      emit('plan_removed', {
-        ...stepData(ctx),
-        ...idData(last.id),
-      });
+      this.emit(entry.ctx, 'plan_removed', idData(last.id));
     }
     if (plan === null || hash === undefined) {
-      told.delete(key);
-      continue;
+      entry.told.delete(layerId);
+      return;
     }
-    told.set(key, {
+    entry.told.set(layerId, {
       hash,
       ...idData(plan.id),
     });
-    emit('plan_updated', {
-      ...stepData(ctx),
+    this.emit(entry.ctx, 'plan_updated', {
       plan,
     });
   }
+
+  private emit(ctx: Context, eventType: string, data: Record<string, unknown>): void {
+    emitFrameworkEvent({
+      broadcaster: getBroadcaster(ctx),
+      agentName: ctx.harness.config.name,
+      eventType,
+      data: {
+        ...stepData(ctx),
+        ...data,
+      },
+    });
+  }
+}
+
+/** `store`, telling `reporter` of every write as it lands. */
+export function reportingLayerPlans(
+  store: LayerStateStore,
+  reporter: LayerPlanReporter,
+): LayerStateStore {
+  return new Proxy(store, {
+    get(target, property) {
+      if (property === 'set') {
+        return <T>(executionId: string, layerId: string, state: T): void => {
+          target.set(executionId, layerId, state);
+          reporter.changed(executionId, layerId, state);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
 }
 
 //#endregion

@@ -284,7 +284,7 @@ Layers are ordered by slot number regardless of array order. The runtime calls e
 
 State written by **any** path — `store()` hooks, `provides` functions, `onComplete`, the append pipeline — is durably mirrored for non-`'execution'` scopes, so the next execution's `init` can rehydrate it from `ScopedStorage` (key `'state'`). Returning `{ state: undefined }` clears the state and deletes the durable key. Mirror failures are reported as diagnostics and never interrupt the agent.
 
-A layer that keeps the agent's plan — a task list, say — can declare `plan(state)`, returning an `AgentPlan` (`{ entries }`, `{ markdown }` or `{ uri }`, with an optional `id`) or `null`. The harness reads it after each tool call and emits `plan_updated` / `plan_removed` when it changes, so a host shows it as it shows a coding agent's plan:
+A layer that keeps the agent's plan — a task list, say — can declare `plan(state)`, returning an `AgentPlan` (`{ entries }`, `{ markdown }` or `{ uri }`, with an optional `id`) or `null`. The harness reads it each time the layer's state is written — a layer tool called by a model or a coding agent, a code step, a `store()` hook — and emits `plan_updated` / `plan_removed` as the change lands, so a host shows it as it shows a coding agent's plan:
 
 ```ts
 import type { ContextLayer } from '@noetic-tools/core';

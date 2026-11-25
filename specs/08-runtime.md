@@ -877,11 +877,15 @@ answer.
   left in it.
 - `plan_removed` — `{ stepId, id? }`: the agent dropped that plan.
 
-An agent step's agent reports its plan as it goes. A `callModel` step's plan is
-the one a context layer keeps (`ContextLayer.plan`, `11-context-layer-system`):
-the harness reads each such layer's plan after every tool call — a plan changes
-only through the layer's tools — and tells each change once, a plan under a new
-id as the old one removed. The `plan()` layer's plan is its PRD, as markdown,
+An agent step's agent reports its plan as it goes. A context layer that keeps a
+plan (`ContextLayer.plan`, `11-context-layer-system`) reports it live too, for
+any step: the harness reads the layer's plan each time the layer's state is
+written — by a layer tool a model or an agent calls (through the tool bridge as
+well), a code step's layer function, a `store()` hook, or `init` restoring an
+earlier plan — and tells each change as it lands, before the call that made it
+completes, a plan under a new id as the old one removed. An execution's layers
+are watched from their `init` until they are disposed. These events are the
+layer's, not a step's, so a step's `emit` filter does not apply to them. The `plan()` layer's plan is its PRD, as markdown,
 from the moment one is written until it is idle again (`12-builtin-context-layers`).
 `stepId` is there when the context knows the step running.
 

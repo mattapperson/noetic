@@ -33,7 +33,6 @@ import {
   noticeHeld,
   waitOnHeldCalls,
 } from '../runtime/held-calls';
-import { reportLayerPlans } from '../runtime/layer-plans';
 import type { ApprovalOutcome } from '../runtime/tool-approval';
 import type { ToolCallResult } from '../runtime/tool-call';
 import { createToolResultItem, executeToolCall } from '../runtime/tool-call';
@@ -78,21 +77,6 @@ function callIdentity(
     callId: fc.callId,
     ...toolIdentityData(identity),
   };
-}
-
-/** A plan the step's layers keep changes only through their tools: tell it after each call. */
-function reportPlans(
-  request: CallModelRequest,
-  emit: (eventType: string, data: Record<string, unknown>) => void,
-): void {
-  if (!request.ctx) {
-    return;
-  }
-  reportLayerPlans({
-    ctx: request.ctx,
-    layers: request.layers,
-    emit,
-  });
 }
 
 /** A call's arguments, parsed for its presentation; undefined when they do not parse. */
@@ -260,7 +244,6 @@ async function executeToolRound(
       emitIfAllowed: params.emitIfAllowed,
       calls: params.calls,
     });
-    reportPlans(request, params.emitIfAllowed);
     if (call.held) {
       heldCalls.push(fc);
       announcedAs.set(fc.callId, call.held);
@@ -308,7 +291,6 @@ async function executeToolRound(
         calls: params.calls,
         announced: announcedAs.get(fc.callId),
       });
-      reportPlans(request, params.emitIfAllowed);
       if (call.held) {
         heldCalls.push(fc);
         announcedAs.set(fc.callId, call.held);
