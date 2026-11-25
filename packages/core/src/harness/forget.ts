@@ -48,6 +48,8 @@ export interface ForgetHost {
   settleOutput(threadId: string): Promise<void>;
   /** Drop what this harness holds in memory for the thread: its session and park watch. */
   dropThread(threadId: string): void;
+  /** Ids of the context layers this harness keeps durable state for. */
+  layerIds(): ReadonlyArray<string>;
 }
 
 //#endregion
@@ -60,32 +62,68 @@ const LAYERS_PREFIX = 'layers/';
 /** The suffixes an execution's keys carry after its id, and the part each is. */
 const PART_PATTERN = /^(.+?):(snapshot|ledger|trail|held|intent|pending)(?::|$)/;
 
-/** The execution and part a key under `execution:` belongs to. */
-function parseExecutionKey(key: string):
-  | {
-      executionId: string;
-      part: ExecutionPart;
+/** An execution's key, with the execution and the part it belongs to. */
+interface ExecutionKey {
+  key: string;
+  executionId: string;
+  part: ExecutionPart;
+}
+
+/**
+ * The execution and part of each key under `execution:`. A key core writes is read by
+ * its part's suffix. Any other key belongs to the longest execution id, among those
+ * core's keys name, that it starts with — else to the id up to its first colon — so
+ * `execution:a:b:custom` is execution `a:b`'s when `a:b` has records of its own.
+ */
+function parseExecutionKeys(keys: ReadonlyArray<string>): ExecutionKey[] {
+  const known = new Set<string>();
+  const parsed: ExecutionKey[] = [];
+  const unknown: string[] = [];
+  for (const key of keys) {
+    const match = key.startsWith(EXECUTION_PREFIX)
+      ? PART_PATTERN.exec(key.slice(EXECUTION_PREFIX.length))
+      : null;
+    if (match?.[1] && match[2]) {
+      known.add(match[1]);
+      parsed.push({
+        key,
+        executionId: match[1],
+        part: toPart(match[2]),
+      });
+      continue;
     }
-  | undefined {
+    unknown.push(key);
+  }
+  for (const key of unknown) {
+    const owner = ownerOf(key, known);
+    if (owner !== undefined) {
+      parsed.push({
+        key,
+        executionId: owner,
+        part: ExecutionPart.Other,
+      });
+    }
+  }
+  return parsed;
+}
+
+/** The execution a key core does not write belongs to. */
+function ownerOf(key: string, known: ReadonlySet<string>): string | undefined {
   if (!key.startsWith(EXECUTION_PREFIX)) {
     return undefined;
   }
   const rest = key.slice(EXECUTION_PREFIX.length);
-  const match = PART_PATTERN.exec(rest);
-  if (match?.[1] && match[2]) {
-    return {
-      executionId: match[1],
-      part: toPart(match[2]),
-    };
+  let owner: string | undefined;
+  for (const id of known) {
+    if (rest.startsWith(`${id}:`) && id.length > (owner?.length ?? -1)) {
+      owner = id;
+    }
   }
-  // A key core does not write: its id is up to the last colon.
-  const colon = rest.lastIndexOf(':');
-  return colon > 0
-    ? {
-        executionId: rest.slice(0, colon),
-        part: ExecutionPart.Other,
-      }
-    : undefined;
+  if (owner !== undefined) {
+    return owner;
+  }
+  const colon = rest.indexOf(':');
+  return colon > 0 ? rest.slice(0, colon) : undefined;
 }
 
 const PARTS: Record<string, ExecutionPart> = {
@@ -99,22 +137,6 @@ const PARTS: Record<string, ExecutionPart> = {
 
 function toPart(name: string): ExecutionPart {
   return PARTS[name] ?? ExecutionPart.Other;
-}
-
-/** The scope key of a context layer's state key (`layers/<layerId>/<scopeKey>/...`). */
-function layerScopeMatches(key: string, scopeKeys: ReadonlySet<string>): boolean {
-  const rest = key.slice(LAYERS_PREFIX.length);
-  const slash = rest.indexOf('/');
-  if (slash < 0) {
-    return false;
-  }
-  const scoped = rest.slice(slash + 1);
-  for (const scopeKey of scopeKeys) {
-    if (scoped.startsWith(`${scopeKey}/`)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /** Ids of keys under `prefix` that start with `idPrefix`. */
@@ -150,45 +172,60 @@ function busy(threadOrExecution: string, reason: string): NoeticErrorImpl {
 
 //#region Forget
 
-/** Delete everything stored for one execution, and its layer state. */
+/** Delete everything stored for the executions, checking the lease between them. */
 async function forgetExecutionState(
   host: ForgetHost,
   executionIds: ReadonlyArray<string>,
-  keepTrail: boolean,
+  under: {
+    keepTrail: boolean;
+    lease?: TurnLease;
+  },
 ): Promise<void> {
-  for (const executionId of executionIds) {
-    await host.clearCheckpoint(executionId);
-  }
   const storage = host.storage;
-  if (!storage) {
-    return;
-  }
-  const wanted = new Set(executionIds);
   for (const executionId of executionIds) {
-    const keys = (await storage.list(`${EXECUTION_PREFIX}${executionId}:`)).filter((key) => {
-      const parsed = parseExecutionKey(key);
-      return (
-        parsed !== undefined &&
-        wanted.has(parsed.executionId) &&
-        !(keepTrail && parsed.part === ExecutionPart.Trail)
-      );
-    });
+    under.lease?.assert();
+    await host.clearCheckpoint(executionId);
+    if (!storage) {
+      continue;
+    }
+    const keys = parseExecutionKeys(await storage.list(`${EXECUTION_PREFIX}${executionId}:`))
+      .filter(
+        (parsed) =>
+          parsed.executionId === executionId &&
+          !(under.keepTrail && parsed.part === ExecutionPart.Trail),
+      )
+      .map((parsed) => parsed.key);
     await deleteAll(storage, keys);
   }
 }
 
-/** Delete context-layer state kept at any of `scopeKeys`. */
+/**
+ * Delete the state each of `layerIds` keeps at the thread's scope key. A key under
+ * `layers/<id>/a/` may be thread `a`'s or, as `layers/<id>/a/b/`, thread `a/b`'s: keys
+ * under another stored thread's scope key are left to that thread.
+ */
 async function forgetLayerState(
-  storage: StorageAdapter | undefined,
-  scopeKeys: ReadonlySet<string>,
+  host: ForgetHost,
+  threadId: string,
+  layerIds: ReadonlySet<string>,
 ): Promise<void> {
-  if (!storage || scopeKeys.size === 0) {
+  const storage = host.storage;
+  if (!storage || layerIds.size === 0) {
     return;
   }
-  const keys = (await storage.list(LAYERS_PREFIX)).filter((key) =>
-    layerScopeMatches(key, scopeKeys),
-  );
-  await deleteAll(storage, keys);
+  const nested = (
+    await listStoredThreads(host, {
+      prefix: `${threadId}/`,
+    })
+  ).map((other) => `${other}/`);
+  for (const layerId of layerIds) {
+    const scope = `${LAYERS_PREFIX}${layerId}/${threadId}/`;
+    const keys = (await storage.list(scope)).filter((key) => {
+      const rest = key.slice(scope.length - threadId.length - 1);
+      return !nested.some((other) => rest.startsWith(other));
+    });
+    await deleteAll(storage, keys);
+  }
 }
 
 /** The thread's stored record, or undefined when it has none or it does not read. */
@@ -196,8 +233,20 @@ async function recordOf(host: ForgetHost, threadId: string): Promise<SessionReco
   return host.sessionStore?.load(threadId);
 }
 
-/** Refuse a thread whose turn runs here, or whose lease another harness holds. */
-async function takeThread(
+/** Refuse a thread with a turn running, or about to run, in this harness. */
+function refuseBusy(host: ForgetHost, threadId: string, record: SessionRecord | undefined): void {
+  const live = executionsOf(record).find((id) => host.executionBusy(id));
+  if (host.threadBusy(threadId) || live !== undefined) {
+    throw busy(threadId, `thread "${threadId}" has a turn running in this harness`);
+  }
+}
+
+/**
+ * Take the thread's lease, waiting up to `waitMs` for another harness's, and keep it
+ * renewed until the forget is done. Taking it raises its term, so a harness that
+ * stalled mid-turn loses its next write.
+ */
+async function holdThread(
   host: ForgetHost,
   threadId: string,
   under: {
@@ -205,31 +254,43 @@ async function takeThread(
     waitMs: number;
   },
 ): Promise<TurnLease | undefined> {
-  const { record, waitMs } = under;
-  const live = executionsOf(record).find((id) => host.executionBusy(id));
-  if (host.threadBusy(threadId) || live !== undefined) {
-    throw busy(threadId, `thread "${threadId}" has a turn running in this harness`);
-  }
   if (!host.leaseOptions) {
     return undefined;
   }
-  // Taking the lease raises its term, so a harness that stalled mid-turn loses its next write.
-  return TurnLease.take(
+  const lease = await TurnLease.take(
     {
       ...host.leaseOptions,
-      waitMs,
+      waitMs: under.waitMs,
     },
     threadId,
     {
-      above: record?.term,
+      above: under.record?.term,
     },
   );
+  // A lost lease is found by `assert` and `verify` before the next delete.
+  lease.keep(() => undefined);
+  return lease;
+}
+
+/** Every layer id whose state may be kept for the thread. */
+function layerIdsFor(
+  host: ForgetHost,
+  records: ReadonlyArray<SessionRecord | undefined>,
+): Set<string> {
+  const ids = new Set(host.layerIds());
+  for (const record of records) {
+    for (const id of record?.layers ?? []) {
+      ids.add(id);
+    }
+  }
+  return ids;
 }
 
 /**
  * @internal
  * Forget a thread: settle its spend, then delete its executions, layer state,
- * display output, record and lease, in that order.
+ * display output, record and lease, in that order, holding the lease throughout.
+ * The caller keeps new turns of the thread from starting in this harness meanwhile.
  */
 export async function forgetThread(
   host: ForgetHost,
@@ -237,10 +298,34 @@ export async function forgetThread(
   options: ForgetOptions = {},
 ): Promise<ForgetReport> {
   const before = await recordOf(host, threadId);
-  await takeThread(host, threadId, {
+  refuseBusy(host, threadId, before);
+  const lease = await holdThread(host, threadId, {
     record: before,
     waitMs: options.waitMs ?? 0,
   });
+  try {
+    const report = await forgetHeldThread(host, threadId, {
+      options,
+      before,
+      lease,
+    });
+    return report;
+  } catch (error) {
+    await lease?.release();
+    throw error;
+  }
+}
+
+async function forgetHeldThread(
+  host: ForgetHost,
+  threadId: string,
+  held: {
+    options: ForgetOptions;
+    before: SessionRecord | undefined;
+    lease: TurnLease | undefined;
+  },
+): Promise<ForgetReport> {
+  const { options, before, lease } = held;
   const executions = new Set(executionsOf(before));
   const spend = await host.closeSpend(
     (record) =>
@@ -248,13 +333,10 @@ export async function forgetThread(
       (record.executionId !== undefined && executions.has(record.executionId)),
     options.patienceMs,
   );
-  // Settling can outlast the lease: take it again, and read the record again under it,
-  // in case a turn began meanwhile.
+  await lease?.verify();
+  // A turn may have begun before the lease was taken: read the record again under it.
   const after = await recordOf(host, threadId);
-  await takeThread(host, threadId, {
-    record: after,
-    waitMs: 0,
-  });
+  refuseBusy(host, threadId, after);
   for (const executionId of executionsOf(after)) {
     executions.add(executionId);
   }
@@ -262,20 +344,28 @@ export async function forgetThread(
     ...executions,
   ];
   host.dropThread(threadId);
-  await forgetExecutionState(host, executionIds, options.keepTrail === true);
+  await forgetExecutionState(host, executionIds, {
+    keepTrail: options.keepTrail === true,
+    lease,
+  });
   await forgetLayerState(
-    host.storage,
-    new Set([
-      threadId,
-      ...executionIds,
+    host,
+    threadId,
+    layerIdsFor(host, [
+      before,
+      after,
     ]),
   );
   await host.settleOutput(threadId);
   await host.outputStorage.delete(outputKey(threadId));
+  await lease?.verify();
   if (host.storage) {
     await host.storage.delete(sessionKey(threadId));
-    await host.storage.delete(leaseKey(threadId));
   }
+  // The lease goes last, while still held: a forget cut off before this leaves the thread listed.
+  await lease?.stop();
+  await lease?.verify();
+  await host.storage?.delete(leaseKey(threadId));
   return {
     threadId,
     executionIds,
@@ -286,7 +376,7 @@ export async function forgetThread(
 /**
  * @internal
  * Forget one execution: settle its spend, then delete everything under
- * `execution:<id>:` and its layer state. A thread's record is left alone.
+ * `execution:<id>:`. A thread's record is left alone.
  */
 export async function forgetExecution(
   host: ForgetHost,
@@ -305,13 +395,9 @@ export async function forgetExecution(
     [
       executionId,
     ],
-    options.keepTrail === true,
-  );
-  await forgetLayerState(
-    host.storage,
-    new Set([
-      executionId,
-    ]),
+    {
+      keepTrail: options.keepTrail === true,
+    },
   );
   return {
     executionIds: [
@@ -363,11 +449,9 @@ export async function listStoredExecutions(
     known.add(part);
     parts.set(executionId, known);
   };
-  for (const key of (await host.storage?.list(`${EXECUTION_PREFIX}${prefix}`)) ?? []) {
-    const parsed = parseExecutionKey(key);
-    if (parsed) {
-      add(parsed.executionId, parsed.part);
-    }
+  const keys = (await host.storage?.list(`${EXECUTION_PREFIX}${prefix}`)) ?? [];
+  for (const parsed of parseExecutionKeys(keys)) {
+    add(parsed.executionId, parsed.part);
   }
   // A checkpoint store of the host's own may keep snapshots outside `storage`.
   for (const { executionId } of (await host.checkpointStore?.list()) ?? []) {

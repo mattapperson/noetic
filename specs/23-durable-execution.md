@@ -517,7 +517,7 @@ interface ForgetOptions {
 interface ForgetReport {
   threadId?: string;
   executionIds: string[];       // every execution forgotten
-  spend: SpendSettlement[];     // every pending dispatch settled or written off, in that order
+  spend: SpendSettlement[];     // every pending dispatch settled or written off, priced ones first
 }
 
 interface StoredExecution {
@@ -529,20 +529,24 @@ interface StoredExecution {
 type ExecutionPart = 'snapshot' | 'ledger' | 'trail' | 'held' | 'intent' | 'pending' | 'other';
 ```
 
+A scope with neither a `threadId` nor an `executionId` is refused with `NoeticConfigError` `INVALID_FORGET_SCOPE`: a forget never falls back to the default thread.
+
 ### What a thread's forget deletes
 
-`forget({ threadId })` covers every execution the thread ran: the turn in flight, parked, stopped, or stuck, and every turn that finished. The thread's record lists them all in `executions`, the ids of every turn it began, oldest first, so a turn that has dropped out of the remembered `done` turns is still found. For each of those executions it deletes what an execution's forget deletes (below). Then it deletes, in order:
+`forget({ threadId })` covers every execution the thread ran: the turn in flight, parked, stopped, or stuck, and every turn that finished. The thread's record lists them in `executions`, the ids of every turn it began, oldest first, so a turn that has dropped out of the remembered `done` turns is still found. A record written before `executions` was kept names only its remembered turns and its turn in flight; executions older than those are not found. For each execution it deletes what an execution's forget deletes (below). Then it deletes, in order:
 
-1. Context-layer state kept at the thread's scope key (`layers/<layerId>/<threadId>/`), for every layer.
+1. Context-layer state kept at the thread's scope key, `layers/<layerId>/<threadId>/`, for every layer that may keep state there: the harness's thread-wide `contextLayers`, every layer this harness has kept durable state for, and every layer the thread's record names in `layers` (the record keeps those ids as turns begin and end, so a harness that never ran the thread still finds them). A key that also lies under another stored thread's scope key — thread `a/b`'s `layers/<id>/a/b/` while forgetting `a` — is left to that thread. A layer that writes storage of its own outside these keys deletes it itself.
 2. The thread's display output (`output:<threadId>`), after any write still queued for it has landed.
 3. The thread's record (`session:<threadId>`): its history, usage, turn, remembered turns, and kept steers.
 4. The thread's turn lease (`turn-lease:<threadId>`).
 
-The lease goes last: the forget holds it (below) until everything else is gone, and a forget cut off part way leaves the thread listed by `listStoredThreads`, so a later sweep finishes it. The harness also stops watching a parked turn of the thread and drops the thread's session and display output from memory.
+The lease goes last, while the forget still holds it (below). A forget cut off part way leaves the thread listed by `listStoredThreads`, so a later sweep finishes it. The harness also stops watching a parked turn of the thread and drops the thread's session and display output from memory.
 
 ### What an execution's forget deletes
 
-`forget({ executionId })` deletes everything under `execution:<id>:` — the checkpoint snapshot (through the configured `CheckpointStore`), the step ledger, held calls and their intents, pending entries, and the trail unless `keepTrail` — and context-layer state kept at the execution's scope key (`layers/<layerId>/<executionId>/`). It does not touch a thread's record: forgetting the execution of a thread's turn leaves the thread naming an execution with nothing stored, and the turn starts over on its next delivery. Forget the thread for that.
+`forget({ executionId })` deletes everything under `execution:<id>:` — the checkpoint snapshot (through the configured `CheckpointStore`), the step ledger, held calls and their intents, pending entries, the trail unless `keepTrail`, and any other key there. Core keeps layer state durably only at thread, resource, and global scope, so an execution has none to delete. A thread's record is not touched: forgetting the execution of a thread's turn leaves the thread naming an execution with nothing stored, and the turn starts over on its next delivery. Forget the thread for that.
+
+A key under `execution:` is read as the execution its part's suffix names (`:snapshot`, `:ledger:`, `:trail:`, `:held:`, `:intent:`, `:pending:`). Any other key belongs to the longest execution id that other keys name and that it starts with, else to the id before its first colon; so `execution:a:b:custom` is execution `a:b`'s when `a:b` has records of its own.
 
 Deleting goes through the `StorageAdapter`, so storage that keeps a large value elsewhere (a spilled object, `25-platform-packages` § Values larger than a row) deletes it with its key.
 
@@ -550,15 +554,17 @@ Deleting goes through the `StorageAdapter`, so storage that keeps a large value 
 
 A forget never discards evidence of spend unaccounted for. Before it deletes anything it settles every pending dispatch (§ Paid dispatches) that names the thread, or one of the executions it forgets:
 
-1. Each is priced through the provider's generation lookup, waiting up to `patienceMs`, as `reconcileSpend` does.
+1. Each is priced through the provider's generation lookup, waiting up to `patienceMs`, as `reconcileSpend` does. A lookup already running for the dispatch, with a patience of its own, is waited on no longer than `patienceMs`.
 2. Each the provider did not price is written off at its ceiling. One with no ceiling — its model publishes no price, its request set no output cap, or its record is unreadable — is written off at 0 and its settlement carries `unbounded: true`, so the host knows the bill was unknown.
+3. A dispatch whose record could not be deleted, so it could not be settled, stops the forget with `ledger_write_failed` (`path` is `spend:<id>`) before anything is deleted, and the thread's lease is handed back.
 
-Each settlement is charged as any other (§ Reconciliation) and returned in `ForgetReport.spend`, with the dispatch's `model` and `path`, so a host can attribute it. An unreadable record that names no execution and no thread is left alone: it is not known to be the thread's.
+Each settlement is charged as any other (§ Reconciliation) and returned in `ForgetReport.spend`, with the dispatch's `model` and `path`, so a host can attribute it. A settlement that lands after the thread's record is gone — a reconcile on another harness — charges nothing to it: a usage write never creates a thread's record. An unreadable record that names no execution and no thread is left alone: it is not known to be the thread's.
 
-### A live turn is not forgotten
+### A live turn is not forgotten, and none starts meanwhile
 
-- A thread whose turn is running in this harness, or an execution with a run in flight in this harness, is refused with `lease_lost`.
-- On storage with `swap`, a thread's forget takes the thread's lease (§ One writer per turn) before deleting, waiting up to `waitMs` for a lease another harness holds. A lease still held elsewhere after that is refused with `lease_lost`. Taking it raises the term, so a harness that stalled mid-turn and comes back loses its next write and stops.
+- A thread whose turn is running in this harness — in flight, queued, or being delivered — or an execution with a run in flight in this harness, is refused with `lease_lost`. So is a second forget of a thread this harness is already forgetting.
+- While this harness forgets a thread, a message sent to it on this harness waits for the forget to end, then starts the thread afresh; a `wake()` skips it.
+- On storage with `swap`, a thread's forget takes the thread's lease (§ One writer per turn) before anything else, waiting up to `waitMs` for a lease another harness holds; a lease still held elsewhere after that is refused with `lease_lost`. It renews the lease for as long as it runs, so another harness cannot start a turn of the thread meanwhile, and checks it still holds it before each execution it deletes and before deleting the record and the lease. A forget that finds the lease lost stops with `lease_lost`. A forget that fails hands the lease back. Taking the lease raises its term, so a harness that stalled mid-turn and comes back loses its next write and stops.
 - On storage without `swap`, nothing fences another process. The host must make sure no other harness runs the thread.
 
 ### Listing what is stored

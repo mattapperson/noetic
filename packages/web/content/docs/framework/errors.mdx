@@ -50,7 +50,7 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `hold_refused` | `callId`, `reason` | `harness.execute()` could not take a decision for a [held tool call](/docs/framework/steps/invoke-tool#human-in-the-loop-approval). |
 | `lease_lost` | `executionId`, `term`, `reason` | Another harness holds or took this thread's turn. See [one writer per turn](/docs/framework/durability#one-writer-per-turn). |
 | `turn_stuck` | `executionId`, `path`, `from`, `to` | A turn resumed under a newer flow version would have to redo a step that already had a lasting effect, so it stopped. See [flow versions](/docs/framework/durability#flow-versions). |
-| `ledger_write_failed` | `executionId`, `path`, `cause` | Under a turn lease, a durable record could not be written, so the turn stopped. |
+| `ledger_write_failed` | `executionId`, `path`, `cause` | Under a turn lease, a durable record could not be written, so the turn stopped. Also thrown by `harness.forget()` when a spend record (`path` `spend:<id>`) could not be settled; nothing was deleted. |
 | `verify_act_failed` | `stepId`, `cause: Error`, `run?: BlobRef` | A `step.verify`'s `act` threw. The verification run is recorded first, with the failure as evidence, and `run` points at it. |
 
 ### Full Type Definition
@@ -231,6 +231,12 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 **Cause:** `harness.execute()` (or the session API) was called on a harness built without an `agentGraph`.
 
 **Fix:** Pass `agentGraph` to the `AgentHarness` constructor, or drive steps directly with `harness.run(step, input, ctx)`.
+
+#### INVALID_FORGET_SCOPE
+
+**Cause:** `harness.forget()` was given a scope with neither a `threadId` nor an `executionId`, or an empty `threadId`.
+
+**Fix:** Pass `{ threadId }` to forget a thread, or `{ executionId }` to forget one execution. Forget never falls back to the default thread.
 
 #### INVALID_LEASE_OPTIONS
 

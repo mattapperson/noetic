@@ -29,10 +29,18 @@ export interface ThreadRecordHost {
   restore(executionId: string, opts: RestoreCheckpointOptions): Promise<Context | null>;
   clearCheckpoint(executionId: string): Promise<void>;
   parseItems(raw: unknown[]): Item[];
+  /** Ids of the context layers this harness keeps durable state for. */
+  layerIds?(): ReadonlyArray<string>;
 }
 
 /** How many finished turns a thread remembers, to answer a message delivered again. */
 const MAX_DONE_TURNS = 20;
+
+/** How a record write behaves. */
+interface CommitOptions {
+  /** Write only over a stored record: never create one. */
+  onlyIfStored?: boolean;
+}
 
 /** How many times a compare-and-set write is tried against a record that keeps changing. */
 const COMMIT_ATTEMPTS = 8;
@@ -195,6 +203,7 @@ export class ThreadRecord {
       ...record,
       steers: record.steers?.filter((steer) => !messageIds.includes(steer.id)),
       executions: withExecution(record.executions, ctx.id),
+      ...this.withLayers(record),
       turn: {
         executionId: ctx.id,
         messageIds: [
@@ -374,6 +383,7 @@ export class ThreadRecord {
   ): Promise<void> {
     await this.updateHeld(ctx, (record) => ({
       ...withoutTurn(record),
+      ...this.withLayers(record),
       steers: record.steers?.filter((steer) => queuedIds.includes(steer.id)),
       items: [
         ...history,
@@ -386,10 +396,16 @@ export class ThreadRecord {
   addUsage(spent: TurnUsage): Promise<SessionUsage> {
     return this.run(async () => {
       const usage = addUsage((await this.load())?.usage ?? EMPTY_USAGE, spent);
-      await this.write((record) => ({
-        ...record,
-        usage,
-      }));
+      // A record a forget deleted meanwhile stays deleted: a late bill does not bring it back.
+      await this.write(
+        (record) => ({
+          ...record,
+          usage,
+        }),
+        {
+          onlyIfStored: true,
+        },
+      );
       return usage;
     });
   }
@@ -444,9 +460,12 @@ export class ThreadRecord {
   }
 
   /** Read-modify-write the stored record, best-effort. Call only from inside `run`. */
-  private async write(change: (record: SessionRecord) => SessionRecord): Promise<void> {
+  private async write(
+    change: (record: SessionRecord) => SessionRecord,
+    opts?: CommitOptions,
+  ): Promise<void> {
     try {
-      await this.commit(change);
+      await this.commit(change, opts);
     } catch (error) {
       // Same rule as checkpoints: losing the record costs resumability, not the turn.
       console.warn(
@@ -461,10 +480,16 @@ export class ThreadRecord {
    * the write lands only if nothing else wrote meanwhile, and is tried again on what
    * the other writer left, so two harnesses never overwrite each other's fields.
    */
-  private async commit(change: (record: SessionRecord) => SessionRecord): Promise<void> {
+  private async commit(
+    change: (record: SessionRecord) => SessionRecord,
+    opts?: CommitOptions,
+  ): Promise<void> {
     const store = this.host.store;
     for (let attempt = 0; attempt < COMMIT_ATTEMPTS; attempt += 1) {
       const stored = await store.read(this.threadId);
+      if (opts?.onlyIfStored && stored.raw === null) {
+        return;
+      }
       const next = change(
         stored.record ?? {
           items: [],
@@ -492,6 +517,22 @@ export class ThreadRecord {
             input,
           ],
     );
+  }
+
+  /** `layers` with the ids of the layers this harness keeps durable state for, when it has any new ones. */
+  private withLayers(record: SessionRecord): Pick<SessionRecord, 'layers'> {
+    const known = this.host.layerIds?.() ?? [];
+    const layers = new Set(record.layers);
+    for (const id of known) {
+      layers.add(id);
+    }
+    return layers.size === 0
+      ? {}
+      : {
+          layers: [
+            ...layers,
+          ],
+        };
   }
 
   private load(): Promise<SessionRecord | undefined> {

@@ -104,6 +104,12 @@ const SessionRecordSchema = z.object({
    * find the older ones. Absent in records written before it was kept.
    */
   executions: z.array(z.string()).optional(),
+  /**
+   * Ids of the context layers whose state may be kept at the thread's scope key, so a
+   * forget on a harness that never ran the thread still finds it. Absent in records
+   * written before it was kept.
+   */
+  layers: z.array(z.string()).optional(),
   /** Steers sent into the turn in flight, in arrival order. */
   steers: z
     .array(

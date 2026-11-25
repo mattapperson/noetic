@@ -352,6 +352,12 @@ export class TurnLease implements LedgerFence {
     this.assert();
   }
 
+  /** Stop renewing, and wait for a renewal in flight, keeping the lease as it stands. */
+  async stop(): Promise<void> {
+    this.stopTimer();
+    await this.renewing;
+  }
+
   /** Hand the lease back so the next turn need not wait for it to run out. */
   async release(): Promise<void> {
     this.stopTimer();

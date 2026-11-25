@@ -10,6 +10,7 @@ import type {
   HeldCall,
   HeldResolution,
   ListStoredOptions,
+  ScopedStorage,
   StoredExecution,
   StuckTurn,
   TrailMark,
@@ -211,6 +212,8 @@ interface Session {
   readonly record?: ThreadRecord;
   /** The lease the turn in flight runs under, when storage can compare-and-set. */
   lease?: TurnLease;
+  /** Deliveries handed to the session that have not reached its queue yet. */
+  arriving?: number;
   /** The `execute()` options of the turn in flight, to resume it with if it parks. */
   turnOptions?: ExecuteOptions;
   /**
@@ -234,6 +237,29 @@ function keepForLater(
 //#endregion
 
 const DEFAULT_THREAD_ID = '__default__';
+
+/**
+ * `store`, noting in `ids` the id of every layer it keeps durable state for, so a
+ * forget knows which layers' storage to look in (spec 23 § Forgetting).
+ */
+function noteDurableLayers(store: LayerStateStore, ids: Set<string>): LayerStateStore {
+  const register = store.registerDurable;
+  if (!register) {
+    return store;
+  }
+  return new Proxy(store, {
+    get(target, property) {
+      if (property === 'registerDurable') {
+        return (executionId: string, layerId: string, storage: ScopedStorage): void => {
+          ids.add(layerId);
+          register.call(target, executionId, layerId, storage);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
 
 /** What a `turn_stuck` error says about where the turn stopped, or undefined for any other error. */
 function stuckOf(error: unknown):
@@ -449,6 +475,10 @@ export class AgentHarness<
   private readonly outputStorage: StorageAdapter;
   /** The display output each thread of an interactive harness records, by thread id. */
   private readonly outputs = new Map<string, OutputStore>();
+  /** Forgets in progress, by thread id: a turn of the thread waits for its forget. */
+  private readonly forgetting = new Map<string, Promise<unknown>>();
+  /** Ids of the context layers whose state this harness has kept durably. */
+  private readonly durableLayerIds = new Set<string>();
   /** Thread id → what stops recording it. */
   private readonly stopRecording = new Map<string, () => void>();
   /** Threads named by a host-built context's own id, dropped when its run ends. */
@@ -607,11 +637,13 @@ export class AgentHarness<
       onWarning: (warning) => this.recordChannelWarning(warning),
     });
     this.traceExporter = resolveTraceExporter(opts.traceExporter);
-    this.layerStateStore =
+    this.layerStateStore = noteDurableLayers(
       storageEnv?.layerStateStore ??
-      createLayerStateStore((layerId, hook, error) => {
-        console.warn(`[noetic] context layer '${layerId}' ${hook} error:`, error);
-      });
+        createLayerStateStore((layerId, hook, error) => {
+          console.warn(`[noetic] context layer '${layerId}' ${hook} error:`, error);
+        }),
+      this.durableLayerIds,
+    );
     this.recallCache = createRecallCache();
     this.contextCache = createContextCacheStore();
     this.defaultDeliveryMode = opts.defaultDeliveryMode ?? 'next-turn';
@@ -913,6 +945,11 @@ export class AgentHarness<
     }
 
     const threadId = options?.threadId ?? DEFAULT_THREAD_ID;
+    const forgetting = this.forgetting.get(threadId);
+    if (forgetting) {
+      // A message for a thread being forgotten starts the thread afresh once the forget is done.
+      return forgetting.then(() => this.deliverInput(input, options));
+    }
     const deliveryMode = options?.deliveryMode ?? this.defaultDeliveryMode;
     const session = this.getOrCreateSession(threadId);
     const message: QueuedMessage = {
@@ -939,9 +976,13 @@ export class AgentHarness<
    * deliveries doing that at once would each miss the other.
    */
   private deliver(session: Session, message: QueuedMessage): Promise<void> {
+    session.arriving = (session.arriving ?? 0) + 1;
     const turn = (session.delivering ?? Promise.resolve())
       .catch(() => undefined)
-      .then(() => this.deliverOne(session, message));
+      .then(() => this.deliverOne(session, message))
+      .finally(() => {
+        session.arriving = (session.arriving ?? 1) - 1;
+      });
     session.delivering = turn;
     return turn;
   }
@@ -1505,6 +1546,10 @@ export class AgentHarness<
       : await this.sessionStore.threads();
     const woken: string[] = [];
     for (const threadId of threadIds) {
+      // A thread being forgotten has no turn left to wake.
+      if (this.forgetting.has(threadId)) {
+        continue;
+      }
       // A turn asked for by name may be closing out its park this instant: its
       // runner is busy, though nothing is running. Wait for it rather than skip.
       const closing = scope?.threadId ? this.sessions.get(threadId)?.runner : undefined;
@@ -1780,8 +1825,8 @@ export class AgentHarness<
    * the receipt of a step with a lasting effect (spec 23 § The trail). Marks outlive
    * the ledger entries they came from, so the trail of a finished run stays readable.
    *
-   * `scope` names an execution, or a thread, whose recent turns are then listed in
-   * order.
+   * `scope` names an execution, or a thread, whose turns are then listed in order:
+   * every turn it began, two reads per turn.
    * @public
    */
   async getAuditTrail(scope: SessionScope | ExecutionScope): Promise<TrailMark[]> {
@@ -1829,21 +1874,58 @@ export class AgentHarness<
    * written off at its ceiling (at 0, flagged `unbounded`, when it has none). The trail
    * goes too unless `keepTrail`.
    *
-   * @throws NoeticError `lease_lost` when the thread has a turn running in this
-   *   harness, or the execution a run in flight; or when another harness still holds
-   *   the thread's lease after `waitMs`.
+   * A thread's forget holds and renews the thread's lease until it is done, and a
+   * message sent to the thread on this harness meanwhile waits for it, then starts
+   * the thread afresh.
+   *
+   * @throws NoeticError `lease_lost` when the thread has a turn running, queued or
+   *   being delivered in this harness, is already being forgotten, or the execution
+   *   has a run in flight; when another harness still holds the thread's lease after
+   *   `waitMs`; or when the lease is lost part way.
+   * @throws NoeticError `ledger_write_failed` when a spend record could not be
+   *   settled; nothing was deleted.
+   * @throws NoeticConfigError `INVALID_FORGET_SCOPE` for a scope with neither id.
    * @public
    */
   async forget(
-    scope: SessionScope | ExecutionScope,
+    scope:
+      | {
+          threadId: string;
+        }
+      | ExecutionScope,
     options?: ForgetOptions,
   ): Promise<ForgetReport> {
-    const report =
-      'executionId' in scope
-        ? await forgetExecution(this.forgetHost(), scope.executionId, options)
-        : await forgetThread(this.forgetHost(), scope.threadId ?? DEFAULT_THREAD_ID, options);
-    await this.announceWakeTimeQuietly();
-    return report;
+    if ('executionId' in scope) {
+      return forgetExecution(this.forgetHost(), scope.executionId, options);
+    }
+    const threadId = scope.threadId;
+    if (typeof threadId !== 'string' || threadId === '') {
+      throw new NoeticConfigError({
+        code: 'INVALID_FORGET_SCOPE',
+        message: 'harness.forget() needs a threadId or an executionId.',
+        hint: 'Pass { threadId } to forget a thread, or { executionId } to forget one execution.',
+      });
+    }
+    const running = this.forgetting.get(threadId);
+    if (running) {
+      throw new NoeticErrorImpl({
+        kind: 'lease_lost',
+        executionId: threadId,
+        term: 0,
+        reason: `thread "${threadId}" is already being forgotten`,
+      });
+    }
+    const forgetting = forgetThread(this.forgetHost(), threadId, options);
+    this.forgetting.set(
+      threadId,
+      forgetting.catch(() => undefined),
+    );
+    try {
+      return await forgetting;
+    } finally {
+      this.forgetting.delete(threadId);
+      await this.announceWakeTimeQuietly();
+    }
   }
 
   /**
@@ -1874,7 +1956,16 @@ export class AgentHarness<
       leaseOptions: this.leaseOptions,
       threadBusy: (threadId) => {
         const session = this.sessions.get(threadId);
-        return session?.lease !== undefined || session?.runner.context !== undefined;
+        if (!session) {
+          return false;
+        }
+        return (
+          session.lease !== undefined ||
+          session.runner.context !== undefined ||
+          session.runner.getStatus().kind !== 'idle' ||
+          session.runner.queue.size > 0 ||
+          (session.arriving ?? 0) > 0
+        );
       },
       executionBusy: (executionId) => this.liveRoots.has(executionId),
       closeSpend: async (owns, patienceMs) => (await this.spend?.close(owns, patienceMs)) ?? [],
@@ -1888,7 +1979,21 @@ export class AgentHarness<
         this.parkWatchers?.stop(threadId);
         this.sessions.delete(threadId);
       },
+      layerIds: () => this.layerIds(),
     };
+  }
+
+  /** Ids of the layers that may keep durable state: this harness's thread-wide layers, and any it has kept state for. */
+  private layerIds(): string[] {
+    const ids = new Set(this.durableLayerIds);
+    for (const layer of this._contextLayers ?? []) {
+      if (layer.scope !== 'execution') {
+        ids.add(layer.id);
+      }
+    }
+    return [
+      ...ids,
+    ];
   }
 
   //#endregion
@@ -2181,6 +2286,7 @@ export class AgentHarness<
         restore: (executionId, opts) => this.restore(executionId, opts),
         clearCheckpoint: (executionId) => this.clearCheckpoint(executionId),
         parseItems: (raw) => this.itemSchemas.parseMany(raw),
+        layerIds: () => this.layerIds(),
       },
       threadId,
     );

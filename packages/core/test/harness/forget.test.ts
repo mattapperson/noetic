@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { StorageAdapter } from '@noetic-tools/context';
-import type { CallModelRequest, ContextData, LLMResponse } from '@noetic-tools/types';
+import type { CallModelRequest, ContextData, ContextLayer, LLMResponse } from '@noetic-tools/types';
 import { frameworkCast, isNoeticError } from '@noetic-tools/types';
 import { callModel } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
@@ -55,12 +55,39 @@ function model(): Model {
   return m;
 }
 
-function harnessOver(storage: StorageAdapter, m: Model = model()): AgentHarness {
+/** A thread-scoped layer: its state is kept under `layers/notes/<threadId>/`. */
+const notes: ContextLayer = {
+  id: 'notes',
+  slot: 50,
+  scope: 'thread',
+  hooks: {},
+};
+
+/** A layer whose id holds a slash, as some of core's own do. */
+const slashed: ContextLayer = {
+  id: 'acme/notes',
+  slot: 51,
+  scope: 'thread',
+  hooks: {},
+};
+
+function harnessOver(
+  storage: StorageAdapter,
+  m: Model = model(),
+  lease?: {
+    ttlMs?: number;
+    waitMs?: number;
+  },
+): AgentHarness {
   const harness = new AgentHarness({
     name: 'forget',
     params: {},
     agentGraph: agent,
     interactive: true,
+    contextLayers: [
+      notes,
+      slashed,
+    ],
     callModelDefaults: {
       provider: 'openrouter',
       apiKey: 'sk-test',
@@ -69,6 +96,11 @@ function harnessOver(storage: StorageAdapter, m: Model = model()): AgentHarness 
     environment: {
       storage: {
         adapter: storage,
+        ...(lease
+          ? {
+              lease,
+            }
+          : {}),
       },
     },
     _testCallModel: (request) => m.call(request),
@@ -173,7 +205,8 @@ async function seedExecution(storage: StorageAdapter, executionId: string): Prom
   await storage.set(`execution:${executionId}:pending:wait-1`, {
     at: 1,
   });
-  await storage.set(`layers/notes/${executionId}/state`, {
+  // A key core does not write, as a host's own checkpoint store might.
+  await storage.set(`execution:${executionId}:layers:notes`, {
     n: 1,
   });
 }
@@ -531,6 +564,7 @@ describe('forget({ executionId })', () => {
           'held',
           'intent',
           'pending',
+          'other',
         ],
         resumable: true,
       },
@@ -542,11 +576,11 @@ describe('forget({ executionId })', () => {
           'held',
           'intent',
           'pending',
+          'other',
         ],
         resumable: true,
       },
     ]);
-    expect(await storage.get('layers/notes/job-2/state')).not.toBeNull();
   });
 
   it('keeps the trail with keepTrail', async () => {
@@ -704,3 +738,331 @@ describe('executionsOf', () => {
     ]);
   });
 });
+
+//#region Races and edge cases
+
+/** `storage` with every delete slowed by `ms`, as a networked store is. */
+function slowDeletes(storage: StorageAdapter, ms: number): StorageAdapter {
+  return Object.assign(Object.create(storage), {
+    delete: async (key: string) => {
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      return storage.delete(key);
+    },
+  });
+}
+
+describe('forget against turns that start meanwhile', () => {
+  it('a message for the thread sent during its forget runs afterwards, on a fresh thread', async () => {
+    const memory = createInMemoryStorage({
+      swap: true,
+    });
+    const storage = slowDeletes(memory, 5);
+    const harness = harnessOver(storage);
+    await runTurns(harness, 't', 3);
+    const old = await storedExecutions(memory, 't');
+
+    const forgetting = harness.forget(
+      {
+        threadId: 't',
+      },
+      {
+        patienceMs: 0,
+      },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await harness.execute('late', {
+      threadId: 't',
+      messageId: 'late',
+    });
+    const report = await forgetting;
+    const response = await harness.getAgentResponse({
+      threadId: 't',
+    });
+
+    expect(report.executionIds).toEqual(old);
+    expect(response.text).toStartWith('answer-');
+    const fresh = await storedExecutions(memory, 't');
+    expect(fresh).toHaveLength(1);
+    expect(old).not.toContain(fresh[0]);
+    for (const executionId of old) {
+      expect((await memory.list('')).filter((key) => key.includes(executionId))).toEqual([]);
+    }
+  });
+
+  it('holds the lease for as long as the forget runs, so another harness cannot start a turn', async () => {
+    const memory = createInMemoryStorage({
+      swap: true,
+    });
+    const lease = {
+      ttlMs: 60,
+      waitMs: 0,
+    };
+    // Deletes wait at a gate the test opens, so the forget is surely still running.
+    let reached = (): void => {};
+    const atGate = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let open = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    let gated = false;
+    const storage: StorageAdapter = Object.assign(Object.create(memory), {
+      delete: async (key: string) => {
+        if (gated) {
+          reached();
+          await gate;
+        }
+        return memory.delete(key);
+      },
+    });
+    const harness = harnessOver(storage, model(), lease);
+    await runTurns(harness, 't', 2);
+    gated = true;
+    const other = new AgentHarness({
+      name: 'other',
+      params: {},
+      agentGraph: agent,
+      environment: {
+        storage: {
+          adapter: memory,
+          lease,
+        },
+      },
+      _testCallModel: (request) => model().call(request),
+    });
+
+    const forgetting = harness.forget(
+      {
+        threadId: 't',
+      },
+      {
+        patienceMs: 0,
+      },
+    );
+    await atGate;
+    // Well past one lease period into a forget that takes several.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await other.execute('meanwhile', {
+      threadId: 't',
+    });
+    expect(
+      await kindOf(() =>
+        other.getAgentResponse({
+          threadId: 't',
+        }),
+      ),
+    ).toBe('lease_lost');
+    open();
+    await forgetting;
+
+    expect(await memory.list('')).toEqual([]);
+  });
+
+  it('refuses a second forget of a thread already being forgotten', async () => {
+    const memory = createInMemoryStorage({
+      swap: true,
+    });
+    const harness = harnessOver(slowDeletes(memory, 5));
+    await runTurns(harness, 't', 2);
+    const first = harness.forget(
+      {
+        threadId: 't',
+      },
+      {
+        patienceMs: 0,
+      },
+    );
+    expect(
+      await kindOf(() =>
+        harness.forget({
+          threadId: 't',
+        }),
+      ),
+    ).toBe('lease_lost');
+    await first;
+    expect(await memory.list('')).toEqual([]);
+  });
+});
+
+describe('forget leaves what is not the thread’s', () => {
+  it('keeps the layer state of thread "a/b" when forgetting "a", and finds layers whose ids hold a slash', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const harness = harnessOver(storage);
+    await runTurns(harness, 'a', 1);
+    await runTurns(harness, 'a/b', 1);
+    await runTurns(harness, 'notes', 1);
+    for (const key of [
+      'layers/notes/a/state',
+      'layers/notes/a/b/state',
+      'layers/acme/notes/a/state',
+      'layers/acme/notes/notes/state',
+      'layers/notes/notes/state',
+    ]) {
+      await storage.set(key, {
+        n: 1,
+      });
+    }
+
+    await harness.forget(
+      {
+        threadId: 'a',
+      },
+      {
+        patienceMs: 0,
+      },
+    );
+
+    expect(await storage.list('layers/')).toEqual([
+      'layers/notes/a/b/state',
+      'layers/acme/notes/notes/state',
+      'layers/notes/notes/state',
+    ]);
+    await harness.forget(
+      {
+        threadId: 'notes',
+      },
+      {
+        patienceMs: 0,
+      },
+    );
+    expect(await storage.list('layers/')).toEqual([
+      'layers/notes/a/b/state',
+    ]);
+  });
+
+  it('a harness without the layer configured finds it in the thread record', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    await runTurns(harnessOver(storage), 't', 1);
+    await storage.set('layers/acme/notes/t/state', {
+      n: 1,
+    });
+    const bare = new AgentHarness({
+      name: 'bare',
+      params: {},
+      environment: {
+        storage: {
+          adapter: storage,
+        },
+      },
+    });
+
+    await bare.forget(
+      {
+        threadId: 't',
+      },
+      {
+        patienceMs: 0,
+      },
+    );
+
+    expect(await storage.list('')).toEqual([]);
+  });
+});
+
+describe('forget and spend', () => {
+  it('waits no longer than patienceMs for a lookup already running', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const harness = harnessOver(storage);
+    const slow = dispatch({
+      executionId: 'job-1',
+      generationId: 'gen-never',
+    });
+    await createSpendLog(storage).put(slow);
+    const reconciling = harness.reconcileSpend({
+      patienceMs: 30e3,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const started = Date.now();
+    const report = await harness.forget(
+      {
+        executionId: 'job-1',
+      },
+      {
+        patienceMs: 50,
+      },
+    );
+
+    expect(Date.now() - started).toBeLessThan(2e3);
+    expect(report.spend).toEqual([
+      {
+        id: slow.id,
+        executionId: 'job-1',
+        cost: DISPATCH_CEILING,
+        inputTokens: 0,
+        outputTokens: 0,
+        model: 'test/model',
+        writtenOff: true,
+      },
+    ]);
+    expect(await reconciling).toEqual([]);
+  });
+
+  it('stops before deleting anything when a spend record cannot be settled', async () => {
+    const memory = createInMemoryStorage({
+      swap: true,
+    });
+    const storage: StorageAdapter = Object.assign(Object.create(memory), {
+      delete: async (key: string) => {
+        if (key.startsWith('spend:')) {
+          throw new Error('storage is unavailable');
+        }
+        return memory.delete(key);
+      },
+    });
+    const harness = harnessOver(storage);
+    await runTurns(harness, 't', 1);
+    await createSpendLog(memory).put(
+      dispatch({
+        threadId: 't',
+      }),
+    );
+
+    expect(
+      await kindOf(() =>
+        harness.forget(
+          {
+            threadId: 't',
+          },
+          {
+            patienceMs: 0,
+          },
+        ),
+      ),
+    ).toBe('ledger_write_failed');
+    expect(await memory.get('session:t')).not.toBeNull();
+    // The lease was handed back: a forget that works can run at once.
+    const lease = await memory.get<{
+      heldUntil: number;
+    }>('turn-lease:t');
+    expect(lease?.heldUntil).toBe(0);
+  });
+});
+
+describe('forget scope', () => {
+  it('refuses a scope with neither a thread nor an execution', async () => {
+    const harness = harnessOver(
+      createInMemoryStorage({
+        swap: true,
+      }),
+    );
+    await expect(
+      harness.forget(
+        frameworkCast<{
+          threadId: string;
+        }>({}),
+      ),
+    ).rejects.toMatchObject({
+      code: 'INVALID_FORGET_SCOPE',
+    });
+  });
+});
+
+//#endregion

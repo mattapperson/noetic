@@ -76,6 +76,15 @@ function harnessOver(storage: StorageAdapter): AgentHarness {
     name: 'forget',
     params: {},
     interactive: true,
+    // A thread-scoped layer, so `layers/notes/<threadId>/` is this harness's to forget.
+    contextLayers: [
+      {
+        id: 'notes',
+        slot: 50,
+        scope: 'thread',
+        hooks: {},
+      },
+    ],
     agentGraph: callModel<ContextData, string, string>({
       id: 'turn',
       model: 'test/model',
