@@ -1,3 +1,22 @@
+## @noetic-tools/acp-v2.0.0-next.1 (2026-11-25)
+
+* fix: an approval never times out unless a timeout is set ([b4c762d](https://github.com/mattapperson/noetic/commit/b4c762d))
+* fix(core): a decision that cannot be taken is refused, not half applied ([7d07818](https://github.com/mattapperson/noetic/commit/7d07818))
+* feat: one approval seam for every path that asks a person ([f2979cc](https://github.com/mattapperson/noetic/commit/f2979cc))
+
+### BREAKING CHANGE
+
+* a step's call to a connection operation that needs
+approval, on a harness with no approveToolCall, is held instead of
+denied. A coding agent's permission request that nothing settles, on a
+step whose policy names no default, is held instead of denied; name
+`default: 'deny'` to keep the old behavior.
+
+Specs 08, 12, 23, 27, 29, 31 and 35, the matching docs, and the
+agent-builder skill are updated.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+
 ## @noetic-tools/acp-v1.4.0 (2026-11-04)
 
 * feat: one way to attach MCP servers, served to every agent (#156) ([2195f69](https://github.com/mattapperson/noetic/commit/2195f69)), closes [#156](https://github.com/mattapperson/noetic/issues/156)
