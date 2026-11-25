@@ -317,6 +317,7 @@ Only the model's copy changes, and only in the round the call was made in. The `
 - A call that failed, was refused, or was skipped is not passed to `toModelOutput`: the model gets the error text.
 - A held call answered with an `output` (`08-runtime` § Held tool calls) is passed to it, with that output as `result`.
 - A resumed round calls it again for each call it replays from a record, with the recorded result (`23a-step-level-resume` § Tool calls in a round). It is synchronous and must be a pure function of its arguments, so the model is given the same thing both times.
+- So that a live call and its replay agree, `result` is always the result as a record keeps it, its JSON round trip (a `Date` arrives as its ISO text, a `Uint8Array` as an object of its bytes), and `args` is the call's arguments as the tool's input schema reads them, defaults included.
 - If it throws, the model is given the output text and the harness emits `tool_model_output_failed` (`08-runtime` § Framework Events). The call is already done and on record, so the throw does not fail it.
 
 A tool served to an ACP agent over the tool bridge (`38-acp-tools`), or run by an `invokeTool` step, has no model round of its own, and `toModelOutput` is not called for it.

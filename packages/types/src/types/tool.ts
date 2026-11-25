@@ -155,7 +155,9 @@ export interface Tool<
    * fail, with the tool's result and the call's arguments. The result item, the
    * `tool_call_completed` event and the call's record keep the JSON output, so a
    * resumed run calls this again with the recorded result: keep it a pure function
-   * of its arguments. If it throws, the model is given the JSON output.
+   * of its arguments. Live and on replay, `result` is the result's JSON round trip
+   * (a `Date` arrives as its ISO text) and `args` the arguments as the input schema
+   * reads them. If it throws, the model is given the JSON output.
    */
   toModelOutput?(result: InferSchemaOutput<O>, args: InferSchemaOutput<I>): ToolModelOutput;
   /**

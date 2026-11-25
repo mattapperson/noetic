@@ -443,6 +443,10 @@ export class AgentHarness<
   private readonly outputStorage: StorageAdapter;
   /** The display output each thread of an interactive harness records, by thread id. */
   private readonly outputs = new Map<string, OutputStore>();
+  /** Thread id → what stops recording it. */
+  private readonly stopRecording = new Map<string, () => void>();
+  /** Threads named by a host-built context's own id, dropped when its run ends. */
+  private readonly ownThreads = new Set<string>();
   /**
    * @internal Live ACP connections. Reached by the interpreter via
    * `frameworkCast`; use {@link listAcpSessions}, {@link getAcpSession},
@@ -1003,12 +1007,18 @@ export class AgentHarness<
     return this.outputOf(scope.threadId ?? DEFAULT_THREAD_ID).write(items);
   }
 
-  /** The thread's recording store on an interactive harness, else one that only reads and writes. */
+  /**
+   * The thread's one output store: every write for a thread goes through it, so
+   * this harness's writes queue behind each other instead of racing.
+   */
   private outputOf(threadId: string): OutputStore {
-    this.getOrCreateSession(threadId);
-    return (
-      this.outputs.get(threadId) ?? new OutputStore(this.outputStorage, threadId, this.itemSchemas)
-    );
+    const known = this.outputs.get(threadId);
+    if (known) {
+      return known;
+    }
+    const output = new OutputStore(this.outputStorage, threadId, this.itemSchemas);
+    this.outputs.set(threadId, output);
+    return output;
   }
 
   getTextStream(scope?: SessionScope): AsyncIterable<string> {
@@ -1449,9 +1459,11 @@ export class AgentHarness<
     };
 
     if (this.interactive) {
-      const output = new OutputStore(this.outputStorage, threadId, this.itemSchemas);
-      this.outputs.set(threadId, output);
-      session.runner.broadcaster.observe((event) => output.record(event));
+      const output = this.outputOf(threadId);
+      this.stopRecording.set(
+        threadId,
+        session.runner.broadcaster.observe((event) => output.record(event)),
+      );
     }
     this.sessions.set(threadId, session);
     if (record) {
@@ -2329,11 +2341,6 @@ export class AgentHarness<
     try {
       await entry.ready;
       const result = await execute(s, input, ctx);
-      if (entry.depth === 1) {
-        // Inside the `try`: a run whose display output could not be saved fails,
-        // so it is not taken for a finished run to replay from.
-        await this.outputs.get(ctx.threadId)?.flush();
-      }
       return result;
     } catch (error) {
       entry.failed = true;
@@ -2355,20 +2362,39 @@ export class AgentHarness<
         }
         // The turn's own connections end with it; a resume attaches them again.
         await this.#connections.release(ctx.id);
-        if (entry.failed) {
-          await this.saveOutputOfFailedRun(ctx.threadId);
-        }
+        await this.saveOutputOfRun(ctx.threadId);
+        this.forgetOwnThread(ctx.threadId);
       }
     }
   }
 
-  /** Keep what a failed run streamed. The run's own error is the one that is thrown. */
-  private async saveOutputOfFailedRun(threadId: string): Promise<void> {
+  /**
+   * Wait for what a run streamed to be saved. Display output never decides a run:
+   * a save that failed is logged, stays queued for the next flush, and the run's
+   * own result or error stands.
+   */
+  private async saveOutputOfRun(threadId: string): Promise<void> {
     try {
       await this.outputs.get(threadId)?.flush();
     } catch (error) {
-      console.warn('[noetic] could not save the display output of a failed run:', error);
+      console.warn('[noetic] could not save the display output of a run:', error);
     }
+  }
+
+  /**
+   * A thread named by a host-built context's own id has no later turns: once its
+   * run ends, the harness drops its session and output store. What was saved stays
+   * in storage under `output:<ctx.id>`.
+   */
+  private forgetOwnThread(threadId: string): void {
+    // The thread is named by its context's id, so that context's root run is its only one.
+    if (!this.ownThreads.delete(threadId) || this.liveRoots.has(threadId)) {
+      return;
+    }
+    this.stopRecording.get(threadId)?.();
+    this.stopRecording.delete(threadId);
+    this.outputs.delete(threadId);
+    this.sessions.delete(threadId);
   }
 
   /**
@@ -2603,6 +2629,9 @@ export class AgentHarness<
       return {};
     }
     const threadId = opts.threadId ?? executionId;
+    if (opts.threadId === undefined) {
+      this.ownThreads.add(threadId);
+    }
     return {
       threadId,
       _broadcaster: this.getOrCreateSession(threadId).runner.broadcaster,

@@ -39,12 +39,20 @@ export class OutputStoreError extends Error {
   }
 }
 
+/** A thread's output as storage holds it. */
+interface Stored {
+  raw: unknown;
+  items: OutputSnapshot[];
+}
+
 //#endregion
 
 //#region Helpers
 
 /** How many times one write is tried before the failure is kept. */
 const WRITE_ATTEMPTS = 3;
+/** How many times a write may lose to another writer before it is a failure. */
+const SWAP_ATTEMPTS = 20;
 const WRITE_RETRY_MS = 10;
 
 /** @internal The storage key a thread's display output is kept under. */
@@ -81,7 +89,8 @@ function wait(ms: number): Promise<void> {
  * `record` and `write` queue snapshots and save them in the background, one
  * write at a time, each holding the whole output. `flush` and `read` wait for
  * what is queued and throw `OutputStoreError` when it could not be saved; the
- * snapshots stay queued, so the next call tries again.
+ * snapshots stay queued, so the next call tries again. On storage with `swap` a
+ * write never replaces what another store saved meanwhile.
  */
 export class OutputStore {
   private readonly storage: StorageAdapter;
@@ -97,14 +106,20 @@ export class OutputStore {
     this.stream = new ItemStream(schemas);
   }
 
-  /** Fold one stream event into the output. Never throws: a failure waits for `flush`. */
+  /**
+   * Fold one stream event into the output. Never throws: an event that cannot be
+   * read as display output is left out, with a warning, and the run goes on.
+   */
   record(event: StreamEvent): void {
     try {
       for (const item of this.stream.push(event)) {
         this.queue(OutputSnapshotSchema.parse(item));
       }
     } catch (cause) {
-      this.failure = this.error('Could not read a stream event as display output.', cause);
+      console.warn(
+        `[noetic] left a stream event out of the display output of "${this.scope}":`,
+        cause,
+      );
       return;
     }
     this.start();
@@ -134,24 +149,23 @@ export class OutputStore {
    */
   async read(): Promise<OutputSnapshot[]> {
     await this.flush();
-    return this.load();
+    return (await this.load()).items;
   }
 
   /**
    * Wait until everything queued is saved.
    *
-   * @throws OutputStoreError when it could not be. What was queued stays queued.
+   * @throws OutputStoreError when it could not be. What was queued stays queued,
+   *   and every flush throws until a later one saves it.
    */
   async flush(): Promise<void> {
     this.start();
     while (this.writing) {
       await this.writing;
     }
-    const failure = this.failure;
-    if (failure) {
-      // Thrown once: what failed to save is still queued, and the next flush tries it.
-      this.failure = undefined;
-      throw failure;
+    // Not cleared here: two callers waiting on one failed write are both told.
+    if (this.failure) {
+      throw this.failure;
     }
   }
 
@@ -179,11 +193,14 @@ export class OutputStore {
     );
   }
 
-  private async load(): Promise<OutputSnapshot[]> {
+  /** What storage holds under the key, as it is stored and as snapshots. */
+  private async load(): Promise<Stored> {
     try {
-      return OutputSnapshotSchema.array().parse(
-        (await this.storage.get<unknown>(outputKey(this.scope))) ?? [],
-      );
+      const raw = (await this.storage.get<unknown>(outputKey(this.scope))) ?? null;
+      return {
+        raw,
+        items: OutputSnapshotSchema.array().parse(raw ?? []),
+      };
     } catch (cause) {
       throw this.error('Could not read streamed output.', cause);
     }
@@ -191,22 +208,11 @@ export class OutputStore {
 
   /** Save what is queued over what is stored, until nothing is queued. */
   private async drain(): Promise<void> {
-    const held = new Map(
-      (await this.load()).map((item) => [
-        keyOf(item),
-        item,
-      ]),
-    );
     while (this.pending.size > 0) {
       const batch = new Map(this.pending);
       this.pending.clear();
-      for (const [key, item] of batch) {
-        held.set(key, item);
-      }
       try {
-        await this.save([
-          ...held.values(),
-        ]);
+        await this.save(batch);
       } catch (cause) {
         // Put back what was not saved, behind anything newer queued meanwhile.
         for (const [key, item] of batch) {
@@ -219,18 +225,59 @@ export class OutputStore {
     }
   }
 
-  private async save(items: OutputSnapshot[]): Promise<void> {
-    for (let attempt = 1; ; attempt++) {
+  private async save(batch: ReadonlyMap<string, OutputSnapshot>): Promise<void> {
+    let lost = 0;
+    for (let attempt = 1; ; ) {
       try {
-        await this.storage.set(outputKey(this.scope), items);
-        return;
+        if (await this.saveOver(batch)) {
+          return;
+        }
       } catch (cause) {
+        if (cause instanceof OutputStoreError) {
+          throw cause;
+        }
         if (attempt >= WRITE_ATTEMPTS) {
           throw this.error('Could not write streamed output.', cause);
         }
+        attempt++;
         await wait(WRITE_RETRY_MS);
+        continue;
+      }
+      // Another writer saved first: merge over what it wrote.
+      lost++;
+      if (lost >= SWAP_ATTEMPTS) {
+        throw this.error(
+          'Could not write streamed output.',
+          new Error(`Lost to another writer ${lost} times.`),
+        );
       }
     }
+  }
+
+  /**
+   * Write `batch` over what is stored now. On storage with `swap` the write lands
+   * only if nothing else was saved since the read, and false means it did not.
+   */
+  private async saveOver(batch: ReadonlyMap<string, OutputSnapshot>): Promise<boolean> {
+    const stored = await this.load();
+    const held = new Map(
+      stored.items.map((item) => [
+        keyOf(item),
+        item,
+      ]),
+    );
+    for (const [key, item] of batch) {
+      held.set(key, item);
+    }
+    const next = [
+      ...held.values(),
+    ];
+    const key = outputKey(this.scope);
+    if (!this.storage.swap) {
+      await this.storage.set(key, next);
+      return true;
+    }
+    return this.storage.swap(key, stored.raw, next);
   }
 
   private error(message: string, cause: unknown): OutputStoreError {

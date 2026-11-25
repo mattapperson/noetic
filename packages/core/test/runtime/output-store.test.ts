@@ -167,17 +167,38 @@ describe('ItemStream', () => {
     expect(snapshots.at(-1)).toBe('msg_2=two…');
   });
 
-  it('gives an event naming an unknown item to no other item', () => {
+  it('gives an event naming an unknown item, at no output index, to no item', () => {
     const stream = new ItemStream();
     const snapshots = [
       sdk('response.created', {}),
       added('msg_1', 0),
-      delta('stray', 'msg_other', 0),
+      delta('stray', 'msg_other'),
     ].flatMap((event) => seen(stream, event));
 
     expect(snapshots).toEqual([
       'msg_1=…',
     ]);
+  });
+
+  it('matches an item renamed after it was added by its output index', () => {
+    const stream = new ItemStream();
+    const snapshots = [
+      sdk('response.created', {}),
+      sdk(
+        'response.output_item.added',
+        {
+          item: {
+            type: 'message',
+          },
+        },
+        0,
+      ),
+      delta('hi', 'msg_real', 0),
+      done('msg_real', 0),
+    ].flatMap((event) => seen(stream, event));
+
+    expect(snapshots).toHaveLength(3);
+    expect(snapshots.at(-1)).toEndWith('=hi');
   });
 });
 
@@ -364,9 +385,10 @@ describe('OutputStore', () => {
     expect(await storage.get('output:t')).toHaveLength(1);
   });
 
-  it('record() never throws: an event it cannot fold fails the next flush, once', async () => {
+  it('record() never throws: an event it cannot fold is left out, and the flush succeeds', async () => {
+    const storage = createInMemoryStorage();
     const output = new OutputStore(
-      createInMemoryStorage(),
+      storage,
       't',
       frameworkCast<ItemSchemaRegistry>({
         parse: () => {
@@ -382,8 +404,76 @@ describe('OutputStore', () => {
         },
       }),
     );
-    const error = await thrownBy(() => output.flush());
-    expect(error.message).toBe('Could not read a stream event as display output.');
     await output.flush();
+    expect(await storage.get('output:t')).toBeNull();
+  });
+
+  it('tells every flush waiting on a failed write, until a later one lands', async () => {
+    const failing = {
+      on: true,
+      writes: 0,
+    };
+    const output = new OutputStore(failingOutputs(createInMemoryStorage(), failing), 't');
+    output.record(
+      appended({
+        id: 'u1',
+        type: 'message',
+      }),
+    );
+    const settled = await Promise.allSettled([
+      output.flush(),
+      output.flush(),
+    ]);
+    expect(settled.map((result) => result.status)).toEqual([
+      'rejected',
+      'rejected',
+    ]);
+    await expect(output.flush()).rejects.toBeInstanceOf(OutputStoreError);
+    failing.on = false;
+    await output.flush();
+  });
+
+  it('never replaces what another store saved meanwhile, on storage with swap', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const slow: StorageAdapter = {
+      ...storage,
+      async get<T>(key: string): Promise<T | null> {
+        const value = await storage.get<T>(key);
+        // Read before the other store's write, and swap after it.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return value;
+      },
+    };
+    const first = new OutputStore(slow, 't');
+    const second = new OutputStore(storage, 't');
+    first.record(
+      appended({
+        id: 'a',
+        type: 'message',
+      }),
+    );
+    second.record(
+      appended({
+        id: 'b',
+        type: 'message',
+      }),
+    );
+    await Promise.all([
+      first.flush(),
+      second.flush(),
+    ]);
+    const stored =
+      await storage.get<
+        {
+          id: string;
+        }[]
+      >('output:t');
+    assert(stored);
+    expect(stored.map((item) => item.id).sort()).toEqual([
+      'a',
+      'b',
+    ]);
   });
 });

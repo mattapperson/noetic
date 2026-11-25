@@ -472,9 +472,10 @@ cut off before its body finishes is still priced later. Estimated calls are
 
 A native call goes to the provider the harness is configured for. When the
 provider's base URL (`LlmProviderConfig.baseUrl`, or the Noetic platform's for
-the `noetic` provider) is not OpenRouter's (`https://openrouter.ai`, with any
-path), the call is sent to `<base URL>/api/alpha/decisions`, the base URL taken
-without trailing slashes. For OpenRouter's own base, or none, the SDK's
+the `noetic` provider) is not OpenRouter's (an `https` URL whose host is
+`openrouter.ai`, in any case, on the default port, with any path), the call is
+sent to `<base URL>/api/alpha/decisions`, the base URL taken without trailing
+slashes: such a base must serve decisions under its own path. For OpenRouter's own base, or none, the SDK's
 decisions endpoint is used. The harness's credential therefore goes only where
 its model calls go: a harness pointed at another OpenRouter-shaped route never
 sends its key to openrouter.ai.
@@ -486,7 +487,8 @@ many tokens a request and a question may carry when the request has
 `TypeSafe-Danger-Zone-Long-Context: true`.
 
 - The dispatch record's own header is applied after them, so a step cannot
-  replace it.
+  replace it. Header names are not case-sensitive: a request header that names a
+  dispatch header in any case is dropped.
 - They are not part of the dispatch record's request hash.
 - The estimated path sends a `callModel` request and ignores them.
 - A step, and a JSON workflow, may be serialized: credentials do not belong in

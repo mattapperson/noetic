@@ -65,17 +65,30 @@ type NativeAnswer = NativeResponse['answers'][string];
 
 //#region Public API
 
-const OPENROUTER_BASE = /^https:\/\/openrouter\.ai(\/|$)/;
+const OPENROUTER_HOST = 'openrouter.ai';
+
+/** Whether `url` is OpenRouter's own API, however its host and port are spelled. */
+function isOpenRouter(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  // `URL` lower-cases the host and drops a scheme's default port.
+  return parsed.protocol === 'https:' && parsed.host === OPENROUTER_HOST;
+}
 
 /**
  * The base URL native decisions are sent to, given the one the client was built
  * with: that URL without trailing slashes, or undefined for OpenRouter's own (or
- * none), whose decisions endpoint the SDK already knows.
+ * none), whose decisions endpoint the SDK already knows. Any other base must
+ * serve `api/alpha/decisions` under its own path.
  *
  * @internal
  */
 export function decisionsServerUrl(clientServerUrl: string | undefined): string | undefined {
-  if (!clientServerUrl || OPENROUTER_BASE.test(clientServerUrl)) {
+  if (!clientServerUrl || isOpenRouter(clientServerUrl)) {
     return undefined;
   }
   return clientServerUrl.replace(/\/+$/, '');
@@ -235,7 +248,9 @@ async function sendNative({
 
 /**
  * The request headers of a native call: the request's own, then the dispatch
- * record's, which a step's header therefore cannot replace.
+ * record's. Header names are not case-sensitive, so a request header that names a
+ * dispatch header in any case is dropped: sent beside it, the two values would be
+ * joined into one that names no record.
  */
 function nativeHeaders(
   dispatchHeaders: Record<string, string> | undefined,
@@ -246,9 +261,13 @@ function nativeHeaders(
   if (!dispatchHeaders && !request.headers) {
     return {};
   }
+  const reserved = new Set(Object.keys(dispatchHeaders ?? {}).map((name) => name.toLowerCase()));
+  const own = Object.entries(request.headers ?? {}).filter(
+    ([name]) => !reserved.has(name.toLowerCase()),
+  );
   return {
     headers: {
-      ...request.headers,
+      ...Object.fromEntries(own),
       ...dispatchHeaders,
     },
   };

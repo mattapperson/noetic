@@ -14,7 +14,7 @@ import type {
   Span,
   Tool,
 } from '@noetic-tools/types';
-import { SteerPoint } from '@noetic-tools/types';
+import { SteerPoint, validateSchema } from '@noetic-tools/types';
 import { itemsToInput, toolModelOutputToProvider } from '../adapters/openrouter';
 import { isFunctionCall } from '../interpreter/typeguards';
 import { drainsOf } from '../runtime/drain';
@@ -378,7 +378,7 @@ async function executeFunctionCall(
   conversationInput.push({
     type: 'function_call_output',
     callId: fc.callId,
-    output: modelOutputOf({
+    output: await modelOutputOf({
       tool: toolForCall,
       toolResult,
       args: parsedArgs,
@@ -408,20 +408,29 @@ async function executeFunctionCall(
  * a call that did not fail, else the output text. The result item, the completed
  * event and the call's record keep the text whatever this returns, so a replayed
  * call lands here again with its recorded result.
+ *
+ * Live and on replay alike, `toModelOutput` reads the result as its JSON round
+ * trip, which is what a call record keeps, and the arguments as the tool's input
+ * schema reads them, defaults included: a replay must give the model what the
+ * live call gave it.
  */
-function modelOutputOf(params: {
+async function modelOutputOf(params: {
   tool: Tool | undefined;
   toolResult: ToolCallResult;
   args: unknown;
   callId: string;
   emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-}): ReturnType<typeof toolModelOutputToProvider> {
+}): Promise<ReturnType<typeof toolModelOutputToProvider>> {
   const { tool, toolResult } = params;
   if (toolResult.error || !tool?.toModelOutput) {
     return toolResult.output;
   }
   try {
-    return toolModelOutputToProvider(tool.toModelOutput(toolResult.result, params.args));
+    const args = await validateSchema(tool.input, params.args);
+    if (!args.success) {
+      throw args.zodError;
+    }
+    return toolModelOutputToProvider(tool.toModelOutput(asRecorded(toolResult.result), args.value));
   } catch (error) {
     // The call is done and on record: a throw here would fail it again on every
     // resume. The model gets the JSON output, and the event says why.
@@ -432,6 +441,12 @@ function modelOutputOf(params: {
     });
     return toolResult.output;
   }
+}
+
+/** `result` as a call record gives it back: its JSON round trip. */
+function asRecorded(result: unknown): unknown {
+  const json = result === undefined ? undefined : JSON.stringify(result);
+  return json === undefined ? result : JSON.parse(json);
 }
 
 /** Drop what a finished call may have left in storage: its intent, its answered hold. */

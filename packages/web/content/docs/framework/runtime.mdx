@@ -183,9 +183,10 @@ const items = await harness.getSessionOutput({ threadId: 't1' });
 | Storage | One key per thread, `output:<threadId>`, in the harness's storage adapter. With no storage configured it is kept in memory. |
 | Display only | Nothing resumes or replays from it. Checkpoints, the step ledger and the model's history are stored apart. |
 | Saving | In the background while the thread streams. The harness waits for it when a root run ends, when a run fails, and in `close()`. |
-| A failed save | Fails the run with `OutputStoreError`, even though its steps finished, so the run is not taken for a finished one. After a run that failed for another reason it is logged, and the run's own error is thrown. |
+| A failed save | Never fails the run: it is logged and stays queued for the next flush, and the run's result and history stand. `getSessionOutput()` and `close()` throw `OutputStoreError` until a later write lands. |
+| Concurrent writers | One store per thread per harness, so a harness's own writes queue. On storage with `swap`, two harnesses over the same storage keep each other's snapshots; without it, the last write wins. |
 | `saveSessionOutput(items, scope)` | Saves your own display snapshots beside the streamed ones, each replacing the stored one with its `id`. Each needs a string `type`. The model's history is untouched. |
-| Host-built contexts | `harness.createContext({ threadId })` joins the thread, so `harness.run()` on it streams and is recorded like a turn. With no `threadId` the context is its own thread, named by `ctx.id`. |
+| Host-built contexts | `harness.createContext({ threadId })` joins the thread, so `harness.run()` on it streams and is recorded like a turn. With no `threadId` the context is its own thread, named by `ctx.id`, dropped from memory when its run ends; its output stays in storage. |
 
 `getSessionOutput` and `saveSessionOutput` throw `OutputStoreError`, which carries the thread id as `scope` and the underlying failure as `cause`. `OutputStore`, `OutputStoreError` and the `OutputSnapshot` type are exported from `@noetic-tools/core`.
 

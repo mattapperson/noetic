@@ -236,6 +236,24 @@ describe('an interactive harness', () => {
     expect('_broadcaster' in child && child._broadcaster).toBeFalsy();
   });
 
+  it('drops a context’s own thread from memory when its run ends, and keeps its output', async () => {
+    const { harness } = setup();
+    const storage = createInMemoryStorage();
+    const h = harness({
+      storage,
+      interactive: true,
+    });
+    for (let i = 0; i < 3; i++) {
+      await h.run(agent, 'hi', h.createContext());
+    }
+    expect(
+      frameworkCast<{
+        sessions: Map<string, unknown>;
+      }>(h).sessions.size,
+    ).toBe(0);
+    expect(await storage.list('output:')).toHaveLength(3);
+  });
+
   it('saves what a failed run streamed before the failure is thrown', async () => {
     const { server, harness } = setup();
     server.dropAt.add(1);
@@ -285,22 +303,69 @@ describe('an interactive harness', () => {
     ]);
   });
 
-  it('fails a run whose output could not be saved, though its step finished', async () => {
+  it('logs a failed save, and the run and its history stand', async () => {
+    const { server, harness } = setup();
+    const storage = createInMemoryStorage();
+    const how = {
+      fail: true,
+    };
+    const h = harness({
+      storage: outputWrites(storage, how),
+      interactive: true,
+    });
+    const warn = console.warn;
+    const warned: unknown[] = [];
+    console.warn = (...args: unknown[]) => {
+      warned.push(args[1]);
+    };
+    try {
+      await h.execute('first', THREAD);
+      expect((await h.getAgentResponse(THREAD)).text).toBe('hello there');
+    } finally {
+      console.warn = warn;
+    }
+    expect(warned.some((error) => error instanceof OutputStoreError)).toBe(true);
+
+    // The next turn's model call carries the first turn.
+    how.fail = false;
+    await h.execute('second', THREAD);
+    await h.getAgentResponse(THREAD);
+    expect(JSON.stringify(server.rounds.at(-1)?.input)).toContain('first');
+    expect(transcript(await h.getSessionOutput(THREAD))).toContain('user: second');
+    await h.close();
+  });
+
+  it('keeps concurrent saves of one thread on one harness', async () => {
     const { harness } = setup();
     const h = harness({
       storage: outputWrites(createInMemoryStorage(), {
-        fail: true,
+        delayMs: 10,
       }),
-      interactive: true,
     });
-    const ctx = h.createContext(THREAD);
-    const error = await h.run(agent, 'hi', ctx).then(
-      () => undefined,
-      (e: unknown) => e,
-    );
-    assert(error instanceof OutputStoreError);
-    expect(error.scope).toBe('t');
-    expect(error.message).toBe('Could not write streamed output.');
+    await Promise.all([
+      h.saveSessionOutput(
+        [
+          {
+            id: 'a',
+            type: 'plan',
+          },
+        ],
+        THREAD,
+      ),
+      h.saveSessionOutput(
+        [
+          {
+            id: 'b',
+            type: 'plan',
+          },
+        ],
+        THREAD,
+      ),
+    ]);
+    expect((await h.getSessionOutput(THREAD)).map((item) => item.id)).toEqual([
+      'a',
+      'b',
+    ]);
   });
 
   it('close() saves what was streamed outside a run', async () => {

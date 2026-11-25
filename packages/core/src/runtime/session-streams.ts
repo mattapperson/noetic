@@ -328,7 +328,9 @@ export class ItemStream {
       return;
     }
     this.accumulators.set(accumulatorKey(this.roundOffset, outputIndex), acc);
-    this.byId.set(acc.id, acc);
+    if (acc.id !== '') {
+      this.byId.set(acc.id, acc);
+    }
     yield {
       ...acc.item,
       isComplete: false,
@@ -338,9 +340,15 @@ export class ItemStream {
   /** The accumulator `event` is about. `missingIndex` stands in for an absent output index. */
   private find(event: SdkStreamEvent, missingIndex: number): ItemAccumulator | undefined {
     const id = itemIdOf(event);
-    // An event that names its item must never fall through to another call's output index.
-    if (id !== undefined) {
-      return this.byId.get(id);
+    const named = id === undefined ? undefined : this.byId.get(id);
+    if (named) {
+      return named;
+    }
+    // An event that names an item this stream never saw is about the item at its
+    // own output index, which the provider renamed after `added`. One with no
+    // index is given to no item: it could be another call's.
+    if (id !== undefined && typeof event.outputIndex !== 'number') {
+      return undefined;
     }
     const outputIndex = typeof event.outputIndex === 'number' ? event.outputIndex : missingIndex;
     return this.accumulators.get(accumulatorKey(this.roundOffset, outputIndex));

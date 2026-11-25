@@ -175,6 +175,9 @@ describe('decisionsServerUrl', () => {
     expect(decisionsServerUrl('https://openrouter.ai')).toBeUndefined();
     expect(decisionsServerUrl('https://openrouter.ai/')).toBeUndefined();
     expect(decisionsServerUrl('https://openrouter.ai/api/v1')).toBeUndefined();
+    // However the host and its default port are spelled.
+    expect(decisionsServerUrl('https://OpenRouter.AI/api/v1')).toBeUndefined();
+    expect(decisionsServerUrl('https://openrouter.ai:443/api/v1')).toBeUndefined();
   });
 
   it('is any other base, without trailing slashes', () => {
@@ -257,6 +260,8 @@ describe('callDecide — native request options', () => {
         headers: {
           ...LONG_CONTEXT,
           'x-noetic-dispatch': 'forged',
+          // Header names are not case-sensitive: this one would be joined to the real id.
+          'X-Noetic-Dispatch': 'forged too',
         },
       },
       {

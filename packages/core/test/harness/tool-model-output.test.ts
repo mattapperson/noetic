@@ -170,10 +170,32 @@ function setup(reply: (input: unknown[]) => unknown[]): Setup {
       return result.toUpperCase();
     },
   });
+  const stamp = tool({
+    name: 'stamp',
+    description: 'Time a page at a scale.',
+    input: z.object({
+      page: z.string(),
+      scale: z.number().default(2),
+    }),
+    output: z.object({
+      at: z.date(),
+    }),
+    execute: async () => ({
+      at: new Date(0),
+    }),
+    toModelOutput: (result, args) => {
+      shown.push({
+        result,
+        args,
+      });
+      return `${args.page} x${args.scale}`;
+    },
+  });
   const agent = callModel<ContextData, string, string>({
     id: 'agent',
     model: 'test/model',
     tools: [
+      stamp,
       screenshot,
       brokenShot,
       badView,
@@ -288,6 +310,35 @@ describe('Tool.toModelOutput', () => {
         output: '{"path":"home.png"}',
       },
     ]);
+  });
+
+  it('reads the result as its record keeps it, and the arguments as the schema reads them', async () => {
+    const { server, shown, harness } = setup(
+      modelAsking([
+        call('stamp', {
+          page: 'home',
+        }),
+      ]),
+    );
+    const h = harness();
+    await h.execute('time home', THREAD);
+    await h.getAgentResponse(THREAD);
+
+    // Live as on replay: the Date is its JSON text, and the default is filled in.
+    expect(shown).toEqual([
+      {
+        result: {
+          at: '1970-01-01T00:00:00.000Z',
+        },
+        args: {
+          page: 'home',
+          scale: 2,
+        },
+      },
+    ]);
+    expect(sentOutputs(server.rounds[1]?.input)).toEqual({
+      call_stamp: 'home x2',
+    });
   });
 
   it('is not asked about a call that failed: the model gets the error text', async () => {
