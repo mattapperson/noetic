@@ -430,6 +430,8 @@ describe('AgentHarness session accessors', () => {
 
     assert(turnStarted, 'should emit turn_started');
     assert(turnCompleted, 'should emit turn_completed');
+    // The turn's last step stopped, and says why, as every turn does.
+    expect(turnCompleted.data.stopReason).toBe('end_turn');
     assert(stepStarted, 'should emit step_started');
     expect(stepStarted.data.stepId).toBe('echo');
   });

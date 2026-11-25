@@ -250,15 +250,13 @@ describe('pumpTurnEvents', () => {
 });
 
 describe('capped turns', () => {
-  it('ends a turn whose last response stopped at a cap with that cap', async () => {
+  it('ends a turn whose last step stopped at a cap with that cap, whatever its events showed', async () => {
     const { outcome } = await pump([
       START,
-      sdk('response.completed', {
-        stopReason: 'max_turn_requests',
-      }),
       fw('turn_completed', {
         turnId: 't1',
         durationMs: 1,
+        stopReason: 'max_turn_requests',
       }),
     ]);
     expect(outcome).toEqual({
@@ -267,16 +265,13 @@ describe('capped turns', () => {
     });
   });
 
-  it('a later response that answered in full ends the turn end_turn', async () => {
+  it('a turn whose last step answered in full ends end_turn', async () => {
     const { outcome } = await pump([
       START,
-      sdk('response.completed', {
-        stopReason: 'max_tokens',
-      }),
-      sdk('response.completed', {}),
       fw('turn_completed', {
         turnId: 't1',
         durationMs: 1,
+        stopReason: 'end_turn',
       }),
     ]);
     expect(outcome).toEqual({

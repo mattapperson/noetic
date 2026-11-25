@@ -56,7 +56,7 @@ function bridgeCtx(step: Pick<StepAcpAgent, 'id' | 'emit'>): {
   withBroadcaster._broadcaster = broadcaster;
 
   return {
-    bridge: new AcpEventBridge(step, 'claude-code', withBroadcaster),
+    bridge: new AcpEventBridge(step, withBroadcaster),
     events,
   };
 }
@@ -527,6 +527,177 @@ describe('AcpEventBridge', () => {
     const started = events.findIndex((e) => e.type.endsWith(':tool_call_started'));
     expect(done).toBeGreaterThanOrEqual(0);
     expect(done).toBeLessThan(started);
+  });
+
+  it('pairs a call run under another id by its input, and reports only the one that never ran', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+    bridge.nameToolCalls((title) => (title === 'mcp__noetic__echo' ? 'echo' : undefined));
+    const announce = (id: string, value: string): void =>
+      bridge.forward({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: id,
+          title: 'mcp__noetic__echo',
+          rawInput: {
+            value,
+          },
+        },
+      });
+
+    bridge.begin();
+    announce('skipped', 'skipped');
+    announce('real', 'ran');
+    bridge.bridgedCallStarted('runner-id', 'echo', {
+      value: 'ran',
+    });
+    bridge.bridgedCallCompleted('runner-id', {
+      name: 'echo',
+      error: false,
+    });
+    bridge.finalize(emptyResult());
+
+    const completed = events.filter((e) => e.type.endsWith(':tool_call_completed'));
+    expect(
+      completed.map((e) => [
+        e.data.callId,
+        e.data.error,
+      ]),
+    ).toEqual([
+      [
+        'runner-id',
+        false,
+      ],
+      [
+        'skipped',
+        true,
+      ],
+    ]);
+  });
+
+  it('reports no call failed on a guess when fewer runs than announcements cannot be paired', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+    bridge.nameToolCalls((title) => (title === 'mcp__noetic__echo' ? 'echo' : undefined));
+
+    bridge.begin();
+    for (const id of [
+      'a',
+      'b',
+    ]) {
+      bridge.forward({
+        sessionId: 's1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: id,
+          title: 'mcp__noetic__echo',
+        },
+      });
+    }
+    bridge.bridgedCallStarted('runner-id', 'echo', {
+      value: 'unrelated',
+    });
+    bridge.bridgedCallCompleted('runner-id', {
+      name: 'echo',
+      error: false,
+    });
+    bridge.finalize(emptyResult());
+
+    const completed = events.filter((e) => e.type.endsWith(':tool_call_completed'));
+    expect(completed.map((e) => e.data.callId)).toEqual([
+      'runner-id',
+    ]);
+  });
+
+  it('settles a bridged call whose pipeline threw before the turn closes', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.bridgedCallStarted('thrown', 'echo', {});
+    bridge.abort(new Error('steering hook threw'));
+
+    const completed = events.findIndex(
+      (e) => e.type.endsWith(':tool_call_completed') && e.data.callId === 'thrown',
+    );
+    const closed = events.findIndex((e) => e.type === 'response.completed');
+    expect(completed).toBeGreaterThanOrEqual(0);
+    expect(completed).toBeLessThan(closed);
+    expect(events[completed]?.data.error).toBe(true);
+  });
+
+  it('completes a result-only call as its result recorded it', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.finalize(
+      emptyResult({
+        items: [
+          {
+            id: 'f1',
+            type: 'function_call',
+            status: 'completed',
+            callId: 'f1',
+            name: 'Bash',
+            arguments: '{}',
+          },
+          {
+            id: 'o1',
+            type: 'function_call_output',
+            status: 'failed',
+            callId: 'f1',
+            output: 'exit 1',
+          },
+          {
+            id: 'f2',
+            type: 'function_call',
+            status: 'completed',
+            callId: 'f2',
+            name: 'Read',
+            arguments: '{}',
+          },
+        ],
+      }),
+    );
+
+    const completed = events.filter((e) => e.type.endsWith(':tool_call_completed'));
+    expect(
+      completed.map((e) => [
+        e.data.callId,
+        e.data.error,
+      ]),
+    ).toEqual([
+      [
+        'f1',
+        true,
+      ],
+      [
+        'f2',
+        true,
+      ],
+    ]);
+  });
+
+  it('ends its message with the whole message, as a model stream does', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.forward(textChunk('hel'));
+    bridge.forward(textChunk('lo'));
+    bridge.finalize(emptyResult());
+
+    const done = events.find(
+      (e) => e.type === 'response.output_item.done' && JSON.stringify(e.data).includes('message'),
+    );
+    expect(done?.data.item).toMatchObject({
+      type: 'message',
+      role: 'assistant',
+      status: 'completed',
+      content: [
+        {
+          type: 'output_text',
+          text: 'hello',
+        },
+      ],
+    });
   });
 
   it("leaves a call to one of the step's bridged tools to the bridge", () => {

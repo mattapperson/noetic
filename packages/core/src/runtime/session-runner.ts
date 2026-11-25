@@ -406,6 +406,13 @@ export class SessionRunner {
         data: {
           turnId,
           durationMs: Date.now() - startedAt,
+          // Why the turn's last step stopped, when it said: a cap is how a
+          // host tells a truncated answer from a complete one.
+          ...(ctx.lastStepMeta?.stopReason === undefined
+            ? {}
+            : {
+                stopReason: ctx.lastStepMeta.stopReason,
+              }),
           ...(wakeAt === undefined
             ? {}
             : {

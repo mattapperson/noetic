@@ -206,7 +206,7 @@ as fallback for aborts that carry none):
 
 | Turn outcome | `stopReason` |
 |---|---|
-| `turn_completed` | `end_turn`, or the cap the turn's last response stopped at (`max_tokens`, `max_turn_requests`) when it returned after one |
+| `turn_completed` | its `stopReason` when that is a cap (`max_tokens`, `max_turn_requests`), else `end_turn` — read from the turn's outcome, never from events a step's `emit` filter may drop |
 | `turn_aborted` with `errorKind: 'cancelled'` (or after `session/cancel`) | `cancelled` |
 | `turn_aborted` with `errorKind: 'model_refused'` | `refusal` |
 | `turn_aborted` with `errorKind: 'budget_exceeded'` | `max_tokens` |

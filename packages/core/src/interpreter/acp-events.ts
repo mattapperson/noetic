@@ -26,6 +26,7 @@ import type {
   Context,
   ContextData,
   FunctionCallItem,
+  FunctionCallOutputItem,
   Item,
   StepAcpAgent,
 } from '@noetic-tools/types';
@@ -155,8 +156,19 @@ interface TurnCall {
 /** Every tool call of one turn, shared by the step's agent and its nested agents. */
 class TurnCalls {
   readonly byId = new Map<string, TurnCall>();
-  /** Tools the bridge ran under an id no announcement had, in order. */
-  readonly unannounced: string[] = [];
+  /** Calls the bridge ran under an id no announcement had, in order: tool and input. */
+  readonly unannounced: Array<{
+    readonly name: string;
+    readonly input: string;
+  }> = [];
+}
+
+/** A call's input as a comparable key. */
+function inputKey(input: unknown): string {
+  if (typeof input === 'string') {
+    return input;
+  }
+  return JSON.stringify(input ?? {});
 }
 
 /** The text a tool call's content carries, when it carries any. */
@@ -209,12 +221,14 @@ export class AcpEventBridge {
   private readonly broadcaster?: EventBroadcaster;
   private readonly agentName: string;
   private readonly stepId: string;
-  private readonly agentId: string;
   private readonly emitOption: EmitOption | undefined;
   private started = false;
   private completed = false;
   private nextOutputIndex = 0;
   private messageOutputIndex: number | null = null;
+  /** The open message's id and its text so far. */
+  private messageId = '';
+  private messageText = '';
   private sawText = false;
   /** Maps an agent's title for a bridged tool call to the tool's wire name. */
   toolNameOf: (title: string) => string | undefined = () => undefined;
@@ -233,7 +247,6 @@ export class AcpEventBridge {
 
   constructor(
     step: Pick<StepAcpAgent, 'id' | 'emit'>,
-    agentId: string,
     ctx: Context<ContextData>,
     /** The nested agent this bridge speaks for; absent for the step's own agent. */
     private readonly scope?: AgentScope,
@@ -243,7 +256,6 @@ export class AcpEventBridge {
     this.broadcaster = getBroadcaster(ctx);
     this.agentName = ctx.harness.config.name;
     this.stepId = step.id;
-    this.agentId = agentId;
     this.emitOption = step.emit;
     this.step = step;
     this.ctx = ctx;
@@ -344,7 +356,7 @@ export class AcpEventBridge {
     };
     const agent: ChildAgent = {
       scope,
-      bridge: new AcpEventBridge(this.step, this.agentId, this.ctx, scope, this.calls),
+      bridge: new AcpEventBridge(this.step, this.ctx, scope, this.calls),
     };
     agent.bridge.toolNameOf = this.toolNameOf;
     this.children.set(info.sessionId, agent);
@@ -446,7 +458,10 @@ export class AcpEventBridge {
   bridgedCallStarted(callId: string, name: string, args: unknown): void {
     const announced = this.calls.byId.get(callId);
     if (announced?.state !== 'announced') {
-      this.calls.unannounced.push(name);
+      this.calls.unannounced.push({
+        name,
+        input: inputKey(args),
+      });
     }
     this.calls.byId.set(callId, {
       name,
@@ -530,15 +545,7 @@ export class AcpEventBridge {
     this.settleUnstartedCalls();
     this.closeChildren(result.stopReason === 'cancelled' ? 'cancelled' : 'completed');
     if (!this.sawText && result.text.length > 0) {
-      this.openMessage();
-      this.sdk(
-        'response.output_text.delta',
-        {
-          delta: result.text,
-        },
-        this.messageOutputIndex ?? 0,
-      );
-      this.sawText = true;
+      this.messageDelta(result.text);
     }
     // Close the message before synthesizing tool calls, so output items finish
     // in index order. Emitting them first left item 0 closing after items 1..n,
@@ -615,13 +622,13 @@ export class AcpEventBridge {
   }
 
   /**
-   * The turn is over: an own call the agent never reported finished on this
-   * stream is settled failed, so no consumer is left with a call that started
-   * and never ended.
+   * The turn is over: a call started on this stream and never reported
+   * finished — the agent's own, or one whose pipeline threw — is settled
+   * failed, so no consumer is left with a call that started and never ended.
    */
   private settleOpenCalls(): void {
     for (const [callId, call] of this.calls.byId) {
-      if (call.bridge !== this || call.via !== 'own' || call.state !== 'open') {
+      if (call.bridge !== this || call.state !== 'open') {
         continue;
       }
       call.state = 'closed';
@@ -641,17 +648,46 @@ export class AcpEventBridge {
    * which is reported as a failed call on the announcing agent's stream.
    */
   private settleUnstartedCalls(): void {
+    const left: Array<
+      [
+        string,
+        TurnCall,
+      ]
+    > = [];
+    const runs = [
+      ...this.calls.unannounced,
+    ];
+    // The same tool with the same input first: that is the call, run under another id.
     for (const [callId, call] of this.calls.byId) {
       if (call.state !== 'announced') {
         continue;
       }
       call.state = 'closed';
-      const ranAs = this.calls.unannounced.indexOf(call.name);
-      if (ranAs >= 0) {
-        this.calls.unannounced.splice(ranAs, 1);
+      const at = runs.findIndex(
+        (run) => run.name === call.name && run.input === inputKey(call.input),
+      );
+      if (at >= 0) {
+        runs.splice(at, 1);
         continue;
       }
-      call.bridge.reportUnran(callId, call);
+      left.push([
+        callId,
+        call,
+      ]);
+    }
+    // Then by tool alone. With no run of the tool left, none of them ran; with
+    // as many runs as announcements, all did; with fewer, which ones did is
+    // unknown, so none is reported failed on a guess.
+    for (const name of new Set(left.map(([, call]) => call.name))) {
+      const unmatched = runs.filter((run) => run.name === name).length;
+      if (unmatched > 0) {
+        continue;
+      }
+      for (const [callId, call] of left) {
+        if (call.name === name) {
+          call.bridge.reportUnran(callId, call);
+        }
+      }
     }
   }
 
@@ -683,21 +719,19 @@ export class AcpEventBridge {
     });
     this.emitToolCall(item.callId, item.name, item.arguments);
     const output = items.find(
-      (candidate) => candidate.type === 'function_call_output' && candidate.callId === item.callId,
+      (candidate): candidate is FunctionCallOutputItem =>
+        candidate.type === 'function_call_output' && candidate.callId === item.callId,
     );
     this.toolEvent('tool_call_started', {
       name: item.name,
       callId: item.callId,
     });
+    // As its result recorded it: a call with no result never finished.
     this.toolEvent('tool_call_completed', {
       name: item.name,
       callId: item.callId,
-      error: false,
-      ...(output?.type === 'function_call_output' && typeof output.output === 'string'
-        ? {
-            output: output.output,
-          }
-        : {}),
+      error: output === undefined || output.status === 'failed' || output.status === 'incomplete',
+      output: output?.output ?? UNFINISHED_OUTPUT,
     });
   }
 
@@ -803,12 +837,28 @@ export class AcpEventBridge {
     this.sdk('response.created', {});
   }
 
+  /** Stream text into the open assistant message, opening one first if none is. */
+  private messageDelta(delta: string): void {
+    this.openMessage();
+    this.messageText += delta;
+    this.sdk(
+      'response.output_text.delta',
+      {
+        delta,
+      },
+      this.messageOutputIndex ?? 0,
+    );
+    this.sawText = true;
+  }
+
   private openMessage(): void {
     if (this.messageOutputIndex !== null) {
       return;
     }
     this.start();
     const id = `acp-msg-${crypto.randomUUID()}`;
+    this.messageId = id;
+    this.messageText = '';
     this.messageOutputIndex = this.nextOutputIndex++;
     this.sdk(
       'response.output_item.added',
@@ -835,8 +885,32 @@ export class AcpEventBridge {
       return;
     }
     const index = this.messageOutputIndex;
-    this.sdk('response.output_text.done', {}, index);
-    this.sdk('response.output_item.done', {}, index);
+    // The finished message, as a model's stream ends one.
+    this.sdk(
+      'response.output_text.done',
+      {
+        text: this.messageText,
+      },
+      index,
+    );
+    this.sdk(
+      'response.output_item.done',
+      {
+        item: {
+          id: this.messageId,
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [
+            {
+              type: 'output_text',
+              text: this.messageText,
+            },
+          ],
+        },
+      },
+      index,
+    );
     this.messageOutputIndex = null;
   }
 
@@ -896,15 +970,7 @@ export class AcpEventBridge {
       return;
     }
     if (update.sessionUpdate === 'agent_message_chunk') {
-      this.openMessage();
-      this.sdk(
-        'response.output_text.delta',
-        {
-          delta: blockText(update.content),
-        },
-        this.messageOutputIndex ?? 0,
-      );
-      this.sawText = true;
+      this.messageDelta(blockText(update.content));
       return;
     }
     if (update.sessionUpdate === 'agent_thought_chunk') {

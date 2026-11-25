@@ -1223,7 +1223,7 @@ async function runAcpStep<TContext, I, O>(params: {
   // marked `replay: true`, and never the text, reasoning or item streams.
   let reloading = false;
 
-  let bridge = new AcpEventBridge(step, agent.agentId, baseCtx);
+  let bridge = new AcpEventBridge(step, baseCtx);
   // A tool pipeline error fails the step, as it does in `callModel`: it is
   // kept, the agent's turn is cancelled, and the error is thrown once the
   // turn has unwound.
@@ -1384,7 +1384,7 @@ async function runAcpStep<TContext, I, O>(params: {
       turnPrompt = guidance;
       turnBlocks = undefined;
       retries += 1;
-      bridge = new AcpEventBridge(step, agent.agentId, baseCtx);
+      bridge = new AcpEventBridge(step, baseCtx);
       bindHostToStep(resolution.live.host, bindingFor(bridge));
       continue;
     }

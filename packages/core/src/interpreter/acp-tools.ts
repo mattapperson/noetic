@@ -75,6 +75,12 @@ export interface AcpToolBinding {
 
 /** One call's binding: where it reports as it runs. */
 interface CallBinding extends AcpToolBinding {
+  /**
+   * Nobody had announced the call when it started while a subagent was about:
+   * its item and lifecycle wait until its owner is known, so all of it lands
+   * on one stream.
+   */
+  provisional: boolean;
   /** The nested agent making it, when known to be a subagent's as it starts. */
   scope?: AgentScope;
   /** The step's own events: held calls are announced there, never scoped. */
@@ -318,6 +324,11 @@ interface SettledCall extends BridgedCall {
   readonly pending?: AcpEventBridge;
   /** Nobody had announced it: a subagent announcing it by the turn's end takes it. */
   readonly provisional?: boolean;
+  /** A provisional call's start and completion, reported with its result once its owner is known. */
+  readonly deferred?: {
+    readonly args: unknown;
+    readonly completion: Record<string, unknown>;
+  };
 }
 
 //#region Runner
@@ -528,6 +539,7 @@ export class AcpToolRunner implements AcpToolHost {
           }
         : {}),
       stepEvents: binding.events,
+      provisional: owner === undefined && this.subagentsThisTurn,
     };
   }
 
@@ -542,10 +554,15 @@ export class AcpToolRunner implements AcpToolHost {
     for (const call of this.finished) {
       const owner = call.provisional ? this.calls.get(call.callId)?.owner : undefined;
       if (owner?.kind === 'subagent') {
-        call.pending?.childBridge(owner.sessionId)?.itemAppended(call.outputItem);
+        const child = call.pending?.childBridge(owner.sessionId) ?? call.pending;
+        if (child) {
+          emitResult(child, call);
+        }
         continue;
       }
-      call.pending?.itemAppended(call.outputItem);
+      if (call.pending) {
+        emitResult(call.pending, call);
+      }
       taken.push(call);
     }
     this.finished = [];
@@ -566,9 +583,7 @@ export class AcpToolRunner implements AcpToolHost {
     const known = this.known(finished.callId);
     const owner = known.owner;
     if (owner?.kind === 'subagent') {
-      (binding.stepEvents.childBridge(owner.sessionId) ?? binding.events).itemAppended(
-        finished.outputItem,
-      );
+      emitResult(binding.stepEvents.childBridge(owner.sessionId) ?? binding.events, finished);
       return;
     }
     const provisional = owner === undefined && this.subagentsThisTurn;
@@ -593,7 +608,7 @@ export class AcpToolRunner implements AcpToolHost {
         : {}),
     });
     if (!behind) {
-      binding.stepEvents.itemAppended(finished.outputItem);
+      emitResult(binding.stepEvents, finished);
     }
   }
 
@@ -878,7 +893,9 @@ export class AcpToolRunner implements AcpToolHost {
     tool: Tool | undefined,
   ): ReturnType<typeof executeToolCall> {
     const args = this.unwrap(call);
-    binding.events.bridgedCallStarted(callId, call.name, args);
+    if (!binding.provisional) {
+      binding.events.bridgedCallStarted(callId, call.name, args);
+    }
     const record = this.records.recordFor({
       ctx: binding.ctx,
       stepId: binding.stepId,
@@ -940,16 +957,45 @@ export class AcpToolRunner implements AcpToolHost {
       callItem,
       outputItem,
     };
+    const completion = {
+      name: call.name,
+      error: result.error === true,
+      output: result.output,
+    };
+    if (binding.provisional) {
+      this.publish(binding, {
+        ...finished,
+        callId,
+        deferred: {
+          args,
+          completion,
+        },
+      });
+      return result;
+    }
     this.publish(binding, {
       ...finished,
       callId,
     });
-    binding.events.bridgedCallCompleted(callId, {
-      name: call.name,
-      error: result.error === true,
-      output: result.output,
-    });
+    binding.events.bridgedCallCompleted(callId, completion);
     return result;
+  }
+}
+
+/**
+ * Put a finished call's result item on `bridge`: a provisional call's start
+ * first and completion after, so its whole lifecycle lands on one stream.
+ */
+function emitResult(
+  bridge: AcpEventBridge,
+  call: Pick<SettledCall, 'callId' | 'wireName' | 'outputItem' | 'deferred'>,
+): void {
+  if (call.deferred) {
+    bridge.bridgedCallStarted(call.callId, call.wireName, call.deferred.args);
+  }
+  bridge.itemAppended(call.outputItem);
+  if (call.deferred) {
+    bridge.bridgedCallCompleted(call.callId, call.deferred.completion);
   }
 }
 

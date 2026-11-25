@@ -906,11 +906,23 @@ the step's own Noetic tools is reported once, by the tool bridge, when it runs
 it (spec 38): its item, carrying the arguments it runs with, then
 `tool_call_started`, under the id the bridge runs it under — never from the
 agent's `tool_call`, which only announces it. An announcement under that same
-id is the same call, whenever it arrives. At the turn's end an announcement
-the bridge never ran under its id either ran under another (the bridge ran
-that tool under an id no announcement had) and shows nothing more, or never
-reached the tool, and completes failed on the announcing agent's stream. A
-call id announced twice is one call.
+id is the same call, whenever it arrives. At the turn's end the
+announcements the bridge never ran under their ids are paired with the calls
+it ran under ids no announcement had: first the same tool with the same
+input — the same call, which shows nothing more; then by tool alone. When no
+run of a tool is left over, its remaining announcements never reached the
+tool, and each completes failed on its announcing agent's stream; when some
+are left but fewer than the announcements, which ones ran is unknown, so none
+is reported failed on a guess. A call id announced twice is one call. A call
+started and never completed — one whose pipeline threw — completes failed
+before its stream's `response.completed`, and a call the agent reported only
+in its turn result completes as that result recorded it (no result: failed).
+
+Message and call items end as a model's stream ends them:
+`response.output_text.done` carries the message's text and
+`response.output_item.done` the whole message or call. The turn's outcome
+reaches the host on `turn_completed` as `stopReason` (spec 08), whatever the
+step's `emit` filter drops.
 
 The client accepts every `session/update` variant of the current protocol, so
 normal traffic from current bridges never draws a `-32602 Invalid params`

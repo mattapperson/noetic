@@ -213,8 +213,6 @@ interface TurnState {
   argsByCallId: Map<string, unknown>;
   /** Calls started but not completed — flushed at the turn boundary so the client is never left with a spinner. */
   openCalls: Set<string>;
-  /** The cap the turn's last response stopped at, when it returned after one. */
-  cap?: 'max_tokens' | 'max_turn_requests';
 }
 
 async function flushOpenCalls(state: TurnState, status: 'completed' | 'failed'): Promise<void> {
@@ -236,14 +234,6 @@ async function handleSdkEvent(state: TurnState, event: StreamEvent): Promise<voi
   }
   if (event.type === 'response.reasoning.delta' && typeof event.data.delta === 'string') {
     await notifyIfPrimary(params, primary, textChunk('agent_thought_chunk', event.data.delta));
-    return;
-  }
-  if (event.type === 'response.completed') {
-    // The last response of the turn decides: a step that came after a capped
-    // one answered in full.
-    const stopReason = event.data.stopReason;
-    state.cap =
-      stopReason === 'max_tokens' || stopReason === 'max_turn_requests' ? stopReason : undefined;
     return;
   }
   const fc = readFunctionCallArgs(event);
@@ -346,9 +336,12 @@ async function handleFrameworkEvent(
   }
   if (hasEventName(event, 'turn_completed') && matchesTurn(event, state.turnId)) {
     await flushOpenCalls(state, 'completed');
+    // The turn's last step decides: one that stopped at a cap says so.
+    const stopReason = event.data.stopReason;
     return {
       kind: 'stop',
-      stopReason: state.cap ?? 'end_turn',
+      stopReason:
+        stopReason === 'max_tokens' || stopReason === 'max_turn_requests' ? stopReason : 'end_turn',
     };
   }
   if (hasEventName(event, 'turn_aborted') && matchesTurn(event, state.turnId)) {
