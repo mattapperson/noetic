@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.19.0-next.2 (2026-11-25)
+
+* feat(core): land the spec-workspace patch: decide headers and base URL, Tool.toModelOutput, interact ([7b21be0](https://github.com/mattapperson/noetic/commit/7b21be0)), closes [#161](https://github.com/mattapperson/noetic/issues/161) [#159](https://github.com/mattapperson/noetic/issues/159) [#159](https://github.com/mattapperson/noetic/issues/159) [#159](https://github.com/mattapperson/noetic/issues/159) [#120](https://github.com/mattapperson/noetic/issues/120) [#160](https://github.com/mattapperson/noetic/issues/160)
+
 ## @noetic-tools/types-v3.19.0-next.1 (2026-11-25)
 
 * fix(core): a decision that cannot be taken is refused, not half applied ([7d07818](https://github.com/mattapperson/noetic/commit/7d07818))
