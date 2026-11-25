@@ -2160,7 +2160,19 @@ harness.getAuditTrail(scope: { threadId } | { executionId }): Promise<TrailMark[
 // TrailMark: { executionId, path, stepId, kind, completedAt, version?, term?, holder?, receipt? }
 ```
 
-A turn resumed under another `version` keeps the steps that still match. If the first step that differs already had a lasting effect (a `once`/`effects` connection operation, or a `durable: true` tool), the turn stops with `NoeticError` `turn_stuck` and waits: `wake()` skips it until that decision arrives. Give an effect step a `replayKey` to keep it matching across edits. Trail marks outlive the ledger and `clearCheckpoint`.
+A turn resumed under another `version` keeps the steps that still match. If the first step that differs already had a lasting effect (a `once`/`effects` connection operation, or a `durable: true` tool), the turn stops with `NoeticError` `turn_stuck` and waits: `wake()` skips it until that decision arrives. Give an effect step a `replayKey` to keep it matching across edits. Trail marks outlive the ledger and `clearCheckpoint`; only `forget` deletes them.
+
+### Forgetting threads and executions
+
+```ts
+harness.forget(scope: { threadId } | { executionId }, options?: { keepTrail?: boolean; patienceMs?: number; waitMs?: number }): Promise<ForgetReport>;
+// ForgetReport: { threadId?, executionIds: string[], spend: SpendSettlement[] }
+harness.listStoredThreads(options?: { prefix?: string }): Promise<string[]>;
+harness.listStoredExecutions(options?: { prefix?: string }): Promise<StoredExecution[]>;
+// StoredExecution: { executionId, parts: ExecutionPart[], resumable }  — parts: snapshot|ledger|trail|held|intent|pending|other
+```
+
+When a thread or run is over, `forget` deletes everything core keeps for it — never build `session:`/`execution:`/`turn-lease:`/`output:` keys yourself. A thread's forget covers its record, lease, display output, thread- and execution-scoped layer state, and every execution it ran (the record lists them in `executions`); an execution's forget leaves thread records alone. Pending spend is settled first: priced through the provider (up to `patienceMs`), else written off at its ceiling, or at 0 with `unbounded: true`. Settlements carry `model` and `path` for attribution. A turn running in this harness, or a lease held elsewhere after `waitMs`, is refused with `lease_lost`. Sweep with `listStoredThreads({ prefix })`; decide resumability with `listStoredExecutions()`'s `resumable` (a trail alone is not a checkpoint).
 
 ### Held tool calls
 

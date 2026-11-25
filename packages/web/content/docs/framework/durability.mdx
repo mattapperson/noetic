@@ -422,7 +422,7 @@ const marks = await harness.getAuditTrail({ threadId: 'case-7' });
 // [{ executionId, path, stepId: 'charge', kind, completedAt, version: 'v1', term, holder, receipt }, …]
 ```
 
-A mark outlives the ledger entry it came from: pruning an entry, finishing the run and `clearCheckpoint` all leave it. Marks live under `execution:<id>:trail:` in your storage, and core never deletes them; prune that prefix by age if you need to.
+A mark outlives the ledger entry it came from: pruning an entry, finishing the run and `clearCheckpoint` all leave it. Only [`forget`](#forgetting-a-thread-or-an-execution) deletes marks, unless you pass `keepTrail`. A thread's trail covers every turn it began: its stored record lists each turn's execution.
 
 ### Paid Calls
 
@@ -467,6 +467,40 @@ One that names no execution may be any execution's, so it is listed with each of
 **Evidence is never discarded.** Records live under `spend:<id>`, apart from checkpoints, so `clearCheckpoint` and an abandoned turn leave them alone. A record leaves storage only when it is settled or written off.
 
 Run one harness per storage when reconciling: a harness skips the calls it has in flight, but cannot see another harness's.
+
+### Forgetting a Thread or an Execution
+
+When a thread or a run is over, tell the harness, and it deletes what it keeps for it. You never build a storage key yourself.
+
+```ts validate=none
+// A thread: its record and history, turn lease, display output, layer state, and
+// every execution it ran — snapshot, ledger, trail, held calls, pending entries.
+const report = await harness.forget({ threadId: 'case-7' });
+// { threadId, executionIds, spend: SpendSettlement[] }
+
+// One execution, such as a job run with `harness.run()`. A thread's record is left alone.
+await harness.forget({ executionId }, { keepTrail: true });
+```
+
+**Spend is settled first.** Before anything is deleted, every pending call of the thread or execution is priced through the provider, waiting up to `patienceMs` (default 60 s); one the provider did not price is written off at its ceiling. One with no ceiling — no published price, no output cap, or an unreadable record — is written off at 0 and its settlement carries `unbounded: true`, so you can log it. Each settlement carries its `model` and `path` (the round or step that made the call), so you can attribute it, and is returned in `report.spend`.
+
+**A live turn is not forgotten.** A thread with a turn running in this harness, or an execution with a run in flight, is refused with `lease_lost`. On storage with `swap`, the forget takes the thread's lease first, waiting up to `waitMs` (default 0) for another harness's; a lease still held elsewhere is refused with `lease_lost`. Taking it raises the lease's term, so a harness that stalled mid-turn loses its next write.
+
+**Sweep without key layouts.** A host that died between a turn's end and its cleanup leaves the thread behind. List what is stored and forget it:
+
+```ts validate=none
+for (const threadId of await harness.listStoredThreads({ prefix: `resp_${handle}_` })) {
+  if (!isRunning(threadId)) {
+    await harness.forget({ threadId });
+  }
+}
+
+// Does a job have a checkpoint to resume? A trail alone is history, not a checkpoint.
+const [job] = await harness.listStoredExecutions({ prefix: jobId });
+const resumable = job?.executionId === jobId && job.resumable;
+```
+
+`listStoredThreads` lists every thread with a record, a lease or display output stored; `listStoredExecutions` lists every execution with anything stored, with its `parts` (`snapshot`, `ledger`, `trail`, `held`, `intent`, `pending`, `other`) and `resumable`. Both read keys only. The forget deletes a thread's lease last, so one cut off part way still lists the thread for the next sweep. Deleting goes through your `StorageAdapter`, so storage that spills large values elsewhere deletes their objects with their keys.
 
 ### Implement `getMany` on a networked adapter
 
