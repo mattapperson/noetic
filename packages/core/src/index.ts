@@ -498,6 +498,7 @@ export type {
   InputImagePart,
   InputMessageItem,
   InputTextPart,
+  InputVideoPart,
   Item,
   ItemBase,
   ItemSchemaExtensions,

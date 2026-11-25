@@ -43,6 +43,7 @@ Chat SDK messages map onto Open Responses items, oldest first (sorted by `dateSe
 | `author.isMe` (the bot's own) | assistant `MessageItem` with one `output_text` part |
 | anyone else | user `InputMessageItem`; text rendered `userName: text` so group threads keep attribution |
 | image attachment with URL | `input_image` part |
+| video attachment with URL | `input_video` part |
 | other attachment with URL | `input_file` part |
 
 Platform message ids become item ids. `isAssistant` and `formatMessage` hooks override detection and rendering; `formatMessage` returning `null` drops a message. Messages that render to no text and no usable attachment are dropped.

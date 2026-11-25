@@ -117,6 +117,12 @@ function toAttachmentPart(attachment: ChatAttachmentLike): InputContentPart | nu
       imageUrl: attachment.url,
     };
   }
+  if (attachment.type === 'video') {
+    return {
+      type: 'input_video',
+      videoUrl: attachment.url,
+    };
+  }
   return {
     type: 'input_file',
     fileUrl: attachment.url,

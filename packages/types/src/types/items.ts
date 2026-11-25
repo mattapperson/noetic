@@ -73,6 +73,12 @@ export interface InputFilePart {
   readonly filename?: string;
 }
 
+/** @public User video input as a URL or base64 data URL. */
+export interface InputVideoPart {
+  readonly type: 'input_video';
+  readonly videoUrl: string;
+}
+
 /** @public Reasoning trace content. */
 export type ReasoningTextPart = ReasoningTextContent;
 
@@ -80,7 +86,7 @@ export type ReasoningTextPart = ReasoningTextContent;
 export type SummaryTextPart = ReasoningSummaryText;
 
 /** @public User/developer input content variants. */
-export type InputContentPart = InputTextPart | InputImagePart | InputFilePart;
+export type InputContentPart = InputTextPart | InputImagePart | InputFilePart | InputVideoPart;
 
 /** @public Content part variants for message items. */
 export type ContentPart = OutputTextPart | RefusalPart | InputContentPart;

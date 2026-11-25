@@ -3,7 +3,9 @@ import type { AcpToolKind } from './acp';
 import type {
   FunctionCallItem,
   FunctionCallOutputItem,
-  InputContentPart,
+  InputFilePart,
+  InputImagePart,
+  InputTextPart,
   Item,
   ItemSchemaExtensions,
   ToolResultExtensionItem,
@@ -100,9 +102,12 @@ export type ToolAcpTitleFn<I extends StandardSchemaV1 = StandardSchemaV1> = {
 
 /**
  * @public What `Tool.toModelOutput` returns: the text, or the content parts, the
- * model is given as a tool call's result.
+ * model is given as a tool call's result. The Agent SDK accepts text, images,
+ * and files in tool results.
  */
-export type ToolModelOutput = string | ReadonlyArray<InputContentPart>;
+export type ToolModelOutput =
+  | string
+  | ReadonlyArray<InputTextPart | InputImagePart | InputFilePart>;
 
 /**
  * A tool definition that an LLM can invoke during execution.

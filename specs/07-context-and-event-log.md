@@ -130,6 +130,12 @@ interface InputFilePart {
   readonly filename?: string;
 }
 
+/** User video input as a URL or base64 data URL. */
+interface InputVideoPart {
+  readonly type: 'input_video';
+  readonly videoUrl: string;
+}
+
 /** Reasoning trace content. */
 type ReasoningTextPart = ReasoningTextContent;
 
@@ -137,7 +143,7 @@ type ReasoningTextPart = ReasoningTextContent;
 type SummaryTextPart = ReasoningSummaryText;
 
 /** User/developer input content variants. */
-type InputContentPart = InputTextPart | InputImagePart | InputFilePart;
+type InputContentPart = InputTextPart | InputImagePart | InputFilePart | InputVideoPart;
 
 /** Content part variants for message items. */
 type ContentPart = OutputTextPart | RefusalPart | InputContentPart;

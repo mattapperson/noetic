@@ -20,6 +20,8 @@ Per message, `noeticAgent`:
 2. **Executes a turn** — the triggering message is enqueued with a `messageId` that correlates the turn.
 3. **Streams the reply** — `streamToChatChunks` translates the harness event stream into Chat SDK chunks: text deltas stream as markdown, tool calls render as native task cards (`task_update`) on platforms that support them, and the stream terminates at the turn boundary so `thread.post()` resolves.
 
+User attachments with URLs become `input_image` for images, `input_video` for videos, and `input_file` for other attachments. The selected model must support video to process a video attachment.
+
 `chat` is an optional peer dependency: the core loop uses structural mirrors of the few shapes it touches (pinned by a compile-time test), and `chatTools()` imports `chat/ai` lazily.
 
 ## Options

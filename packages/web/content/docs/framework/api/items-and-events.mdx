@@ -216,7 +216,7 @@ interface InputMessageItem {
   readonly type: 'message';
   readonly role: 'user' | 'system' | 'developer';
   readonly status: 'in_progress' | 'completed' | 'incomplete' | 'failed';
-  readonly content: InputTextPart[];
+  readonly content: InputContentPart[];
 }
 ```
 
@@ -224,7 +224,7 @@ interface InputMessageItem {
 |---|---|---|
 | `type` | `'message'` | Discriminant |
 | `role` | `'user' \| 'system' \| 'developer'` | Message author. `developer` is used for framework-injected context (e.g., from context layers), distinct from `system` (agent instructions). |
-| `content` | `InputTextPart[]` | Input text content segments |
+| `content` | `InputContentPart[]` | Input text, images, files, and video |
 | `status` | `string` | Lifecycle status. Includes `failed` as a Noetic extension beyond the Open Responses spec. |
 
 `UserMessageItem` is `InputMessageItem` narrowed to `role: 'user'` — the type the `isUserMessage` guard narrows to:

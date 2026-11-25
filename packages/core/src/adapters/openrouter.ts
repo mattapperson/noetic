@@ -105,13 +105,16 @@ function inputFilePartToProvider(part: InputFilePart): OpenRouterAgent.InputFile
 }
 
 function inputContentPartToProvider(part: InputContentPart): ProviderInputContentPart {
-  if (part.type === 'input_text') {
-    return inputTextPartToProvider(part);
+  switch (part.type) {
+    case 'input_text':
+      return inputTextPartToProvider(part);
+    case 'input_image':
+      return inputImagePartToProvider(part);
+    case 'input_file':
+      return inputFilePartToProvider(part);
+    case 'input_video':
+      return part;
   }
-  if (part.type === 'input_image') {
-    return inputImagePartToProvider(part);
-  }
-  return inputFilePartToProvider(part);
 }
 
 function contentPartsToProviderContent(
@@ -121,7 +124,8 @@ function contentPartsToProviderContent(
   }>,
 ): string | ProviderInputContentPart[] {
   const hasStructuredInput = parts.some(
-    (part) => part.type === 'input_image' || part.type === 'input_file',
+    (part) =>
+      part.type === 'input_image' || part.type === 'input_file' || part.type === 'input_video',
   );
   if (!hasStructuredInput) {
     return contentPartsToText(parts);
