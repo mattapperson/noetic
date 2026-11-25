@@ -194,16 +194,18 @@ async function recordToLedger<TContext, I, O>(opts: {
   ledgerKey: string | undefined;
   inputHash: string | undefined;
   lane: ContextImpl | null;
+  /** The dispatch's positional path, where what ran beneath it recorded. */
+  positionalPath: string | undefined;
   step: Step<TContext, I, O>;
   output: O;
 }): Promise<void> {
-  const { ledger, ledgerKey, inputHash, lane, step, output } = opts;
+  const { ledger, ledgerKey, inputHash, lane, positionalPath, step, output } = opts;
   if (!ledger || ledgerKey === undefined) {
     return;
   }
   const items = lane?.appendedItems() ?? [];
   const streamed = lane?.emittedIndices() ?? [];
-  await ledger.record({
+  const stored = await ledger.record({
     path: ledgerKey,
     stepId: step.id,
     kind: step.kind,
@@ -221,6 +223,12 @@ async function recordToLedger<TContext, I, O>(opts: {
       : {}),
     completedAt: new Date().toISOString(),
   });
+  /* A positional record prunes what recorded beneath it. A `key:` record sits at no
+   * position, so the rounds and child steps that recorded under this dispatch's path
+   * are dropped here: the step now replays from its key, and nothing reads them. */
+  if (stored && ledgerKey.startsWith(REPLAY_KEY_PREFIX) && positionalPath) {
+    await ledger.dropWithin(positionalPath);
+  }
 }
 
 /**
@@ -238,7 +246,12 @@ async function runStepHook(stepId: string, hook: () => Promise<void>): Promise<v
     throw new NoeticErrorImpl({
       kind: 'step_failed',
       stepId,
-      cause: error instanceof Error ? error : new Error(String(error)),
+      cause:
+        error instanceof Error
+          ? error
+          : new Error(String(error), {
+              cause: error,
+            }),
       retriesExhausted: false,
     });
   }
@@ -365,6 +378,7 @@ async function executeStep<TContext, I, O>(
     lane?.skipLedger();
   }
   const inputHash = ledgerKey === undefined ? undefined : lane?.currentDispatch()?.inputHash;
+  const positionalPath = lane?.currentDispatch()?.path;
   const ledger = impl?.ledger;
   const replay = replayFromLedger({
     ledger,
@@ -462,6 +476,7 @@ async function executeStep<TContext, I, O>(
     ledgerKey,
     inputHash,
     lane,
+    positionalPath,
     step,
     output: result,
   });

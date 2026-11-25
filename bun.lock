@@ -24,7 +24,7 @@
     },
     "packages/acp": {
       "name": "@noetic-tools/acp",
-      "version": "2.0.0-next.1",
+      "version": "1.4.0",
       "bin": {
         "noetic-acp": "./dist/bin.js",
         "noetic-pi": "./dist/pi/launch.js",
@@ -87,7 +87,7 @@
     },
     "packages/context": {
       "name": "@noetic-tools/context",
-      "version": "2.0.0-next.1",
+      "version": "1.11.1",
       "dependencies": {
         "@noetic-tools/types": "workspace:*",
         "zod": "^4.0.0",
@@ -101,7 +101,7 @@
     },
     "packages/core": {
       "name": "@noetic-tools/core",
-      "version": "5.22.0-next.2",
+      "version": "5.21.0",
       "dependencies": {
         "@noetic-tools/context": "workspace:*",
         "@noetic-tools/types": "workspace:*",
@@ -326,7 +326,7 @@
     },
     "packages/types": {
       "name": "@noetic-tools/types",
-      "version": "3.19.0-next.1",
+      "version": "3.18.0",
       "dependencies": {
         "@openrouter/agent": "^0.11.0",
         "@standard-schema/spec": "1.1.0",

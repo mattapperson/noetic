@@ -1053,7 +1053,7 @@ describe('customItem() with a union output (#143)', () => {
     expect(bad.issues).toBeDefined();
   });
 
-  it('accepts a plain union and a JSON Schema oneOf of objects', () => {
+  it('accepts a plain union, and a JSON Schema oneOf of objects that validates each option', async () => {
     expect(
       customItem({
         type: 'myapp:either',
@@ -1067,31 +1067,96 @@ describe('customItem() with a union output (#143)', () => {
         ]),
       }).type,
     ).toBe('myapp:either');
+    const fromJson = customItem({
+      type: 'myapp:json-either',
+      output: {
+        oneOf: [
+          {
+            type: 'object',
+            properties: {
+              kind: {
+                const: 'a',
+              },
+              a: {
+                type: 'string',
+              },
+            },
+            required: [
+              'kind',
+              'a',
+            ],
+          },
+          {
+            type: 'object',
+            properties: {
+              kind: {
+                const: 'b',
+              },
+              b: {
+                type: 'number',
+              },
+            },
+            required: [
+              'kind',
+              'b',
+            ],
+          },
+        ],
+      },
+    });
+    const validate = (value: unknown) => fromJson.output['~standard'].validate(value);
     expect(
-      customItem({
-        type: 'myapp:json-either',
-        output: {
-          oneOf: [
-            {
-              type: 'object',
-              properties: {
-                a: {
-                  type: 'string',
-                },
+      (
+        await validate({
+          kind: 'a',
+          a: 'x',
+        })
+      ).issues,
+    ).toBeUndefined();
+    expect(
+      (
+        await validate({
+          kind: 'b',
+          b: 1,
+        })
+      ).issues,
+    ).toBeUndefined();
+    expect(
+      (
+        await validate({
+          kind: 'b',
+          b: 'x',
+        })
+      ).issues,
+    ).toBeDefined();
+  });
+
+  it('throws INVALID_CUSTOM_ITEM_SHAPE for an object that combines properties with oneOf', async () => {
+    await expectConfigError(
+      () =>
+        customItem({
+          type: 'myapp:combined',
+          output: {
+            type: 'object',
+            properties: {
+              n: {
+                type: 'number',
               },
             },
-            {
-              type: 'object',
-              properties: {
-                b: {
-                  type: 'number',
+            oneOf: [
+              {
+                type: 'object',
+                properties: {
+                  a: {
+                    type: 'string',
+                  },
                 },
               },
-            },
-          ],
-        },
-      }).type,
-    ).toBe('myapp:json-either');
+            ],
+          },
+        }),
+      'INVALID_CUSTOM_ITEM_SHAPE',
+    );
   });
 
   it('throws INVALID_CUSTOM_ITEM_SHAPE when an option is not an object or declares id or type', async () => {

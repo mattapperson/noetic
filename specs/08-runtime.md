@@ -1033,7 +1033,7 @@ The harness validates items at trust boundaries (model output parsing, session r
 
 ### Step hooks
 
-`AgentConfig.hooks` (`AgentHooks`) takes two callbacks the interpreter runs around every step it executes, in `execute()` — the root step and every nested one (sequence members, loop bodies, branches, fork and spawn children, steps a tool or code step runs on its context):
+`AgentConfig.hooks` (`AgentHooks`) takes two callbacks the interpreter runs around every step it executes in this process, in `execute()` — the root step and every nested one (sequence members, loop bodies, branches, fork and in-process spawn children, steps a tool or code step runs on its context). A child a subprocess adapter runs in another process executes under that process's harness and its hooks; this harness's hooks see only the parent-side dispatch.
 
 ```typescript
 interface AgentHooks {
@@ -1047,7 +1047,7 @@ interface AgentHooks {
 - Hooks nest: a parent's `beforeStep` runs before its children's and its `afterStep` after theirs. A step retried by its `RetryPolicy` is one execution: each hook runs once.
 - **Failure and cancellation.** `afterStep` does not run for a step that threw or was cancelled; `beforeStep` has already run for it.
 - **Replay.** A step replayed from the ledger (`23a-step-level-resume`) does not execute, so neither hook runs for it; `step_replayed` marks it.
-- **Errors.** A hook that throws fails the step it ran for, as an error the step threw would. A `NoeticError` or `NoeticConfigError` passes through unchanged; anything else becomes `step_failed` with the hook's error as `cause` (`09-error-model`). A throwing `beforeStep` means the step never ran; a throwing `afterStep` means the step is not recorded, so a resume runs it again.
+- **Errors.** A hook that throws fails the step it ran for, as an error the step threw would. A `NoeticError` or `NoeticConfigError` passes through unchanged; anything else becomes `step_failed` with the hook's error as `cause` (`09-error-model`). A throwing `beforeStep` means the step never ran; a throwing `afterStep` means the step is not recorded, so a resume runs it again. `afterStep` runs after the step's items were emitted, so a step whose `afterStep` threw has already appended and streamed its final custom items, and a resume that runs it again emits them again.
 
 The hooks are on `ctx.harness.config.hooks`, which is how the interpreter reaches them on any context of the harness.
 

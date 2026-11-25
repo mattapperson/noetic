@@ -328,7 +328,105 @@ describe('harness.recordedToolCalls', () => {
     }
   });
 
-  it('is empty once a run finishes: there is nothing left to resume', async () => {
+  it('lists a replayKey step’s calls once, under its key, with no round records left behind', async () => {
+    const { harness, agent } = setup({
+      total: 2,
+      perRound: 1,
+      hangOn: -1,
+    });
+    const keyed = {
+      ...agent,
+      replayKey: () => 'k1',
+    };
+    let reached = false;
+    const hang = runCode<ContextData, string, string>({
+      id: 'after',
+      execute: async () => {
+        reached = true;
+        return new Promise<string>(() => {});
+      },
+    });
+    const storage = createInMemoryStorage();
+    const first = harness(storage);
+    const ctx = first.createContext();
+    void first
+      .run(
+        [
+          keyed,
+          hang,
+        ],
+        'go',
+        ctx,
+      )
+      .catch(() => {});
+    await waitFor(() => reached);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const calls = await harness(storage).recordedToolCalls(ctx.id);
+    expect(
+      calls.map((c) => [
+        c.callId,
+        c.path,
+        c.settled,
+      ]),
+    ).toEqual([
+      [
+        'call_1',
+        'key:k1',
+        true,
+      ],
+      [
+        'call_2',
+        'key:k1',
+        true,
+      ],
+    ]);
+    const kinds = await Promise.all(
+      (await storage.list(`execution:${ctx.id}:ledger:`)).map(async (key) => {
+        const stored = await storage.get<{
+          kind: string;
+        }>(key);
+        return stored?.kind;
+      }),
+    );
+    expect(kinds.filter((kind) => kind?.startsWith('callModel:'))).toEqual([]);
+  });
+
+  it('keeps a replayKey step’s calls after the run finishes, since a later run replays them', async () => {
+    const { harness, agent } = setup({
+      total: 1,
+      perRound: 1,
+      hangOn: -1,
+    });
+    const storage = createInMemoryStorage();
+    const h = harness(storage);
+    const ctx = h.createContext();
+    expect(
+      await h.run(
+        {
+          ...agent,
+          replayKey: () => 'k1',
+        },
+        'go',
+        ctx,
+      ),
+    ).toBe('shipped 1');
+    const calls = await harness(storage).recordedToolCalls(ctx.id);
+    expect(
+      calls.map((c) => [
+        c.callId,
+        c.path,
+      ]),
+    ).toEqual([
+      [
+        'call_1',
+        'key:k1',
+      ],
+    ]);
+    await h.clearCheckpoint(ctx.id);
+    expect(await harness(storage).recordedToolCalls(ctx.id)).toEqual([]);
+  });
+
+  it('is empty once a run with no replayKey steps finishes', async () => {
     const { harness, agent } = setup({
       total: 1,
       perRound: 1,

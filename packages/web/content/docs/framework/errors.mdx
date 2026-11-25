@@ -136,7 +136,7 @@ try {
 }
 ```
 
-A thrown value that is not an `Error` is wrapped in an `Error` whose own `cause` is that value. `failureCause()` returns a `NoeticError` that carries no cause (`cancelled`, `budget_exceeded`, ...) and any other value as is.
+A thrown value that is not an `Error` is wrapped in an `Error` whose own `cause` is that value; `failureCause()` returns that wrapper, so read its `cause` for the thrown value. `failureCause()` returns a `NoeticError` that carries no cause (`cancelled`, `budget_exceeded`, ...) and any other value as is.
 
 ## Handling Errors in Loops
 
@@ -580,7 +580,7 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Cause:** A custom item's JSON Schema does not load, or its `output` does not describe an object or a union of objects, or one of those objects declares `id` or `type`.
 
-**Fix:** Give an object schema for `output`, or a union of object schemas (a discriminated union, or a JSON Schema `oneOf`), and leave out `id` and `type`: the runtime adds both to every final item.
+**Fix:** Give an object schema for `output`, or a union of object schemas (a discriminated union, a `z.union`, or a top-level JSON Schema `oneOf`/`anyOf` whose options are objects), and leave out `id` and `type`: the runtime adds both to every final item. Union options must be plain object schemas: an object with both `properties` and `oneOf`, options wrapped in `z.lazy`, and `.optional()`/`.pipe()` around the union are refused.
 
 #### CUSTOM_ITEM_MISMATCH
 

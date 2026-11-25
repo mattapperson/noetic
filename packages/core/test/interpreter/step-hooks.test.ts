@@ -182,6 +182,28 @@ describe('step hooks', () => {
     expect(log).toEqual([]);
   });
 
+  it('a hook that throws a non-Error keeps the thrown value as the wrapper’s cause', async () => {
+    const thrown = {
+      code: 'denied',
+    };
+    const harness = harnessWith({
+      beforeStep: async () => {
+        throw thrown;
+      },
+    });
+    const error = await caught(
+      harness.run(
+        code('guarded', (i) => i),
+        'x',
+        harness.createContext(),
+      ),
+    );
+    assert(isNoeticError(error));
+    const wrapper = error.cause;
+    assert(wrapper instanceof Error);
+    expect(wrapper.cause).toBe(thrown);
+  });
+
   it('a hook that throws a NoeticError fails the step with that error unchanged', async () => {
     const denied = new NoeticErrorImpl({
       kind: 'steering_denied',

@@ -238,8 +238,9 @@ export interface RecordedToolCall {
   /**
    * The call's result is on record too: a resume replays it, the result item
    * included, and the tool does not run. False when only the request is (a round cut
-   * off while the call ran): a resume runs that call again, with the idempotency key
-   * it had.
+   * off while the call ran): a resume does not replay a result for it. The call runs
+   * again with the idempotency key it had, unless its tool is `durable: true` (the
+   * call is held for a person) or it needs approval (it waits for one).
    */
   readonly settled: boolean;
 }

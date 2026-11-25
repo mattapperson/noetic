@@ -35,6 +35,8 @@ const Update = z.discriminatedUnion('kind', [
 const update = customItem({ type: 'myapp:update', event: Update, output: Update });
 // final item: { id, type: 'myapp:update', kind: 'result', value: 7 }
 ```
+
+  Prefer a discriminated union. With a plain `z.union`, the first option that parses wins, so an option whose fields are a subset of another's drops the extra fields. A JSON Schema `oneOf` requires exactly one option to match: give each option `required` fields and a distinguishing `const`, or every value will match several options and be refused. Union options must be plain object schemas: an object that has both `properties` and `oneOf`, options wrapped in `z.lazy`, and `.optional()`/`.pipe()` around the union are refused with `INVALID_CUSTOM_ITEM_SHAPE`.
 - Without `event`, the item has no events: it arrives only as a final item.
 
 A final item is `{ id, type, ...output }`. Each event is the payload `event` describes.

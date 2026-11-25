@@ -293,7 +293,9 @@ const calls = await harness.recordedToolCalls(executionId);
 // [{ callId: 'call_1', name: 'ship', path: 'agent/round#0', settled: true }, ...]
 ```
 
-`settled` is true when the call's result is on record too: the resume replays it and the tool does not run. It is false for the call that was running when the host died: only the model's request is on record, so that call runs again, with its `idempotencyKey`.
+`settled` is true when the call's result is on record too: the resume replays it and the tool does not run. It is false for the call that was running when the host died: only the model's request is on record, so that call runs again with its `idempotencyKey` — unless its tool is `durable: true`, in which case it is held for a person, or it needs approval and waits for one.
+
+A finished run drops its positional entries, but a step with a `replayKey` keeps its record for later runs on the same context, so its calls stay listed (under `key:<key>`) until `harness.clearCheckpoint(executionId)`.
 
 A host that journals tool traffic of its own — written before rounds and calls were recorded — must not append any of these calls to a restored context: the resume appends them itself, and the model would see each one twice. With every round and every finished call recorded, such a journal has nothing left to add, and a host can drop it.
 
