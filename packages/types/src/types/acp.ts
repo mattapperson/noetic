@@ -626,8 +626,9 @@ export interface AcpTurnResult {
   usage?: TokenUsage;
   cost?: number;
   /**
-   * The `usage` the agent's `session/prompt` answer reported, verbatim. The
-   * runtime charges it as the turn's usage when `usage` is absent.
+   * The `usage` the agent's `session/prompt` answer reported, verbatim: the
+   * session's running total, not this turn's, so the runtime never charges it
+   * (an adapter that knows its agent's figures supplies `usage`).
    * Context-window occupancy (`usage_update`) is not here.
    */
   reportedUsage?: acp.Usage;
@@ -763,37 +764,6 @@ export interface AcpAgentConnection {
 export interface AcpResumeTurnOptions {
   /** Aborting it cancels the turn, as for {@link AcpSession.prompt}. */
   signal?: AbortSignal;
-}
-
-/**
- * A live connection plus the session running on it. The runtime keeps these
- * keyed by {@link AcpSessionPolicy.reuse} so a session can span several steps.
- * @internal A host never handles an agent's connection.
- */
-export interface AcpLiveSession {
-  connection: AcpAgentConnection;
-  session: AcpSession;
-  /**
-   * The host this connection was opened with. The runtime rebinds its
-   * per-turn fields before every turn, so a session shared by several steps
-   * honours each step's own permissions, steering, and event stream.
-   */
-  host: AcpClientHost;
-  /** `agentId` of the adapter that opened this connection, for reuse conflict checks. */
-  agentId: string;
-  /** How long this connection is kept alive; decides who closes it and when. */
-  keepAlive: AcpKeepAlive;
-  /** Working directory the session was created in — fixed for its lifetime. */
-  cwd: string;
-  /** MCP servers attached at creation — also fixed for its lifetime. */
-  mcpServers?: ReadonlyArray<acp.McpServer>;
-  /** Noetic tools served to the agent at creation — also fixed for its lifetime. */
-  tools?: ReadonlyArray<AcpTool>;
-  /**
-   * What the session was opened with ({@link AcpSession.fingerprint}); for a
-   * reattached session, the one stored when it was opened.
-   */
-  fingerprint?: string;
 }
 
 /** @public Options handed to {@link AcpAgent.connect}. */

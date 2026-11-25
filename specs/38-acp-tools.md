@@ -343,7 +343,7 @@ instead.
 ## Sessions
 
 The agent reads its tool list once, so the session's list is fixed when it is
-created (`AcpLiveSession.tools`). A step reusing the session may serve any part
+created. A step reusing the session may serve any part
 of that list — a call to a listed tool outside its part answers as an unknown
 tool, as on `callModel` — but a tool the list lacks, or lists differently, is
 `ACP_SESSION_SETTING_CONFLICT`, naming the tools. A step that serves no tools

@@ -345,6 +345,33 @@ describe('prompt turn', () => {
 
     await rig.close();
   });
+
+  test('a turn cancelled before it starts never reaches the agent', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let prompted = 0;
+    const rig = await createAcpTestRig({
+      script: {
+        onPrompt: async () => {
+          prompted += 1;
+          return 'end_turn';
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+
+    const result = await session.prompt({
+      content: TEXT_PROMPT,
+      signal: controller.signal,
+    });
+
+    expect(result.stopReason).toBe('cancelled');
+    expect(prompted).toBe(0);
+
+    await rig.close();
+  });
 });
 
 describe('agent liveness', () => {

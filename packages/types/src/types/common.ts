@@ -158,12 +158,12 @@ export interface StepMeta {
   serviceTier?: string;
   responseItems?: ReadonlyArray<Item>;
   /**
-   * Why the model or agent stopped. A returning `callModel` step stopped
-   * `end_turn`; an agent step may also return after a cap (`max_tokens`,
-   * `max_turn_requests`), and this is how a caller tells a truncated turn from
-   * a complete one.
+   * Why the model or agent stopped, on a step that returned. A `callModel` step
+   * stopped `end_turn`; an agent step may also return after a cap
+   * (`max_tokens`, `max_turn_requests`), and this is how a caller tells a
+   * truncated turn from a complete one. A refusal or a cancellation is an error.
    */
-  stopReason?: 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled';
+  stopReason?: 'end_turn' | 'max_tokens' | 'max_turn_requests';
   /** The model the step ran with: a `callModel` step's resolved model, or an agent's current one. */
   model?: string;
   /** Set by `decide` steps. */

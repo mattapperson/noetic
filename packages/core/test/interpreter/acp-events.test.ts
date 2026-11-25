@@ -285,6 +285,138 @@ describe('AcpEventBridge', () => {
     });
   });
 
+  it('ends a call item with the call, and completes a call with its output', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.forward({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'c3',
+        title: 'Read',
+        rawInput: {
+          path: '/a',
+        },
+      },
+    });
+    bridge.forward({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'c3',
+        status: 'completed',
+        content: [
+          {
+            type: 'content',
+            content: {
+              type: 'text',
+              text: 'file body',
+            },
+          },
+        ],
+      },
+    });
+
+    const done = events.find((e) => e.type === 'response.output_item.done');
+    expect(done?.data.item).toMatchObject({
+      type: 'function_call',
+      callId: 'c3',
+      name: 'Read',
+      arguments: '{"path":"/a"}',
+    });
+    const completed = events.find((e) => e.type.endsWith(':tool_call_completed'));
+    expect(completed?.data).toEqual({
+      stepId: 'review',
+      name: 'Read',
+      callId: 'c3',
+      error: false,
+      output: 'file body',
+    });
+  });
+
+  it.each([
+    'finalize',
+    'abort',
+  ] as const)('settles a call still open when the turn ends (%s), failed', (end) => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.forward({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'c4',
+        title: 'Bash',
+      },
+    });
+    if (end === 'finalize') {
+      bridge.finalize(emptyResult());
+    } else {
+      bridge.abort(new Error('gone'));
+    }
+
+    const completed = events.filter((e) => e.type.endsWith(':tool_call_completed'));
+    expect(
+      completed.map((e) => [
+        e.data.callId,
+        e.data.error,
+      ]),
+    ).toEqual([
+      [
+        'c4',
+        true,
+      ],
+    ]);
+    const settledAt = events.indexOf(completed[0] ?? events[0]);
+    const closedAt = events.findIndex((e) => e.type === 'response.completed');
+    expect(settledAt).toBeLessThan(closedAt);
+  });
+
+  it('gives a call the agent reported only in its result its whole lifecycle', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.finalize(
+      emptyResult({
+        items: [
+          {
+            id: 'c5',
+            type: 'function_call',
+            status: 'completed',
+            callId: 'c5',
+            name: 'Grep',
+            arguments: '{}',
+          },
+          {
+            id: 'o5',
+            type: 'function_call_output',
+            status: 'completed',
+            callId: 'c5',
+            output: 'matches',
+          },
+        ],
+      }),
+    );
+
+    const lifecycle = events.filter((e) => /tool_call_(started|completed)$/.test(e.type));
+    expect(
+      lifecycle.map((e) => [
+        e.type.split(':')[1],
+        e.data.output,
+      ]),
+    ).toEqual([
+      [
+        'tool_call_started',
+        undefined,
+      ],
+      [
+        'tool_call_completed',
+        'matches',
+      ],
+    ]);
+  });
+
   it("leaves a call to one of the step's bridged tools to the bridge", () => {
     const { bridge, events } = bridgeCtx(STEP);
     bridge.nameToolCalls((title) => (title === 'mcp__noetic__echo' ? 'echo' : undefined));

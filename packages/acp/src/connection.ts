@@ -374,6 +374,13 @@ class AcpSessionImpl implements AcpSession {
     send: () => Promise<acp.PromptResponse | undefined>,
   ): Promise<AcpTurnResult | undefined> {
     const accumulator = new AcpTurnAccumulator();
+    // Cancelled before it started: the agent is never asked, as one asked
+    // and then cancelled would answer.
+    if (signal?.aborted) {
+      return accumulator.result({
+        stopReason: 'cancelled',
+      });
+    }
     this.activeTurn = accumulator;
     const opts = {
       signal,

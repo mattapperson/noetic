@@ -885,12 +885,19 @@ step's. The `AcpEventBridge` translates each variant into the same
 | `agent_thought_chunk` | `response.reasoning.delta` |
 | `tool_call` | `response.output_item.added` (function_call) + `response.function_call_arguments.delta`/`.done` + `response.output_item.done` |
 | `tool_call` of the agent's own tool | also the framework `tool_call_started` `{ name, callId }`, as the `callModel` tool loop emits it |
-| `tool_call` / `tool_call_update` that reports the call `completed` or `failed` | the framework `tool_call_completed` `{ name, callId, error }`, once per call |
+| `tool_call` / `tool_call_update` that reports the call `completed` or `failed` | the framework `tool_call_completed` `{ name, callId, error, output? }`, once per call; `output` is the text its content carries |
 | every other variant — `user_message_chunk`, `plan`, `available_commands_update`, `current_mode_update`, `config_option_update`, `session_info_update`, `usage_update`, … | nothing: session state the runtime tracks on the live session, not output |
 
 As a result `getTextStream()`, `getReasoningStream()`, `getItemStream()`, and
 `getFullStream()` all surface ACP output, and a host sees exactly the events a
-`callModel` step emits: nothing on the stream names the protocol. A call to
+`callModel` step emits: nothing on the stream names the protocol, and event
+data names the step, never the adapter. Each call item ends
+(`response.output_item.done`) carrying the whole call — its name and
+arguments — before its `tool_call_started`. Every call that starts also
+completes before the turn's `response.completed`: one the agent never reported
+finished when its turn ends — normally, cancelled, or failed — completes
+failed, and a call the agent reported only in its turn result gets its whole
+lifecycle then, with the output the result recorded. A call to
 one of the step's own Noetic tools is reported once, by the tool bridge
 (spec 38), never again from the agent's `tool_call`.
 
@@ -902,23 +909,27 @@ being rejected; it emits nothing. The turn accumulator ignores variants with
 no transcript content, except the draft plan updates: a `plan_update` with
 `items` replaces the plan snapshot and `plan_removed` clears it.
 
-**Turn metadata.** A finished turn records on `ctx.lastStepMeta` the same
-fields a `callModel` step does:
+**Turn metadata.** The turn a step accepts records on `ctx.lastStepMeta` the
+same fields a `callModel` step does, once its outcome is settled (after its
+`afterModelCall` layers), so a refused, cancelled or retried turn publishes
+none; every attempt's spend is charged all the same:
 
-- `stopReason` — why the agent stopped (`end_turn`, `max_tokens`,
-  `max_turn_requests`, `refusal`, `cancelled`). A token or turn cap returns
-  normally; this is how a caller tells a truncated turn from a complete one.
-- `usage` — the turn's tokens as `RoundUsage`, charged to the run's token and
-  cost totals like a model call's. An adapter that supplies the turn's usage
-  (`AcpTurnResult.usage`) wins; otherwise the `usage` the `session/prompt`
-  answer reports is the turn's: its input and output tokens, cache reads as
-  `cachedTokens` and cache writes as `cacheWriteTokens`.
+- `stopReason` — `end_turn`, `max_tokens` or `max_turn_requests`. A token or
+  turn cap returns normally; this is how a caller tells a truncated turn from
+  a complete one. A refusal or a cancellation is an error, not metadata.
+- `usage` — the turn's tokens as `RoundUsage`, when the adapter supplies them
+  (`AcpTurnResult.usage`), charged to the run's token and cost totals like a
+  model call's. The `usage` a `session/prompt` answer reports is the session's
+  running total, not the turn's, so it is never charged.
 - `model` — the model the turn ran with: the current value of the session's
-  `model` config option, when the agent advertises one.
+  `model` config option (found by category, else by id, as the session finds
+  it to set it), else the model the step selected.
 
 `usage_update` (`{ used, size }`) is the session's context-window occupancy,
 not billed tokens, and never becomes usage or cost. The turn's
-`response.completed` carries only its `stopReason`.
+`response.completed` carries only its `stopReason`. A turn whose signal is
+already aborted when it would start is never sent to the agent: it ends
+`cancelled` at once.
 
 **Replay is not output.** While `session/load` runs — for an explicit
 `session.load` or for the resume of an earlier attempt's session — every update

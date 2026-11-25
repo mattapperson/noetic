@@ -29,7 +29,7 @@ import { toStep } from '../builders/sequence';
 import { runEvery } from '../connections/settle';
 import { pendingTasksOf, resumableWaitsOf } from '../interpreter/connection-steps';
 import { turnEndingIn } from '../interpreter/turn-ending';
-import { AcpSessionStore } from '../runtime/acp-session-store';
+import { acpSessionsOf } from '../runtime/acp-session-store';
 import { emitFrameworkEvent } from '../runtime/broadcaster-utils';
 import { stubOf } from '../runtime/durable/step-ledger';
 import type { HeldAnswerRequest } from '../runtime/held-calls';
@@ -533,12 +533,6 @@ export class AgentHarness<
   private readonly stopRecording = new Map<string, () => void>();
   /** Threads named by a host-built context's own id, dropped when its run ends. */
   private readonly ownThreads = new Set<string>();
-  /**
-   * @internal Live agent connections. Reached by the interpreter via
-   * `frameworkCast`; a host interrupts a turn with {@link abort} and releases
-   * every connection with {@link close}.
-   */
-  readonly acpSessions = new AcpSessionStore();
   /** @internal Graceful stops in progress; the interpreter and model loop hold on them. */
   readonly drains = new Drains();
   /** Where binary content is stored: `environment.artifacts`, else an in-memory store. */
@@ -802,7 +796,7 @@ export class AgentHarness<
         ...this.outputs.values(),
       ].map((output) => () => output.flush()),
       () => this.#connections.close(),
-      () => this.acpSessions.closeAll(),
+      () => acpSessionsOf(this).closeAll(),
     ]);
   }
 
@@ -2823,7 +2817,7 @@ export class AgentHarness<
       if (entry.depth <= 0) {
         this.liveRoots.delete(ctx.id);
         this.channelStore.closeExecution(ctx.id);
-        await this.acpSessions.closeOwnedBy(ctx.id);
+        await acpSessionsOf(this).closeOwnedBy(ctx.id);
         if (entry.failed) {
           // A failed run keeps its pool leases, unrenewed, so a resume within the
           // reclaim window gets the same connections back and an abandoned one

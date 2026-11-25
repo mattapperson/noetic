@@ -14,6 +14,7 @@ import { runCode, step } from '../../src/builders/step-builders';
 import { connection } from '../../src/connections/handle';
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import { acpSessionsOf } from '../../src/runtime/acp-session-store';
 import { until } from '../../src/until/predicates';
 import { harnessInternal } from '../../src/util/harness-internals';
 import { makeLayer } from '../_helpers';
@@ -609,7 +610,7 @@ describe('closing the harness', () => {
       throw new Error('registry close failed');
     };
     let acpClosed = false;
-    harness.acpSessions.closeAll = async () => {
+    acpSessionsOf(harness).closeAll = async () => {
       acpClosed = true;
     };
     const e = await rejected(harness.close());

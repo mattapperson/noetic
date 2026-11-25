@@ -20,10 +20,12 @@ import type {
   AcpClientActivity,
   AcpClientMethod,
   AcpSessionNotification,
+  AcpToolCallContent,
   AcpTurnResult,
   AgentScope,
   Context,
   ContextData,
+  FunctionCallItem,
   Item,
   StepAcpAgent,
 } from '@noetic-tools/types';
@@ -124,6 +126,23 @@ function announcedState(update: AcpChildUpdate['update']): {
 }
 
 type SessionUpdate = AcpSessionNotification['update'];
+
+/** The output of a call the agent never reported finished before its turn ended. */
+const UNFINISHED_OUTPUT = 'The agent ended its turn before this call finished.';
+
+/** The text a tool call's content carries, when it carries any. */
+function contentText(
+  content: ReadonlyArray<AcpToolCallContent> | null | undefined,
+): string | undefined {
+  const texts = (content ?? []).flatMap((entry) =>
+    entry.type === 'content' && entry.content.type === 'text'
+      ? [
+          entry.content.text,
+        ]
+      : [],
+  );
+  return texts.length > 0 ? texts.join('\n') : undefined;
+}
 
 /** What a step did through the host's fs or shell adapters, as `workspace_access` names it. */
 const OPERATION_OF: Readonly<Record<AcpClientMethod, string>> = {
@@ -342,6 +361,7 @@ export class AcpEventBridge {
       return;
     }
     this.closeMessage();
+    this.settleOpenCalls();
     this.start();
     this.sdk('response.completed', {
       stopReason,
@@ -473,9 +493,10 @@ export class AcpEventBridge {
     this.closeMessage();
     for (const item of result.items) {
       if (isFunctionCall(item) && !this.announcedToolCalls.has(item.callId)) {
-        this.emitToolCall(item.callId, item.name, item.arguments);
+        this.synthesizeToolCall(item, result.items);
       }
     }
+    this.settleOpenCalls();
     if (!this.completed) {
       this.start();
       this.sdk('response.completed', {
@@ -496,6 +517,7 @@ export class AcpEventBridge {
     }
     this.closeChildren('cancelled');
     this.closeMessage();
+    this.settleOpenCalls();
     this.start();
     this.sdk('response.completed', {
       stopReason: 'error',
@@ -523,12 +545,62 @@ export class AcpEventBridge {
     if (!this.ownToolNames.has(update.toolCallId)) {
       return;
     }
+    const output = contentText(update.content);
     this.framework('tool_call_completed', {
       name: this.ownToolNames.get(update.toolCallId) ?? update.title ?? update.toolCallId,
       callId: update.toolCallId,
       error: update.status === 'failed',
+      ...(output === undefined
+        ? {}
+        : {
+            output,
+          }),
     });
     this.ownToolNames.delete(update.toolCallId);
+  }
+
+  /**
+   * The turn is over: a call the agent never reported finished is settled
+   * failed, so no consumer is left with a call that started and never ended.
+   */
+  private settleOpenCalls(): void {
+    for (const [callId, name] of this.ownToolNames) {
+      this.framework('tool_call_completed', {
+        name,
+        callId,
+        error: true,
+        output: UNFINISHED_OUTPUT,
+      });
+    }
+    this.ownToolNames.clear();
+  }
+
+  /**
+   * A call the agent reported only in its result: its item, then the
+   * lifecycle the stream never saw, with the output the result recorded.
+   */
+  private synthesizeToolCall(item: FunctionCallItem, items: ReadonlyArray<Item>): void {
+    this.emitToolCall(item.callId, item.name, item.arguments);
+    if (this.toolNameOf(item.name)) {
+      return;
+    }
+    const output = items.find(
+      (candidate) => candidate.type === 'function_call_output' && candidate.callId === item.callId,
+    );
+    this.framework('tool_call_started', {
+      name: item.name,
+      callId: item.callId,
+    });
+    this.framework('tool_call_completed', {
+      name: item.name,
+      callId: item.callId,
+      error: false,
+      ...(output?.type === 'function_call_output' && typeof output.output === 'string'
+        ? {
+            output: output.output,
+          }
+        : {}),
+    });
   }
 
   /**
@@ -567,17 +639,12 @@ export class AcpEventBridge {
     if (!this.broadcaster) {
       return;
     }
-    // A nested agent is named by its scope alone; the adapter's id is the step's.
-    const data = this.scope
-      ? {
-          stepId: this.stepId,
-          ...payload,
-        }
-      : {
-          stepId: this.stepId,
-          agentId: this.agentId,
-          ...payload,
-        };
+    // Named by its step (and a nested agent by its scope): which adapter runs
+    // the agent is the workflow's business, not the host's.
+    const data = {
+      stepId: this.stepId,
+      ...payload,
+    };
     if (!shouldEmit(this.emitOption, eventType, data)) {
       return;
     }
@@ -687,7 +754,22 @@ export class AcpEventBridge {
       },
       index,
     );
-    this.sdk('response.output_item.done', {}, index);
+    // The finished call item, as a model's stream ends one: what a consumer
+    // reads the call's arguments from.
+    this.sdk(
+      'response.output_item.done',
+      {
+        item: {
+          id: toolCallId,
+          type: 'function_call',
+          status: 'completed',
+          callId: toolCallId,
+          name,
+          arguments: args,
+        },
+      },
+      index,
+    );
     this.announcedToolCalls.add(toolCallId);
   }
 

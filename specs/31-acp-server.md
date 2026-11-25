@@ -206,15 +206,11 @@ as fallback for aborts that carry none):
 
 | Turn outcome | `stopReason` |
 |---|---|
-| `turn_completed` | `end_turn` |
+| `turn_completed` | `end_turn`, or the cap the turn's last response stopped at (`max_tokens`, `max_turn_requests`) when it returned after one |
 | `turn_aborted` with `errorKind: 'cancelled'` (or after `session/cancel`) | `cancelled` |
 | `turn_aborted` with `errorKind: 'model_refused'` | `refusal` |
 | `turn_aborted` with `errorKind: 'budget_exceeded'` | `max_tokens` |
 | any other turn error | JSON-RPC error on the `session/prompt` request |
-
-The wire's `max_turn_requests` has no core analogue to map from — core has no
-turn-request-limit error kind — so it stays unproduced (see Future
-Considerations).
 
 **A turn always closes its bracket**, same rule as the client direction: every
 accepted prompt eventually resolves or rejects, including when the harness
@@ -457,10 +453,6 @@ usage accounting, the event stream, and durability. If the server needs a
 capability, the harness contract grows it publicly first.
 
 ## Future Considerations
-
-- **`max_turn_requests`** — the wire defines it, but core has no
-  turn-request-limit error kind to map from; when one exists, the pump's
-  errorKind table grows a row.
 
 - **Protocol v2 / library bump.** Upstream's draft second revision restructures
   the turn (`session/prompt` acks immediately; completion flows through

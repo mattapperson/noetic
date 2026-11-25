@@ -273,7 +273,7 @@ describe('executeAcpAgent', () => {
     expect(ctx.lastStepMeta.model).toBe('opus');
   });
 
-  it('charges the usage the agent reported when its adapter supplied none', async () => {
+  it('never charges the session totals an agent reports with its answer', async () => {
     const { ctx } = harnessCtx();
     await execute(
       step.acpAgent({
@@ -284,7 +284,6 @@ describe('executeAcpAgent', () => {
             inputTokens: 7,
             outputTokens: 3,
             totalTokens: 12,
-            cachedReadTokens: 2,
           },
         }),
         prompt: 'go',
@@ -293,14 +292,45 @@ describe('executeAcpAgent', () => {
       ctx,
     );
     assert(ctx.lastStepMeta);
-    expect(ctx.lastStepMeta.usage).toEqual({
-      inputTokens: 7,
-      outputTokens: 3,
-      cachedTokens: 2,
-    });
-    expect(ctx.tokens.input).toBe(7);
-    expect(ctx.tokens.output).toBe(3);
-    expect(ctx.lastStepMeta.model).toBeUndefined();
+    expect(ctx.lastStepMeta.usage).toBeUndefined();
+    expect(ctx.tokens.total).toBe(0);
+  });
+
+  it('records no step metadata for a refused turn', async () => {
+    const { ctx } = harnessCtx();
+    const error = await execute(
+      step.acpAgent({
+        id: 'refused',
+        agent: fakeAgent({
+          stopReason: 'refusal',
+        }),
+        prompt: 'go',
+      }),
+      undefined,
+      ctx,
+    ).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeDefined();
+    expect(ctx.lastStepMeta?.stopReason).toBeUndefined();
+    // Its spend is charged all the same, as a model call's is.
+    expect(ctx.tokens.total).toBe(15);
+  });
+
+  it('records the model the step selected when the agent has no model option', async () => {
+    const { ctx } = harnessCtx();
+    await execute(
+      step.acpAgent({
+        id: 'picked',
+        agent: fakeAgent(),
+        prompt: 'go',
+        model: 'sonnet',
+      }),
+      undefined,
+      ctx,
+    );
+    expect(ctx.lastStepMeta?.model).toBe('sonnet');
   });
 
   it('parses structured output through the step schema', async () => {
@@ -557,11 +587,9 @@ describe('executeAcpAgent — session lifecycle', () => {
 
     await harness.run(acpStep, undefined, harness.createContext());
     expect(closes).toBe(0);
-    expect(harness.acpSessions.held().length).toBe(1);
 
     await harness.close();
     expect(closes).toBe(1);
-    expect(harness.acpSessions.held().length).toBe(0);
   });
 
   it('closeAcpSessions is idempotent', async () => {
@@ -880,63 +908,54 @@ describe('executeAcpAgent — a session shared across steps', () => {
 });
 
 describe('AgentHarness — the agents it holds', () => {
-  it("files a kept session under a scoped handle, with the step's reuse key", async () => {
+  it('shares a kept session under its reuse key and closes it with the harness', async () => {
     const { harness } = harnessCtx();
+    let connects = 0;
+    let closes = 0;
+    const agent = fakeAgent({
+      onConnect: () => {
+        connects++;
+      },
+      onClose: () => {
+        closes++;
+      },
+    });
+    const mk = (id: string) =>
+      step.acpAgent({
+        id,
+        agent,
+        prompt: 'go',
+        session: {
+          reuse: 'live-key',
+          keepAlive: 'harness',
+        },
+      });
+
+    await harness.run(mk('first'), undefined, harness.createContext());
+    await harness.run(mk('second'), undefined, harness.createContext());
+    expect(connects).toBe(1);
+    expect(closes).toBe(0);
+
+    await harness.close();
+    expect(closes).toBe(1);
+  });
+
+  it('closes a step-scoped session with its step', async () => {
+    const { harness } = harnessCtx();
+    let closes = 0;
     const acpStep = step.acpAgent({
-      id: 'live',
+      id: 'ephemeral',
       agent: fakeAgent({
-        agentId: 'claude-code',
-        modes: {
-          currentModeId: 'plan',
-          availableModes: [
-            {
-              id: 'plan',
-              name: 'Plan',
-              description: null,
-            },
-            {
-              id: 'code',
-              name: 'Code',
-              description: null,
-            },
-          ],
+        onClose: () => {
+          closes++;
         },
       }),
       prompt: 'go',
-      session: {
-        reuse: 'live-key',
-        keepAlive: 'harness',
-      },
     });
 
     await harness.run(acpStep, undefined, harness.createContext());
 
-    const sessions = harness.acpSessions.held();
-    expect(sessions).toHaveLength(1);
-    const info = sessions[0];
-    assert(info);
-    // `key` is an opaque handle (scoped so concurrent runs cannot collide);
-    // the step's own key is kept separately.
-    expect(info.reuseKey).toBe('live-key');
-    expect(info.key).toContain('live-key');
-    expect(info.live.agentId).toBe('claude-code');
-    expect(info.live.keepAlive).toBe('harness');
-
-    await harness.close();
-    expect(harness.acpSessions.held()).toHaveLength(0);
-  });
-
-  it('reports nothing once sessions are collected', async () => {
-    const { harness } = harnessCtx();
-    const acpStep = step.acpAgent({
-      id: 'ephemeral',
-      agent: fakeAgent(),
-      prompt: 'go',
-    });
-
-    await harness.run(acpStep, undefined, harness.createContext());
-
-    expect(harness.acpSessions.held()).toHaveLength(0);
+    expect(closes).toBe(1);
   });
 });
 
@@ -973,7 +992,7 @@ describe('executeAcpAgent — session store correctness', () => {
       return;
     }
     // Held for the owner — but reachable, which is the whole point.
-    expect(harness.acpSessions.held()).toHaveLength(1);
+    expect(closes).toBe(0);
     await harness.close();
     expect(closes).toBe(1);
   });
@@ -1059,7 +1078,6 @@ describe('executeAcpAgent — session store correctness', () => {
 
     expect(connects).toBe(1);
     expect(closes).toBe(1);
-    expect(harness.acpSessions.held()).toHaveLength(0);
   });
 });
 

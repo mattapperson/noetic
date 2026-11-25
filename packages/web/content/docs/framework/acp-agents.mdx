@@ -511,7 +511,9 @@ for await (const chunk of harness.getTextStream()) {
 
 These are the same events a `callModel` step emits, so nothing you consume names the protocol. A call to one of the step's own `tools` is reported once, by the tool bridge.
 
-**Turn metadata.** Like a `callModel` step, a finished turn records `ctx.lastStepMeta.stopReason` (`end_turn`, `max_tokens`, `max_turn_requests`, …), `usage` and `model` (the agent's current `model` option). A token or turn cap returns normally; `stopReason` is how you tell a truncated turn from a complete one. The usage an agent reports with its answer is charged as the turn's when the adapter supplies none. A `usage_update` (Codex sends `{ used, size }`) is how full the agent's context window is, not tokens you were billed for, so it never becomes usage or cost.
+Every call that starts also completes before the turn closes — a call the agent never reported finished completes failed.
+
+**Turn metadata.** Like a `callModel` step, the turn a step accepts records `ctx.lastStepMeta.stopReason` (`end_turn`, `max_tokens` or `max_turn_requests`), `usage` (when the adapter supplies it) and `model` (the agent's current `model` option, else the one the step selected). A token or turn cap returns normally; `stopReason` is how you tell a truncated turn from a complete one. The usage an agent reports with its answer is the session's running total, so it is never charged. A `usage_update` (Codex sends `{ used, size }`) is how full the agent's context window is, not tokens you were billed for, so it never becomes usage or cost.
 
 **Loaded history.** When a step loads a session — `session.load`, or a resume after the host died — the agent replays the old conversation first. None of it reaches the event stream; it never appears as new text, reasoning, or tool calls.
 

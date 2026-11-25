@@ -249,6 +249,43 @@ describe('pumpTurnEvents', () => {
   });
 });
 
+describe('capped turns', () => {
+  it('ends a turn whose last response stopped at a cap with that cap', async () => {
+    const { outcome } = await pump([
+      START,
+      sdk('response.completed', {
+        stopReason: 'max_turn_requests',
+      }),
+      fw('turn_completed', {
+        turnId: 't1',
+        durationMs: 1,
+      }),
+    ]);
+    expect(outcome).toEqual({
+      kind: 'stop',
+      stopReason: 'max_turn_requests',
+    });
+  });
+
+  it('a later response that answered in full ends the turn end_turn', async () => {
+    const { outcome } = await pump([
+      START,
+      sdk('response.completed', {
+        stopReason: 'max_tokens',
+      }),
+      sdk('response.completed', {}),
+      fw('turn_completed', {
+        turnId: 't1',
+        durationMs: 1,
+      }),
+    ]);
+    expect(outcome).toEqual({
+      kind: 'stop',
+      stopReason: 'end_turn',
+    });
+  });
+});
+
 describe('budget stops', () => {
   it('maps errorKind budget_exceeded to the max_tokens stop reason', async () => {
     const { outcome } = await pump([
