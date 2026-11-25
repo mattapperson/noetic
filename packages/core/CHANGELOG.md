@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.5 (2026-11-25)
+
+* feat(acp): native host support for #96–#100, agents that outlive their host, and reattach (#167) ([3953c32](https://github.com/mattapperson/noetic/commit/3953c32)), closes [#100](https://github.com/mattapperson/noetic/issues/100) [#167](https://github.com/mattapperson/noetic/issues/167) [#156](https://github.com/mattapperson/noetic/issues/156)
+
 ## @noetic-tools/core-v5.22.0-next.4 (2026-11-25)
 
 * feat: Durable Object hosting — cut turns, turnOptions, per-turn tools, shared alarm (#166) ([2a3a0cd](https://github.com/mattapperson/noetic/commit/2a3a0cd)), closes [#166](https://github.com/mattapperson/noetic/issues/166)
