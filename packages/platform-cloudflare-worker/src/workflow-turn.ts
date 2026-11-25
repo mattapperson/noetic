@@ -80,6 +80,8 @@ interface TurnRun {
   parked?: {
     wakeAt?: number;
   };
+  /** Set when the run was cut because another harness took the turn. */
+  lostLease?: boolean;
   gone?: boolean;
 }
 
@@ -128,11 +130,23 @@ async function answerOf(harness: TurnHarness, threadId: string): Promise<TurnRun
   const response = await harness.getAgentResponse({
     threadId,
   });
+  // A cut turn waits for its back-off as a parked one waits for its deadline
+  // (spec 23 § Cut turns).
+  const parked = response.cut
+    ? {
+        wakeAt: response.cut.wakeAt,
+      }
+    : response.parked;
   return {
     text: response.text,
-    ...(response.parked
+    ...(parked
       ? {
-          parked: response.parked,
+          parked,
+        }
+      : {}),
+    ...(response.cut?.reason === 'lease_lost'
+      ? {
+          lostLease: true,
         }
       : {}),
   };
@@ -148,7 +162,7 @@ async function firstRun(options: RunTurnOptions): Promise<TurnRun> {
   return answerOf(options.harness, threadId);
 }
 
-async function wokenRun(options: RunTurnOptions): Promise<TurnRun> {
+async function wokenRun(options: RunTurnOptions, previous: TurnRun): Promise<TurnRun> {
   const { threadId } = options.turn;
   const woken = await options.harness.wake({
     threadId,
@@ -167,6 +181,11 @@ async function wokenRun(options: RunTurnOptions): Promise<TurnRun> {
     }).kind !== 'idle';
   if (running) {
     return answerOf(options.harness, threadId);
+  }
+  // The harness that took the turn may have finished it: delivering the message
+  // again gets its recorded answer, or resumes the turn if it was left cut off.
+  if (previous.lostLease) {
+    return firstRun(options);
   }
   return {
     text: '',
@@ -228,7 +247,8 @@ export async function runTurn(options: RunTurnOptions): Promise<TurnOutcome> {
   let run = await step.do('turn-0', () => firstRun(options));
   for (let n = 1; run.parked; n += 1) {
     await sleep(step, `wait-${n}`, waitFor(run, options));
-    run = await step.do(`turn-${n}`, () => wokenRun(options));
+    const previous = run;
+    run = await step.do(`turn-${n}`, () => wokenRun(options, previous));
   }
   return {
     text: run.text,

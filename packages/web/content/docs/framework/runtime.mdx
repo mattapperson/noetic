@@ -137,7 +137,7 @@ await harness.execute('follow-up', { threadId: 'thread-1' });
 | Parameter | Type | Description |
 |---|---|---|
 | `input` | `string \| Item \| Item[]` | The input to the agent. |
-| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, `state`, `contextLayers`, `connections`, `deliveryMode`, `messageId`. `connections` attaches connections for this turn only: connected when it starts, released when it ends (see [Attaching](/docs/framework/connections#attaching-at-the-harness-a-turn-or-a-step)). |
+| `options` | `ExecuteOptions` | Optional `threadId`, `resourceId`, `state`, `contextLayers`, `connections`, `tools`, `deliveryMode`, `messageId`. `tools` are offered to this turn only, ahead of the harness's own: one with a name already offered replaces it. `connections` attaches connections for this turn only: connected when it starts, released when it ends (see [Attaching](/docs/framework/connections#attaching-at-the-harness-a-turn-or-a-step)). |
 
 Rejects with `NoeticConfigError` code `NO_STEP_CONFIGURED` if no `agentGraph` was provided in the constructor.
 
@@ -357,7 +357,7 @@ When the harness is constructed with a durable `environment.storage.adapter` (an
 |---|---|
 | `checkpoint(ctx)` | Snapshot execution state (frontier, layer states, cwd, channels, state, usage, and the run's item-log baseline) through the checkpoint store. Fires automatically at run start, after every step, after `runAppendPipeline`, and when a run finishes. Keyed by `ctx.id`; idempotent. |
 | `restore(executionId, opts?)` | Rebuild a `Context` from a previously saved snapshot and step ledger, standing where the interrupted run began; run the same step on the same input to resume. Returns `null` when neither exists. Throws `NoeticConfigError` with `code: 'CHECKPOINT_SCHEMA_MISMATCH'` when the persisted `schemaVersion` is unrecognised. `opts` is a `RestoreContextOptions` (`parent` / `rollUpUsage` / `state` / `contextLayers`) carrying back the host wiring a snapshot cannot serialise — see [Restoring a decorated context](/docs/framework/durability#restoring-a-decorated-context). |
-| `getNextWakeTime()` | The earliest time the harness has something to do: a [parked turn](/docs/framework/durability#parked-turns)'s deadline or the next `cron()` tick. `undefined` when there is neither. |
+| `getNextWakeTime()` | The earliest time the harness has something to do: a [parked turn](/docs/framework/durability#parked-turns)'s deadline, a cut turn's back-off, or the next `cron()` tick. `undefined` when there is none. |
 | `onWakeTimeChange(listener)` | Call `listener` with `getNextWakeTime()` whenever it changes, first when the harness starts. Returns a function that stops it. A parking turn waits for the listener before it answers. |
 | `waitForIdle()` | Resolves once every scheduled event that is due has been read and every turn has finished or parked. A serverless host awaits it before it lets its process go. |
 | `listStuckRuns()` | List the turns that stopped with `turn_stuck` rather than redo a recorded effect under a newer [flow version](/docs/framework/durability#flow-versions). |

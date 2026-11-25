@@ -245,6 +245,30 @@ export interface RecordedToolCall {
   readonly settled: boolean;
 }
 
+/**
+ * @public
+ * A thread's turn as storage holds it, when a wake is about to run it again
+ * (spec 23 § Parked turns): what `AgentHarnessOpts.turnOptions` is asked about.
+ */
+export interface StoredTurn {
+  readonly threadId: string;
+  readonly executionId: string;
+  /** The ids of the messages the turn delivers, in order. */
+  readonly messageIds: ReadonlyArray<string>;
+  /** The flow version the turn last ran under, when the harness names one. */
+  readonly version?: string;
+  /** Set while the turn is parked. */
+  readonly parked?: {
+    readonly until?: number;
+  };
+  /** Set while the turn is cut (spec 23 § Cut turns). */
+  readonly cut?: {
+    readonly reason: string;
+    readonly count: number;
+    readonly at: number;
+  };
+}
+
 /** @public A turn that stopped rather than redo a recorded effect (spec 23 § Versions). */
 export interface StuckTurn {
   readonly threadId: string;

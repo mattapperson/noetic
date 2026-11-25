@@ -48,9 +48,9 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `connection_resume_refused` | `connection`, `reason` | A resumed run's connection was replaced and cannot safely be driven again. |
 | `decision_refused` | `threadId`, `action`, `reason` | A decision passed to `harness.execute()` does not fit what the thread is waiting on: no turn is stuck, it carries both an `action` and an `output`, or its action is the wrong kind for the decision. |
 | `hold_refused` | `callId`, `reason` | `harness.execute()` could not take a decision for a [held tool call](/docs/framework/steps/invoke-tool#human-in-the-loop-approval). |
-| `lease_lost` | `executionId`, `term`, `reason` | Another harness holds or took this thread's turn. See [one writer per turn](/docs/framework/durability#one-writer-per-turn). |
+| `lease_lost` | `executionId`, `term`, `reason` | Another harness holds or took this thread's turn. See [one writer per turn](/docs/framework/durability#one-writer-per-turn). A turn this stops mid-run is cut, not failed: its response resolves with `cut`. |
 | `turn_stuck` | `executionId`, `path`, `from`, `to` | A turn resumed under a newer flow version would have to redo a step that already had a lasting effect, so it stopped. See [flow versions](/docs/framework/durability#flow-versions). |
-| `ledger_write_failed` | `executionId`, `path`, `cause` | Under a turn lease, a durable record could not be written, so the turn stopped. Also thrown by `harness.forget()` when a spend record (`path` `spend:<id>`) could not be settled; nothing was deleted. |
+| `ledger_write_failed` | `executionId`, `path`, `cause` | Under a turn lease, a durable record could not be written, so the turn stopped. It is cut and runs again after a back-off; only once it has been cut `lease.cut.attempts` times does it fail with this error. Also thrown by `harness.forget()` when a spend record (`path` `spend:<id>`) could not be settled; nothing was deleted. |
 | `verify_act_failed` | `stepId`, `cause: Error`, `run?: BlobRef` | A `step.verify`'s `act` threw. The verification run is recorded first, with the failure as evidence, and `run` points at it. |
 
 ### Full Type Definition

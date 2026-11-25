@@ -344,6 +344,16 @@ const harness = new AgentHarness({
 - **Taking over.** A harness that finds the turn held waits for the lease to run out, up to `waitMs` (default: one `ttlMs`). A holder that died stops renewing, so a restarted host picks its turn up without retrying. If the turn is still held after the wait, `getAgentResponse()` rejects with `lease_lost`.
 - **Being replaced.** A harness that stalled past its lease and came back finds a newer writer's term on its next ledger write, stops with `lease_lost`, and does not make another paid call.
 - **Failed writes stop the turn.** Under a lease, a ledger entry that cannot be written raises `ledger_write_failed` instead of a warning, so a turn never runs on with work a resume could not replay.
+- **A stopped turn is cut, not failed.** Everything before a `ledger_write_failed` stop is on record, so the turn runs again from there. `getAgentResponse()` resolves with `cut: { reason, attempt, wakeAt }` (event `{name}:turn_cut`), the turn stays on record, and `getNextWakeTime()` and a routine `wake()` bring it back after a back-off: 1 s, doubling each time, at most 60 s. After 3 cuts the next one fails the turn as before. Tune it with `lease: { cut: { attempts, delayMs, maxDelayMs } }`; `attempts: 0` turns it off.
+- **A replaced harness is told so.** On `lease_lost` while the other holder still runs the turn, the response is `cut` with `reason: 'lease_lost'` and `wakeAt` when that holder's lease runs out; this harness writes and counts nothing. If the other holder already finished it, the response rejects with `lease_lost` as before.
+- **Name the holder after a stable identity.** Each harness needs its own `holder`; the default is a random id. A host with a stable identity that runs once at a time, such as a Cloudflare Durable Object, passes that identity (`ctx.id.toString()`): coming back after its process died, it takes its own leases over at once rather than waiting one `ttlMs`.
+
+```ts validate=none
+const response = await harness.getAgentResponse({ threadId });
+if (response.cut) {
+  // Not failed: a wake at response.cut.wakeAt runs it again from its record.
+}
+```
 
 `createFileStorage` and `createSqliteStorage` both implement `swap`. The in-memory adapter leaves it out unless you pass `createInMemoryStorage({ swap: true })`, which is for tests that put two harnesses on one storage. Storage without `swap` behaves as before.
 
@@ -392,7 +402,19 @@ const stop = harness.onWakeTimeChange((at) => setMyAlarm(at)); // told whenever 
 - **What a woken turn does.** It replays its ledger, so finished model calls are not made again, and listens from the recorded cursor until the original deadline. With nothing to receive it parks again; past the deadline the wait fails as it would have live.
 - **Who wakes it.** The harness that parked it, by default: it keeps a timer for the deadline and a listener for the event, and resumes the turn when either fires. A long-lived process only calls `wake()` once at boot, which also picks up the parked turns an earlier process left. Where no process lives between requests, set `park: { autoWake: false }` and call `wake()` from an alarm you set in `onWakeTimeChange()`, and `wake({ threadId })` when an event arrives. A parking turn waits for that listener before it answers, and fails its response if the listener throws, so a turn never looks parked with no alarm behind it. The listener does not turn the harness's own timer off; that is still `autoWake`.
 - **A watcher cannot run your `filter`.** It wakes on any event of the awaited type; a turn whose filter turns the event down parks again. Each event wakes it at most once.
-- **Requirements.** Storage with [`swap`](#one-writer-per-turn), and a connection defined on the harness: a woken turn does not keep the connections one `execute()` call passed.
+- **Options for a woken turn.** A stored turn keeps no `execute()` options: tools, layers and connections are live objects. A wake with none asks `turnOptions(turn)` on the harness, with `turn` the stored turn (`threadId`, `executionId`, `messageIds`, `parked`, `cut`), so a host that passes per-turn options rebuilds them there:
+
+```ts validate=none
+const harness = new AgentHarness({
+  // …
+  turnOptions: async ({ threadId }) => ({
+    tools: await toolsFor(threadId),
+    connections: await connectorsFor(threadId), // with fresh credentials
+  }),
+});
+```
+
+- **Requirements.** Storage with [`swap`](#one-writer-per-turn). A connection a woken turn waits on comes from the harness, or from `turnOptions`.
 
 Pass `now` to the harness to drive the clock yourself; wait deadlines, leases and wake times all read it.
 

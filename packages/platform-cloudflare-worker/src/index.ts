@@ -13,10 +13,16 @@
  */
 
 export {
+  type AlarmSchedule,
   type AlarmStorageLike,
   type AlarmWake,
   type AlarmWakeOptions,
   alarmWake,
+  type DurableObjectStateLike,
+  durableObjectHolder,
+  type SharedAlarm,
+  type SharedAlarmStorageLike,
+  sharedAlarm,
   type WakeableHarness,
 } from './alarm-wake';
 export {

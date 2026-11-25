@@ -29,6 +29,28 @@ export type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
 
 //#region Harness Response
 
+/**
+ * @public
+ * Why a turn was cut (spec 23 § Cut turns): another harness took its lease, or a
+ * durable write failed. Everything before the stop is on record.
+ */
+export type TurnCutReason = 'lease_lost' | 'ledger_write_failed';
+
+/** @public A turn that was cut rather than failed: a later wake runs it again from its record. */
+export interface TurnCut {
+  readonly reason: TurnCutReason;
+  /**
+   * How many times a failed write has cut this turn, this one included. Absent for
+   * `lease_lost`: the turn is another holder's, and this harness counts nothing.
+   */
+  readonly attempt?: number;
+  /**
+   * Epoch ms from which a routine `harness.wake()` runs it again: after its back-off,
+   * or, for `lease_lost`, once the other holder's lease runs out.
+   */
+  readonly wakeAt: number;
+}
+
 /** @public Final accumulated result of an execution, including all items, usage, cost, and extracted text.
  *
  *  Returned from `AgentHarness.getAgentResponse()`. Resolves once the session's
@@ -66,6 +88,12 @@ export interface HarnessResponse<TItem = Item> {
     /** Absent when nothing the turn waits on has a deadline, such as a held tool call. */
     readonly wakeAt?: number;
   };
+  /**
+   * Set when the turn was cut instead of failing (spec 23 § Cut turns): its lease was
+   * lost or a durable write failed, and it runs again from its record at `wakeAt`.
+   * `text` is empty and `items` are those so far.
+   */
+  readonly cut?: TurnCut;
   /**
    * Set when the message was delivered before and its turn had already finished:
    * this is that turn's recorded answer, and nothing ran. `items` is the thread's

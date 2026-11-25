@@ -262,6 +262,7 @@ export type {
   AgentEnvironmentConfig,
   ParkConfig,
   StorageEnvironmentConfig,
+  TurnCutConfig,
   TurnLeaseConfig,
   WakeTimeListener,
 } from './harness/harness-options';
@@ -577,6 +578,8 @@ export type {
   SdkStreamEvent,
   StreamEvent,
   StreamingItem,
+  TurnCut,
+  TurnCutReason,
 } from '@noetic-tools/types';
 
 //#endregion
@@ -614,6 +617,7 @@ export type {
   RecordedToolCall,
   SessionScope,
   SessionUsage,
+  StoredTurn,
   StuckTurn,
   ToolHold,
   TrailMark,

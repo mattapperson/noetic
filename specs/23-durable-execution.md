@@ -136,6 +136,8 @@ Time decides only when a quiet holder may be replaced; the term decides whose wr
 
 Each harness needs its own `holder` name. The default is a random id; two harnesses given the same name would take each other's lease without waiting.
 
+That is what a host with a stable identity wants. A Cloudflare Durable Object runs one instance at a time, so it passes its own id (`ctx.id.toString()`) as `holder`: the object that comes back after its isolate died takes its threads' leases over at once, and `getNextWakeTime()` says a turn the dead isolate was running is due now, not one `ttlMs` later. The rule that comes with it: one holder name must drive a given thread from one place at a time. An object may build a harness per turn, since leases are per thread, but two harnesses of the same object must not run the same thread at once.
+
 `harness.run(step, input, ctx)` on a context the host built itself takes no lease; the host owns that execution's identity.
 
 Settings live under `environment.storage.lease`: `holder` (default: a random id per harness), `ttlMs`, `waitMs`, and `now`.
@@ -147,6 +149,21 @@ Under a lease, a durable write that fails stops the turn instead of being logged
 Without a lease the rule in § Failure handling stands: writes are best-effort.
 
 The ledger's retention caps (`23a-step-level-resume` § Retention) are a policy, not a failure. An entry dropped for size or count is still dropped, and its step runs again on resume.
+
+### Cut turns
+
+`lease_lost` and `ledger_write_failed` do not mean the turn is wrong. Everything before the stop is on record, and another run can go on from there: the turn is **cut**, not failed.
+
+- **The response.** `getAgentResponse()` resolves, rather than rejects, with `cut: { reason, attempt?, wakeAt }`, an empty `text` and the items so far. `reason` is the error kind, `attempt` counts the write-failure cuts of this turn (1 for the first; absent for `lease_lost`), and `wakeAt` is when a wake will run it again. The runner emits `{name}:turn_cut` with the same fields in place of `turn_aborted`.
+- **The record.** The turn is not marked `stopped`. Its record gains `cut: { reason, count, at }`, best-effort: storage that just refused a write may refuse this one too, so the harness also keeps the mark in memory for as long as it lives. Its checkpoint, ledger, held calls and pending entries stay.
+- **Messages.** Messages queued in the process for the thread are kept in storage, as for a park (§ A message for a parked thread), and a message that arrives while the turn is cut is set aside the same way. Re-delivering the turn's own message ids resumes it at once.
+- **Waking.** A cut turn is due `delay(count)` after it was cut: `delayMs * 2^(count - 1)`, at most `maxDelayMs`, and never before another holder's lease runs out. `getNextWakeTime()` reports that time and listeners hear it before the response resolves; a routine `wake()` leaves the turn alone until then and resumes it after, with `turnOptions` (§ Parked turns). The count belongs to the turn's messages, not its execution: a turn whose checkpoint could not be written resumes under a new execution id, and its cuts still count. It is cleared when the turn ends, parks or is dropped.
+- **Giving up.** The cut that would be number `attempts + 1` is not a cut: the turn fails as before, with the error, `turn_aborted`, and a `stopped` mark, so a routine wake leaves it alone. `attempts: 0` turns cutting off.
+- **A replaced harness.** For `lease_lost` the turn is another holder's, so this harness writes nothing to it, counts nothing, and leaves its own queue in the process: the messages queued behind the turn start the next turn here as they always did. The turn is cut only while the record still names its execution, with `wakeAt` when the other holder's lease runs out: should that holder die, the turn is a cut-off turn any wake resumes. When the record no longer names it (the other holder finished or replaced it), there is nothing to cut, and the response rejects with `lease_lost` as before. `attempts` does not apply.
+
+Settings live under `environment.storage.lease.cut`: `attempts` (default 3), `delayMs` (default 1 000) and `maxDelayMs` (default 60 000).
+
+`turn_stuck` is never a cut: running the turn again would stop at the same step.
 
 ## Parked turns
 
@@ -171,7 +188,7 @@ A parked turn is rows in storage and nothing else. It survives the process endin
 - `wake({ threadId })` resumes that thread's turn whether or not it is due. A host calls it when it knows the event a parked turn waits for has arrived.
 - A turn another harness holds, or one already running here, is left alone.
 - An answer to a held call that lands while the turn's harness still holds the lease cannot wake it. That harness checks for one as soon as it has parked and released, and wakes the turn itself.
-- `options` are the `execute()` options the turn runs with; a stored turn keeps none of its own, so a connection it waits on must be one the harness defines.
+- `options` are the `execute()` options the turn runs with. A stored turn keeps none of its own: options hold live objects (tools, layers, connections with their credentials) that storage cannot. When `wake()` is given none, the harness asks `AgentHarnessOpts.turnOptions(turn)` for them, with `turn` the stored turn (`{ threadId, executionId, messageIds, version?, parked?, cut? }`); with neither, it runs with none, so a connection it waits on must be one the harness defines. Auto-wake and a steer that wakes a parked turn use the options the turn ran with in this process, and the hook when the process has none.
 
 A woken turn replays its ledger, so no finished model call is made again, and its wait listens from the recorded cursor until the recorded deadline. If nothing has arrived it parks again, with the same `until`. If the deadline has passed, the wait fails as it would have live.
 
