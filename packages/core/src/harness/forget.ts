@@ -18,7 +18,13 @@ import { ExecutionPart, NoeticConfigError, NoeticErrorImpl } from '@noetic-tools
 import { poolLeasesOf } from '../connections/pool';
 import type { CheckpointStore } from '../runtime/durable/checkpoint-store';
 import type { ChildLink } from '../runtime/durable/child-links';
-import { ChildAdapterSource, ChildLinkSchema, runsInProcess } from '../runtime/durable/child-links';
+import {
+  adapterOfChild,
+  adaptersUsedBy,
+  ChildAdapterSource,
+  ChildLinkSchema,
+  runsInProcess,
+} from '../runtime/durable/child-links';
 import type { SessionRecord, SessionStore } from '../runtime/durable/session-store';
 import { SESSION_PREFIX, sessionKey } from '../runtime/durable/session-store';
 import type { SpendRecord } from '../runtime/durable/spend-log';
@@ -60,10 +66,8 @@ export interface ForgetHost {
   releaseConnections(executionId: string): Promise<void>;
   /** The harness's `environment.subprocess`. */
   readonly subprocess: SubprocessAdapter;
-  /** The out-of-process adapters this harness has dispatched a child through. */
-  adaptersUsed(): ReadonlyArray<SubprocessAdapter>;
-  /** The adapter this harness dispatched the child through, when it did. */
-  adapterOfChild(childId: string): SubprocessAdapter | undefined;
+  /** The harness itself: what it dispatched out of process is kept against it. */
+  readonly harness: object;
 }
 
 //#endregion
@@ -304,7 +308,7 @@ async function linksOf(
 
 /** The adapter that ran `child`, as far as this harness can tell. */
 function runnerOf(host: ForgetHost, child: LinkedChild): SubprocessAdapter | undefined {
-  const dispatched = host.adapterOfChild(child.childId);
+  const dispatched = adapterOfChild(host.harness, child.childId);
   if (dispatched) {
     return dispatched;
   }
@@ -361,7 +365,7 @@ async function stopChildren(
   }
   const adapters = new Set<SubprocessAdapter>([
     host.subprocess,
-    ...host.adaptersUsed(),
+    ...adaptersUsedBy(host.harness),
     ...named,
   ]);
   for (const runner of runners.values()) {

@@ -30,7 +30,6 @@ import { pendingTasksOf, resumableWaitsOf } from '../interpreter/connection-step
 import { turnEndingIn } from '../interpreter/turn-ending';
 import { AcpSessionStore } from '../runtime/acp-session-store';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
-import { adapterOfChild, adaptersUsedBy } from '../runtime/durable/child-links';
 import { stubOf } from '../runtime/durable/step-ledger';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
 import type { OutputSnapshot } from '../runtime/output-store';
@@ -1983,8 +1982,7 @@ export class AgentHarness<
       layerIds: () => this.layerIds(),
       releaseConnections: (executionId) => this.#connections.registry.releaseRun(executionId),
       subprocess: this.subprocess,
-      adaptersUsed: () => adaptersUsedBy(this),
-      adapterOfChild: (childId) => adapterOfChild(this, childId),
+      harness: this,
     };
   }
 
