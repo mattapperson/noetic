@@ -293,6 +293,28 @@ bridge runs), and the session's `cwd` is the process's working directory. A
 preset's environment and the connection's signal. A preset never changes the
 model a step or its environment selects.
 
+**Subagents through the keeper.** A subagent runs as a child session. When
+the agent announces a child on a session the keeper knows — `subagent_update`
+naming the child's `sessionId`, or codex-acp's earlier draft
+`subagent_spawned` naming `subagentSessionId` — the keeper records the child
+as belonging to that session's root; a child announced on a child belongs to
+the same root. Everything the agent sends that names a descendant — its
+`session/update`s and its requests to the client (`session/request_permission`,
+`elicitation/create`, `fs/*`, `terminal/*`) — is kept with its root: sent
+live only to the host that holds the root, held while no host does, kept in
+the one ordered record of the root's turn, and sent again with the root's
+waiting requests when a host takes the turn with `_noetic/keeper/turn`. Each
+line is sent as the agent wrote it, so session ids are preserved, and the
+host's answers reach the agent by request id. Updates for a session the
+keeper cannot place yet are held — a bounded number per session and a bounded
+number of sessions — and placed in order once the session is announced or
+becomes known; they are dropped if it never is. A request from a session the
+keeper cannot place is asked of every host that attaches until it is
+answered, and moves to its root's waiting requests if the session is
+announced later, so the agent never waits on a host that was not asked. The
+keeper remembers at most a thousand descendants; past that it forgets the
+oldest, never one with a request still waiting.
+
 ### The remote runner
 
 `noetic-acp serve` (the `@noetic-tools/acp` bin, Node) runs on the agent's
@@ -645,21 +667,32 @@ editor advertised form elicitation, its answer passed back as a decision
 declined at once when the editor cannot show forms, fails the request, or
 gives an answer the question refuses. A served turn never waits on nobody.
 
-### Subagents' own sessions
+### Subagents
 
 An agent may run subagents as child sessions of the step's session (the ACP
 subagents RFD: `subagent_update` announces a child; codex-acp's earlier draft,
-`subagent_spawned`). Only the step's own session produces the step's output: a
-child session's updates never reach its text, items, events or result, nor do
-updates for a session the connection does not know. An update that arrives
-for a session before the connection knows whose it is — the agent's first
-updates for a session it creates, sent before its `session/new` answer — is
-held (at most 1000) until the session is known, then delivered or dropped.
-A failed `session/load` forgets the session and every child it announced.
-Updates held before a session was known go through the same routing once it
-is, in order, so a child announced early is still a child. (Showing children
-as nested agents in the harness's events is specified in `08-runtime` once it
-lands; until then the client does not advertise `subagents`.)
+`subagent_spawned`). The client advertises `subagents: {}` by default, so an
+agent runs each subagent in its own session; `clientCapabilities.subagents:
+false` withdraws it.
+
+Only the step's own session produces the step's output. Each child becomes a
+**nested agent** of the turn (`08-runtime` § Nested agents): its updates go
+through the same event mapping as the step's, with a `scope` naming it, so
+its text, reasoning and tool calls reach the full stream as its own — never
+the step's text, items or result. Its announcement opens it
+(`agent_started`, with the RFD's `title` and `description`, or the draft's
+`name` and `task`), each state it reports is an `agent_status`
+(`running`, `idle`, `requires_action` as `waiting`, `unknown`), and the end of
+the turn closes it (`agent_completed`: `cancelled` or `failed` when its last
+stop reason said so, else `completed`). A child announced by a child is
+nested under it (`parentId`). Updates for a session the connection does not
+know are dropped; an update that arrives before the connection knows whose
+it is — the agent's first updates for a session it creates, sent before its
+`session/new` answer — is held (at most 1000) until the session is known,
+then routed again in order, so a child announced early is still a child. A
+failed `session/load` forgets the session and every child it announced.
+While a session is loaded, its children's replayed updates are history and
+are not shown.
 
 ### Failures are Noetic errors
 

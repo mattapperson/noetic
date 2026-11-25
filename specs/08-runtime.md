@@ -696,14 +696,53 @@ interface SdkStreamEvent {
   readonly data: Record<string, unknown>;
   readonly outputIndex?: number;
   readonly contentIndex?: number;
+  readonly scope?: AgentScope;  // a nested agent's event (§ Nested agents)
 }
 
 interface FrameworkStreamEvent {
   readonly source: 'framework';
   readonly type: `${string}:${string}`;  // e.g. 'myagent:step_started'
   readonly data: Record<string, unknown>;
+  readonly scope?: AgentScope;
+}
+
+interface AgentScope {
+  readonly id: string;        // unique in the execution, stable for the agent's life
+  readonly parentId?: string; // the nested agent that started this one
+  readonly title?: string;    // what the agent that started it calls it
 }
 ```
+
+### Nested agents
+
+An agent step's agent may run **subagents** of its own (`27-acp-agent-steps`
+§ Subagents). Each is a nested agent: its events carry a `scope` naming it,
+and everything else about them is the ordinary event surface — its text,
+reasoning and tool calls are the same `sdk` events a `callModel` step emits,
+its items the same `item_appended`. A host needs nothing agent-specific to
+show one.
+
+- **The run's own output carries no scope.** `getTextStream()`,
+  `getReasoningStream()` and `getItemStream()` — and the display output a
+  session persists, which folds the same way — leave scoped events out:
+  a nested agent's answer is never the run's. `getFullStream()` keeps them.
+- **Each nested agent brackets its own output** with `response.created` /
+  `response.completed`, and its output indexes are its own, so a consumer
+  folding one scope never collides with another.
+- **Its life** is three framework events, each scoped: `agent_started`
+  (`{ title?, description? }`), `agent_status` (`{ status: 'running' | 'idle'
+  | 'waiting' | 'unknown', stopReason? }`) as the agent reports it, and
+  `agent_completed` (`{ status: 'completed' | 'failed' | 'cancelled' }`) when
+  the turn that ran it ends.
+- **Ids.** A nested agent's `id` is the step's dispatch path and the
+  subagent's own id (`<path>/agent:<id>`); `parentId` names the nested agent
+  that started it, absent when the step's own agent did.
+- **Usage.** A nested agent's spend is the step's: the agent reports its turn's
+  usage with its subagents' included, and nothing is charged twice.
+
+`spawn` is not a nested agent. It is a context boundary — a fresh context
+window for the same agent — and its child's output is the run's output, as a
+`loop(spawn(callModel))` relies on; it carries no scope.
 
 ### Framework Events
 
@@ -739,12 +778,15 @@ interface FrameworkStreamEvent {
 | `{name}:stream_pipe_error` | Emitted when SDK stream piping fails. Data: `{ error }` |
 | `{name}:spend_pending` | Emitted when a paid call is left with no settled bill, or `restore()` finds one (`23-durable-execution` § Paid dispatches). Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }`, or `{ id, unreadable: true, unbounded: true }` for a record that no longer reads |
 | `{name}:spend_settled` | Emitted when a pending paid call is settled or written off. Data: `{ id, cost, writtenOff? }` |
+| `{name}:agent_started` | A nested agent started (§ Nested agents). Scoped. Data: `{ stepId, agentId, title?, description? }` |
+| `{name}:agent_status` | A nested agent reported its status. Scoped. Data: `{ stepId, agentId, status, stopReason? }` |
+| `{name}:agent_completed` | The turn that ran a nested agent ended. Scoped. Data: `{ stepId, agentId, status }` |
 | `{name}:drain_started` | Emitted when a graceful stop begins (see Graceful Stop). Data: `{ executionId, deadline, inFlight }` |
 | `{name}:drain_finished` | Emitted when a graceful stop ends, just before the cancel. Data: `{ executionId, reason, durationMs, finished, cutOff }` |
 
 ### Streaming Scope
 
-Events from the entire step composition tree flow through `HarnessResult`. All callModel steps encountered during execution (including within loops, conditionals, inParallel paths, and spawns) emit SDK stream events. Non-callModel steps emit framework lifecycle events only.
+Events from the entire step composition tree flow through `HarnessResult`. All callModel steps encountered during execution (including within loops, conditionals, inParallel paths, and spawns) emit SDK stream events, as do agent steps; an agent step's subagents emit them scoped (§ Nested agents). Non-callModel steps emit framework lifecycle events only.
 
 ### Event Emission Control
 
