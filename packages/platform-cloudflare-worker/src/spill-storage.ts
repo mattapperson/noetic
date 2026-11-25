@@ -239,7 +239,7 @@ class Spill {
   /**
    * The row `prev` is stored as, or undefined when the key holds something else.
    * A value is matched as it is when it was stored in the row, and by its
-   * object's text when it was spilled, whichever `this.maxBytes` it was written under.
+   * object's text when it was spilled, whichever `maxBytes` it was written under.
    */
   async rowHolding(key: string, prev: unknown): Promise<unknown> {
     const json = JSON.stringify(prev);
@@ -256,7 +256,7 @@ class Spill {
   async swapRows(key: string, held: unknown, placed: Placed): Promise<boolean> {
     const inner = this.storage.swap;
     if (!inner) {
-      throw new Error('spillStorage: the this.storage underneath has no swap.');
+      throw new Error('spillStorage: the storage underneath has no swap.');
     }
     try {
       return await inner.call(this.storage, key, held, placed.row);
@@ -290,7 +290,7 @@ class Spill {
     let won = await this.swapRows(key, held, placed);
     if (!won && prev !== null && this.pointee(held) === undefined) {
       // `prev` was matched as a row value, and the key may hold it spilled instead:
-      // written under a smaller `this.maxBytes`.
+      // written under a smaller `maxBytes`.
       const row = await this.storage.get<unknown>(key);
       if ((await this.spilledText(row)) === JSON.stringify(prev)) {
         held = row;
