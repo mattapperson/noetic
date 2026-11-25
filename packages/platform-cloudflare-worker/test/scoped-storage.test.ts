@@ -191,3 +191,18 @@ describe('a table made without a scope', () => {
     await expect(scoped.get('k')).rejects.toThrow('scope');
   });
 });
+
+describe('a table made with a scope', () => {
+  for (const [name, scoped] of Object.entries(adapters)) {
+    it(`fails a ${name} adapter without a scope before it reads any scope's rows`, async () => {
+      const db = new Database(':memory:');
+      await scoped(db, 'alice').set('k', 'A');
+      await scoped(db, 'bob').set('k', 'B');
+      // The Durable Object adapter checks when it is made; D1's on its first call.
+      const attempt = async (): Promise<unknown> => scoped(db).get('k');
+      await expect(attempt()).rejects.toThrow('Give this adapter a scope');
+      expect(await scoped(db, 'alice').get('k')).toBe('A');
+      expect(await scoped(db, 'bob').get('k')).toBe('B');
+    });
+  }
+});

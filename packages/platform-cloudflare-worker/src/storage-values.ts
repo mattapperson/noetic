@@ -24,6 +24,14 @@ export const KEYS_PER_STATEMENT = 90;
  */
 export interface StorageTable {
   create: string;
+  /** The table's columns, one row each with its `name`. */
+  columns: string;
+  /**
+   * Throw unless `rows`, the result of `columns`, are this adapter's shape: a
+   * scoped adapter on an unscoped table, or the reverse, would read and write
+   * across scopes.
+   */
+  checkShape(rows: unknown[]): void;
   select: string;
   upsert: string;
   remove: string;
@@ -53,6 +61,19 @@ export function storageTable(
   const at = scoped ? 'scope = ? AND key = ?' : 'key = ?';
   const within = scoped ? 'scope = ? AND ' : '';
   return {
+    columns: `PRAGMA table_info(${table})`,
+    checkShape: (rows) => {
+      const hasScope = rows.some(
+        (row) => typeof row === 'object' && row !== null && 'name' in row && row.name === 'scope',
+      );
+      if (hasScope !== scoped) {
+        throw new Error(
+          scoped
+            ? `${factory}: table "${table}" has no scope column, so a scope cannot keep its rows apart. Use a table of its own.`
+            : `${factory}: table "${table}" is scoped. Give this adapter a scope too: without one it would read and write every scope's rows.`,
+        );
+      }
+    },
     create: scoped
       ? `CREATE TABLE IF NOT EXISTS ${table} (scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (scope, key))`
       : `CREATE TABLE IF NOT EXISTS ${table} (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,

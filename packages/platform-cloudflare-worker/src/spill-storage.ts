@@ -23,6 +23,12 @@ export interface SpillOptions {
   maxBytes?: number;
   /** Leads every object key. Default `noetic-storage`. */
   prefix?: string;
+  /**
+   * Object key prefixes, besides `prefix`, whose pointers are followed: for rows
+   * moved from another layout whose objects keep their keys. A pointer to any
+   * other object is read as a plain value and its object is never read or deleted.
+   */
+  movedPrefixes?: ReadonlyArray<string>;
 }
 
 /** What a value is stored as: itself, or a pointer to the object that holds it. */
@@ -51,11 +57,17 @@ const POINTER_KEY = 'noetic:spilled';
 /** How many times a read follows a row whose object has gone, before it gives up. */
 const READ_ATTEMPTS = 3;
 
-/** The storage key's part of an object key is cut to this, so a long key still fits R2's limit. */
-const KEY_PART_LENGTH = 200;
+/** R2's longest object key, in UTF-8 bytes. */
+const OBJECT_KEY_BYTES = 1024;
 
-/** The object a row points at, when the row is a pointer. */
-function pointee(row: unknown): string | undefined {
+/** The storage key's part of an object key is cut to this many UTF-8 bytes. */
+const KEY_PART_BYTES = 200;
+
+/** What a write's own part of an object key takes: `/`, `/` and a UUID. */
+const OBJECT_SUFFIX_BYTES = 2 + 36;
+
+/** The object a row points at, when the row is a pointer, whoever made it. */
+function pointerIn(row: unknown): string | undefined {
   if (typeof row !== 'object' || row === null || !(POINTER_KEY in row)) {
     return undefined;
   }
@@ -71,6 +83,30 @@ function pointerTo(object: string): unknown {
 
 function byteLength(text: string): number {
   return new TextEncoder().encode(text).byteLength;
+}
+
+/** `text` cut to at most `bytes` UTF-8 bytes, never inside a character. */
+function cutToBytes(text: string, bytes: number): string {
+  let cut = '';
+  let used = 0;
+  for (const char of text) {
+    const size = byteLength(char);
+    if (used + size > bytes) {
+      break;
+    }
+    cut += char;
+    used += size;
+  }
+  return cut;
+}
+
+/** Delete an object no row points at. A failure leaves an orphan, never a wrong result. */
+async function dropObject(blobs: BlobStoreLike, object: string): Promise<void> {
+  try {
+    await blobs.delete(object);
+  } catch (error) {
+    console.warn(`[noetic] spillStorage: could not delete ${object}; it is orphaned.`, error);
+  }
 }
 
 function checkedMaxBytes(maxBytes: number | undefined): number {
@@ -105,16 +141,42 @@ export function spillStorage(storage: StorageAdapter, options: SpillOptions): St
   const { blobs } = options;
   const maxBytes = checkedMaxBytes(options.maxBytes);
   const prefix = options.prefix ?? DEFAULT_PREFIX;
+  const keyPartBytes = Math.min(
+    KEY_PART_BYTES,
+    OBJECT_KEY_BYTES - byteLength(prefix) - OBJECT_SUFFIX_BYTES,
+  );
+  if (keyPartBytes < 1) {
+    throw new Error(
+      `spillStorage: prefix "${prefix}" leaves no room in an object key; keep it under ${OBJECT_KEY_BYTES - OBJECT_SUFFIX_BYTES - 1} bytes.`,
+    );
+  }
+  const followed = [
+    `${prefix}/`,
+    ...(options.movedPrefixes ?? []),
+  ];
+
+  /** The object a row points at, when it is a pointer this storage made or was told to follow. */
+  function pointee(row: unknown): string | undefined {
+    const object = pointerIn(row);
+    return object !== undefined && followed.some((start) => object.startsWith(start))
+      ? object
+      : undefined;
+  }
 
   /** Where `value` goes: the row itself, or a new object the row points at. */
   async function place(key: string, value: unknown): Promise<Placed> {
+    if (pointerIn(value) !== undefined) {
+      throw new Error(
+        `spillStorage: "${key}" cannot hold a value whose only key is "${POINTER_KEY}": it would be read as a pointer.`,
+      );
+    }
     const json = JSON.stringify(value);
     if (json === undefined || byteLength(json) <= maxBytes) {
       return {
         row: value,
       };
     }
-    const object = `${prefix}/${key.slice(0, KEY_PART_LENGTH)}/${crypto.randomUUID()}`;
+    const object = `${prefix}/${cutToBytes(key, keyPartBytes)}/${crypto.randomUUID()}`;
     await blobs.put(object, json);
     return {
       row: pointerTo(object),
@@ -124,15 +186,22 @@ export function spillStorage(storage: StorageAdapter, options: SpillOptions): St
 
   /**
    * Delete the object of a write that did not land. A write that landed but
-   * reported failure left the row pointing at it, and it is kept.
+   * reported failure left the row pointing at it, and it is kept; so is the object
+   * of a write whose row cannot be read to tell, since deleting one the row points
+   * at would lose the value.
    */
   async function unplace(key: string, object: string | undefined): Promise<void> {
     if (object === undefined) {
       return;
     }
-    const row = await storage.get<unknown>(key).catch(() => null);
+    let row: unknown;
+    try {
+      row = await storage.get<unknown>(key);
+    } catch {
+      return;
+    }
     if (pointee(row) !== object) {
-      await blobs.delete(object);
+      await dropObject(blobs, object);
     }
   }
 
@@ -198,7 +267,13 @@ export function spillStorage(storage: StorageAdapter, options: SpillOptions): St
     } catch (error) {
       // A swap that threw may still have landed, and the row then holds what this
       // call wrote: calling that a loss would tell a lease's holder it was replaced.
-      const now = await storage.get<unknown>(key).catch(() => undefined);
+      let now: unknown;
+      try {
+        now = await storage.get<unknown>(key);
+      } catch {
+        // Cannot tell whether it landed: keep the object, and report the failure.
+        throw error;
+      }
       if (JSON.stringify(now) !== JSON.stringify(placed.row)) {
         await unplace(key, placed.object);
         throw error;
@@ -228,7 +303,7 @@ export function spillStorage(storage: StorageAdapter, options: SpillOptions): St
     }
     const stale = won ? pointee(held) : placed.object;
     if (stale !== undefined) {
-      await blobs.delete(stale);
+      await dropObject(blobs, stale);
     }
     return won;
   }
@@ -250,14 +325,14 @@ export function spillStorage(storage: StorageAdapter, options: SpillOptions): St
         throw error;
       }
       if (replaced !== undefined && replaced !== placed.object) {
-        await blobs.delete(replaced);
+        await dropObject(blobs, replaced);
       }
     },
     async delete(key: string): Promise<void> {
       const object = pointee(await storage.get<unknown>(key));
       await storage.delete(key);
       if (object !== undefined) {
-        await blobs.delete(object);
+        await dropObject(blobs, object);
       }
     },
     list: (prefixOfKeys: string) => storage.list(prefixOfKeys),

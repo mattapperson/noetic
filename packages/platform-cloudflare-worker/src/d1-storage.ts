@@ -67,7 +67,9 @@ export interface CreateD1StorageOptions {
  *
  * A write that fails throws; nothing is swallowed.
  *
- * @throws Error when `table` is not a plain identifier, or `scope` is empty.
+ * @throws Error when `table` is not a plain identifier, or `scope` is empty; and
+ *   from the first call, when the table's shape does not match `scope` (a scoped
+ *   table read without one, or the reverse).
  */
 export function createD1Storage(options: CreateD1StorageOptions): StorageAdapter {
   const sql = storageTable(
@@ -83,6 +85,8 @@ export function createD1Storage(options: CreateD1StorageOptions): StorageAdapter
     created ??= db
       .prepare(sql.create)
       .run()
+      .then(() => db.prepare(sql.columns).all())
+      .then(({ results }) => sql.checkShape(results ?? []))
       .catch((error: unknown) => {
         created = undefined;
         throw error;

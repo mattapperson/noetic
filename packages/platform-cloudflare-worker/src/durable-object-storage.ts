@@ -62,7 +62,8 @@ export interface CreateDurableObjectStorageOptions {
  * `prev` as it was read from this storage. A row holds about 2 MB: give `spill` a
  * blob store for values that can grow past that.
  *
- * @throws Error when `table` is not a plain identifier, or `scope` is empty.
+ * @throws Error when `table` is not a plain identifier, `scope` is empty, or the
+ *   table's shape does not match `scope` (a scoped table used without one, or the reverse).
  */
 export function createDurableObjectStorage(
   options: CreateDurableObjectStorageOptions,
@@ -74,6 +75,7 @@ export function createDurableObjectStorage(
   );
   const { sql } = options;
   sql.exec(statements.create);
+  statements.checkShape(sql.exec(statements.columns).toArray());
 
   function raw(key: string): string | undefined {
     const [row] = sql.exec(statements.select, ...statements.scope, key).toArray();

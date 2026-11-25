@@ -30,6 +30,7 @@ fi
 # in a checkout of its own, with the dependencies it was tagged with.
 # Bun may rewrite lockfile metadata during install; compare its committed form.
 publish_dir="./$dir"
+provenance=--provenance
 if ! git diff --quiet "$tag" -- "$dir" ':(glob)packages/*/package.json' ||
   ! git diff --quiet "$tag" HEAD -- bun.lock; then
   echo "This checkout has moved on from $tag: rebuilding $name@$version from the tag."
@@ -71,6 +72,9 @@ NODE
     node -e "const fs=require('fs');const p=require('./package.json');delete p.workspaces;fs.writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n')"
   )
   publish_dir="$src/$dir"
+  # Provenance would name this run's commit as the source of a tarball built from
+  # the tag, so it is left off rather than made to say something untrue.
+  provenance=--provenance=false
 fi
 
 # Name the tag: npm refuses to tag a version `latest` on its own when a higher
@@ -81,4 +85,4 @@ if [[ $version == *-* ]]; then
   prerelease=${version#*-}
   dist_tag=${prerelease%%.*}
 fi
-npm publish "$publish_dir" --access public --provenance --workspaces=false --tag "$dist_tag" "$@"
+npm publish "$publish_dir" --access public "$provenance" --workspaces=false --tag "$dist_tag" "$@"

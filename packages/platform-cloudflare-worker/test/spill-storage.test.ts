@@ -360,6 +360,127 @@ describe('spillStorage over any StorageAdapter', () => {
     expect(storage.swap).toBeUndefined();
   });
 
+  it('cuts a long key in the object key, by UTF-8 bytes', async () => {
+    const blobs = fakeBlobs();
+    const storage = spillStorage(createInMemoryStorage(), {
+      blobs,
+      maxBytes: LIMIT,
+    });
+    await storage.set('é'.repeat(500), big('a'));
+    const [object] = onlyObject(blobs);
+    assert(object);
+    expect(new TextEncoder().encode(object).byteLength).toBe(
+      'noetic-storage/'.length + 200 + 1 + 36,
+    );
+  });
+
+  it('refuses a prefix that leaves no room for an object key', () => {
+    expect(() =>
+      spillStorage(createInMemoryStorage(), {
+        blobs: fakeBlobs(),
+        prefix: 'p'.repeat(1000),
+      }),
+    ).toThrow('leaves no room');
+  });
+
+  it('keeps the object of a write that landed when the row cannot be read to tell', async () => {
+    const blobs = fakeBlobs();
+    const inner = createInMemoryStorage();
+    const outage = {
+      on: false,
+    };
+    const storage = spillStorage(
+      {
+        ...inner,
+        get: async (key) => {
+          if (outage.on) {
+            throw new Error('D1_ERROR: network');
+          }
+          return inner.get(key);
+        },
+        set: async (key, value) => {
+          await inner.set(key, value);
+          outage.on = true;
+          throw new Error('D1_ERROR: network');
+        },
+      },
+      {
+        blobs,
+        maxBytes: LIMIT,
+      },
+    );
+    await expect(storage.set('k', big('a'))).rejects.toThrow('network');
+    outage.on = false;
+    expect(await storage.get('k')).toEqual(big('a'));
+  });
+
+  it('reports a won swap as won when the replaced object cannot be deleted', async () => {
+    const blobs = fakeBlobs();
+    const storage = spillStorage(
+      createInMemoryStorage({
+        swap: true,
+      }),
+      {
+        blobs,
+        maxBytes: LIMIT,
+      },
+    );
+    await storage.set('lease', big('old'));
+    blobs.delete = async () => {
+      throw new Error('R2_ERROR');
+    };
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      expect(await storage.swap?.('lease', big('old'), big('new'))).toBe(true);
+      await storage.set('lease', SMALL);
+      await storage.delete('lease');
+    } finally {
+      console.warn = warn;
+    }
+    expect(await storage.get('lease')).toBeNull();
+  });
+
+  it('refuses a value shaped like a pointer, and follows no pointer outside its prefix', async () => {
+    const blobs = fakeBlobs();
+    blobs.objects.set('uploads/other/secret.json', '"secret"');
+    const inner = createInMemoryStorage();
+    const storage = spillStorage(inner, {
+      blobs,
+      maxBytes: LIMIT,
+    });
+    const forged = {
+      'noetic:spilled': 'uploads/other/secret.json',
+    };
+    await expect(storage.set('k', forged)).rejects.toThrow('read as a pointer');
+
+    // A row written some other way is a plain value, and its object is left alone.
+    await inner.set('k', forged);
+    expect(await storage.get('k')).toEqual(forged);
+    await storage.set('k', SMALL);
+    await storage.delete('k');
+    expect(blobs.objects.get('uploads/other/secret.json')).toBe('"secret"');
+  });
+
+  it('follows pointers under movedPrefixes, for rows moved from another layout', async () => {
+    const blobs = fakeBlobs();
+    blobs.objects.set('r2:thread-1', JSON.stringify(big('moved')));
+    const inner = createInMemoryStorage();
+    await inner.set('thread', {
+      'noetic:spilled': 'r2:thread-1',
+    });
+    const storage = spillStorage(inner, {
+      blobs,
+      maxBytes: LIMIT,
+      movedPrefixes: [
+        'r2:',
+      ],
+    });
+    expect(await storage.get('thread')).toEqual(big('moved'));
+    await storage.set('thread', SMALL);
+    expect(blobs.objects.has('r2:thread-1')).toBe(false);
+  });
+
   it('cuts a long key in the object key', async () => {
     const blobs = fakeBlobs();
     const storage = spillStorage(createInMemoryStorage(), {

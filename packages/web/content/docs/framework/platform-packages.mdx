@@ -129,7 +129,7 @@ const storage = createD1Storage({ database: env.DB, scope: userId });
 | no `scope` | `(key, value)` | `key` |
 | `scope` | `(scope, key, value)` | `(scope, key)` |
 
-A table has one shape: every storage on it is scoped, or none is. To drop a tenant, run `DELETE FROM noetic_storage WHERE scope = ?`.
+A table has one shape: every storage on it is scoped, or none is. A storage checks the table's columns before it reads or writes, and throws when its `scope` does not match. To drop a tenant, run `DELETE FROM noetic_storage WHERE scope = ?`.
 
 #### Values larger than a row
 
@@ -148,8 +148,9 @@ const storage = createD1Storage({
 | `blobs` | `BlobStoreLike` | required | An R2 bucket binding, or anything with its `get`, `put` and `delete` |
 | `maxBytes` | `number` | `1048576` | A value whose JSON is over this many UTF-8 bytes is spilled |
 | `prefix` | `string` | `'noetic-storage'` | Leads every object key. The scope follows it |
+| `movedPrefixes` | `string[]` | none | Object key prefixes of rows moved from another layout, whose pointers are followed too |
 
-Each spilled write gets an object of its own, `<prefix>/<scope>/<key>/<uuid>`, and the write that replaces or deletes it removes the old object. `swap` still has one winner: for a spilled value it compares the object's text, then swaps on the pointer in the database. Without `spill`, a record that outgrows a row cannot be written, and under a turn lease that stops the turn with `ledger_write_failed`.
+Each spilled write gets an object of its own, `<prefix>/<scope>/<key>/<uuid>`, and the write that replaces or deletes it removes the old object. `swap` still has one winner: for a spilled value it compares the object's text, then swaps on the pointer in the database. A pointer is followed only to an object under the storage's own prefix and scope, or under `movedPrefixes`, and a value shaped like a pointer cannot be stored. A failed cleanup delete is logged and leaves an orphaned object; it never fails the write. Without `spill`, a record that outgrows a row cannot be written, and under a turn lease that stops the turn with `ledger_write_failed`.
 
 `spillStorage(storage, { blobs })` adds the same behavior to any other `StorageAdapter`.
 
@@ -162,7 +163,7 @@ INSERT INTO noetic_storage (scope, key, value)
 SELECT scope, key, value FROM old_table;
 ```
 
-If the old table already points at objects in R2, rewrite those rows to this package's pointer in the same statement. The objects stay where they are, since a pointer holds the whole object key. For rows stored as a marker followed by the object key:
+If the old table already points at objects in R2, rewrite those rows to this package's pointer in the same statement. The objects stay where they are, since a pointer holds the whole object key; pass their key prefix as `spill.movedPrefixes` so the storage follows them. For rows stored as a marker followed by the object key:
 
 ```sql
 INSERT INTO noetic_storage (scope, key, value)
