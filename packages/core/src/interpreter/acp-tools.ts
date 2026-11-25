@@ -24,6 +24,7 @@ import type {
   StepAcpAgent,
   Tool,
   ToolCallPresentation,
+  ToolIdentity,
 } from '@noetic-tools/types';
 import {
   bridgedToolTitles,
@@ -332,6 +333,7 @@ interface SettledCall extends BridgedCall {
   readonly deferred?: {
     readonly args: unknown;
     readonly presentation: ToolCallPresentation;
+    readonly identity: ToolIdentity;
     readonly completion: Record<string, unknown>;
   };
 }
@@ -899,8 +901,12 @@ export class AcpToolRunner implements AcpToolHost {
   ): ReturnType<typeof executeToolCall> {
     const args = this.unwrap(call);
     const presentation = presentToolCall(tool, args);
+    // The tool's own name, not the name it goes by on the wire.
+    const identity: ToolIdentity = {
+      id: tool?.name ?? call.name,
+    };
     if (!binding.provisional) {
-      binding.events.bridgedCallStarted(callId, call.name, args, presentation);
+      binding.events.bridgedCallStarted(callId, call.name, args, presentation, identity);
     }
     const record = this.records.recordFor({
       ctx: binding.ctx,
@@ -993,6 +999,7 @@ export class AcpToolRunner implements AcpToolHost {
         deferred: {
           args,
           presentation,
+          identity,
           completion,
         },
       });
@@ -1021,6 +1028,7 @@ function emitResult(
       call.wireName,
       call.deferred.args,
       call.deferred.presentation,
+      call.deferred.identity,
     );
   }
   bridge.itemAppended(call.outputItem);

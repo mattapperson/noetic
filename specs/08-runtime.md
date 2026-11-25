@@ -810,19 +810,27 @@ agents), and where the agent is, its `stepId`.
 
 **A tool call** is an item and three framework events, the same for a model's
 call, an agent's own call, and a step tool an agent calls through the tool
-bridge:
+bridge. Every one of them names the call (`name`, its wire name, and
+`callId`) and the tool it is to: `toolId`, the same for every call to that
+tool, and `toolServer`, the MCP server it is on when it is an MCP tool
+(`ToolIdentity`). A Noetic tool's `toolId` is its own `name` (not the
+sanitized wire name); an agent's own tool's is the name the agent gives it, as
+its adapter reads it (`27-acp-agent-steps` § Output → harness events), and its
+title only for an agent that names its tools no other way.
 
-- `tool_call_started` — `{ name, callId, title?, kind?, locations?, status? }`.
+- `tool_call_started` — `{ name, callId, toolId, toolServer?, title?, kind?,
+  locations?, status? }`.
   `title` is the human title, `kind` a `ToolKind` (`read`, `edit`, `delete`,
   `move`, `search`, `execute`, `think`, `fetch`, `switch_mode`, `other`),
   `locations` the files it works on (`{ path, line? }`), `status` `pending`
   when the call waits (for approval, for its input) and absent when it runs.
 - `tool_progress` — what a running call reports, each field only when it
-  changed: `{ name, callId, status?, title?, kind?, locations?, progress?,
-  content? }`. `progress` is a fraction from 0 to 1; `content` replaces what an
+  changed: `{ name, callId, toolId, toolServer?, status?, title?, kind?,
+  locations?, progress?, content? }`. `progress` is a fraction from 0 to 1; `content` replaces what an
   earlier report gave. A generator tool's report also carries the yielded
   `event`.
-- `tool_call_completed` — `{ name, callId, error, output?, content?, result? }`.
+- `tool_call_completed` — `{ name, callId, toolId, toolServer?, error,
+  output?, content?, result? }`.
   `output` is the call's text; `content` everything it produced as structure,
   `ToolContent[]`. Text and media are the content parts a model is given
   (`InputContentPart`: `input_text`, `input_image` with its `imageUrl` a URL or
@@ -886,9 +894,9 @@ its events, and pass the step's `emit` filter.
 | `{name}:step_started` | Emitted before each step executes. Data: `{ stepId, kind }` |
 | `{name}:step_completed` | Emitted after each step completes. Data: `{ stepId, kind }` |
 | `{name}:tool_round_started` | Emitted before a tool execution round. Data: `{ round, toolCount }` |
-| `{name}:tool_call_started` | Emitted before each tool call. Data: `{ name, callId, title?, kind?, locations?, status? }` (§ Tool calls, plans and agent settings) |
-| `{name}:tool_progress` | A running tool call reported progress (§ Tool calls, plans and agent settings). Data: `{ name, callId, status?, title?, kind?, locations?, progress?, content?, event? }`; an `invokeTool` step's carries `{ stepId, name, toolName, event, … }` |
-| `{name}:tool_call_completed` | Emitted after each tool call. Data: `{ name, callId, error, output?, content?, result? }` |
+| `{name}:tool_call_started` | Emitted before each tool call. Data: `{ name, callId, toolId, toolServer?, title?, kind?, locations?, status? }` (§ Tool calls, plans and agent settings) |
+| `{name}:tool_progress` | A running tool call reported progress (§ Tool calls, plans and agent settings). Data: `{ name, callId, toolId, toolServer?, status?, title?, kind?, locations?, progress?, content?, event? }`; an `invokeTool` step's also carries `{ stepId, toolName }`, its `callId` the step id |
+| `{name}:tool_call_completed` | Emitted after each tool call. Data: `{ name, callId, toolId, toolServer?, error, output?, content?, result? }` |
 | `{name}:tool_model_output_failed` | Emitted when a tool's `toModelOutput` throws; the model is given the call's output text instead (`02-step-variants` § What the model is given). Data: `{ name, callId, error }` |
 | `{name}:tool_round_completed` | Emitted after all tool calls in a round. Data: `{ round, toolCount }` |
 | `{name}:model_call_started` | Emitted before each provider call in the tool-round loop. Data: `{ round, messageCount, toolCount }` |

@@ -895,7 +895,15 @@ step's. The `AcpEventBridge` translates each variant into the same
 | every other variant — `user_message_chunk`, `available_commands_update`, `session_info_update`, `usage_update`, … | nothing: session state the runtime tracks on the live session, not output |
 
 **What a call's events carry.** The fields are the harness's own (`08-runtime`
-§ Tool calls, plans and agent settings), read from the agent's update: `title`
+§ Tool calls, plans and agent settings), read from the agent's update. Which
+tool a call is to, `toolId` and `toolServer`, is the agent's own business, so
+its adapter reads it: `AcpAgent.toolIdOf(update)` (`defineAcpAgent({ toolIdOf
+})`). `claudeCode()` reads `_meta.claudeCode.toolName` — `Read`, or an MCP
+tool's `mcp__<server>__<tool>` as `toolId: <tool>`, `toolServer: <server>`;
+`codex()` reads an MCP call's `rawInput` `{ server, tool }` (or its
+`mcp.<server>.<tool>` title). A call the adapter cannot place, or one whose
+reader throws, goes by its title. A step tool's call the bridge runs is
+identified by the tool's own `name`. `title`
 and `kind` as given, `locations` as `{ path, line? }`, `progress` from the
 update's `_meta.progress` or its raw output's `progress` (a value above 1 is a
 percentage), and `content` mapped entry by entry — a `diff` keeps `path`,

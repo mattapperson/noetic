@@ -347,7 +347,9 @@ interface ToolPresentationDeclaration<I, O, E = unknown> {
 }
 ```
 
-The runtime puts the title, kind and locations on the call's
+Every event of a call also carries `toolId`, the tool's own `name`, so a host
+tells which tool a call is to without parsing its wire name or its title. The
+runtime puts the title, kind and locations on the call's
 `tool_call_started`, what `progress` reports for the events so far on each
 `tool_progress`, and the `content` of a call that did not fail on its
 `tool_call_completed` — on the `callModel` tool loop, and on a call an agent

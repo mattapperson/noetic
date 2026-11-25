@@ -27,6 +27,21 @@ export type ToolKind =
   | 'other';
 
 /**
+ * Which tool a call is to, the same for every call to it: a tool's own
+ * `name`, or the name an agent gives one of its own tools, with the MCP
+ * server it is on when it is an MCP tool. Never a human title (that is
+ * `ToolCallPresentation.title`), except for an agent that names its tools no
+ * other way.
+ * @public
+ */
+export interface ToolIdentity {
+  /** The tool's own name: `read_file`, `Bash`, an MCP tool's name on its server. */
+  id: string;
+  /** The MCP server the tool is on, when it is an MCP tool. */
+  server?: string;
+}
+
+/**
  * Where a tool call is in its life. `pending`: announced, not running yet
  * (waiting for approval or for its input to finish streaming).
  * @public

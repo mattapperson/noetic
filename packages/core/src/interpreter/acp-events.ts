@@ -32,6 +32,7 @@ import type {
   StepAcpAgent,
   ToolCallPresentation,
   ToolContent,
+  ToolIdentity,
 } from '@noetic-tools/types';
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
@@ -155,6 +156,8 @@ const NEVER_RAN_OUTPUT = 'The call never reached the tool.';
  */
 interface TurnCall {
   readonly name: string;
+  /** Which tool it is to: its `toolId` and `toolServer` on every event of it. */
+  readonly identity: ToolIdentity;
   readonly via: 'own' | 'bridged';
   /** The stream that carries it: the step's, or a nested agent's. */
   readonly bridge: AcpEventBridge;
@@ -187,6 +190,18 @@ function inputKey(input: unknown): string {
     return input;
   }
   return JSON.stringify(input ?? {});
+}
+
+/** A call's identity as its events carry it: `toolId`, and `toolServer` for an MCP tool. */
+export function identityData(identity: ToolIdentity): Record<string, string> {
+  return {
+    toolId: identity.id,
+    ...(identity.server === undefined
+      ? {}
+      : {
+          toolServer: identity.server,
+        }),
+  };
 }
 
 /** What a step did through the host's fs or shell adapters, as `workspace_access` names it. */
@@ -238,6 +253,8 @@ export class AcpEventBridge {
   private model: string | undefined;
   /** Maps an agent's title for a bridged tool call to the tool's wire name. */
   toolNameOf: (title: string) => string | undefined = () => undefined;
+  /** Which of the agent's own tools a call is to, as its adapter reads it. */
+  toolIdOf: (update: ToolCallUpdate) => ToolIdentity | undefined = () => undefined;
   /** The turn's subagents by child session id (spec 08 § Nested agents). */
   private readonly children = new Map<string, ChildAgent>();
   /** Set when the turn ended: no nested agent opens after that. */
@@ -365,6 +382,7 @@ export class AcpEventBridge {
       bridge: new AcpEventBridge(this.step, this.ctx, scope, this.calls),
     };
     agent.bridge.toolNameOf = this.toolNameOf;
+    agent.bridge.toolIdOf = this.toolIdOf;
     this.children.set(info.sessionId, agent);
     agent.bridge.begin();
     agent.bridge.framework('agent_started', {
@@ -457,6 +475,33 @@ export class AcpEventBridge {
   }
 
   /**
+   * Identify the agent's own calls by the tool they are to, as its adapter
+   * reads it from the agent's update; a call it cannot place goes by its title.
+   */
+  identifyToolCalls(
+    identify: ((update: ToolCallUpdate) => ToolIdentity | undefined) | undefined,
+  ): void {
+    if (identify) {
+      this.toolIdOf = identify;
+    }
+  }
+
+  /** Which tool an announced call of the agent's own is to. */
+  private identityOf(update: ToolCallUpdate): ToolIdentity {
+    try {
+      return (
+        this.toolIdOf(update) ?? {
+          id: update.title ?? update.toolCallId,
+        }
+      );
+    } catch {
+      return {
+        id: update.title ?? update.toolCallId,
+      };
+    }
+  }
+
+  /**
    * The tool bridge is running a call to one of the step's tools: its item —
    * with the arguments it runs with — then `tool_call_started`, under the id
    * the bridge runs it under. An announcement of the same id is this call.
@@ -466,6 +511,9 @@ export class AcpEventBridge {
     name: string,
     args: unknown,
     presentation: ToolCallPresentation = {},
+    identity: ToolIdentity = {
+      id: name,
+    },
   ): void {
     const announced = this.calls.byId.get(callId);
     if (announced?.state !== 'announced') {
@@ -476,6 +524,7 @@ export class AcpEventBridge {
     }
     this.calls.byId.set(callId, {
       name,
+      identity,
       via: 'bridged',
       bridge: this,
       state: 'open',
@@ -508,14 +557,22 @@ export class AcpEventBridge {
    * `callModel` tool loop emits, filtered by the step's `emit` option.
    */
   toolEvent(eventType: string, data: Record<string, unknown>): void {
-    if (!this.broadcaster || !shouldEmit(this.emitOption, eventType, data)) {
+    // Every event of a call names the tool it is to (spec 08 § Tool calls).
+    const call = typeof data.callId === 'string' ? this.calls.byId.get(data.callId) : undefined;
+    const payload = call
+      ? {
+          ...data,
+          ...identityData(call.identity),
+        }
+      : data;
+    if (!this.broadcaster || !shouldEmit(this.emitOption, eventType, payload)) {
       return;
     }
     emitFrameworkEvent({
       broadcaster: this.broadcaster,
       agentName: this.agentName,
       eventType,
-      data,
+      data: payload,
       scope: this.scope,
     });
   }
@@ -787,6 +844,9 @@ export class AcpEventBridge {
   private synthesizeToolCall(item: FunctionCallItem, items: ReadonlyArray<Item>): void {
     this.calls.byId.set(item.callId, {
       name: item.name,
+      identity: {
+        id: item.name,
+      },
       via: 'own',
       bridge: this,
       state: 'closed',
@@ -829,6 +889,9 @@ export class AcpEventBridge {
     if (wireName) {
       this.calls.byId.set(callId, {
         name: wireName,
+        identity: {
+          id: wireName,
+        },
         via: 'bridged',
         bridge: this,
         state: 'announced',
@@ -839,6 +902,7 @@ export class AcpEventBridge {
     }
     this.calls.byId.set(callId, {
       name: update.title,
+      identity: this.identityOf(update),
       via: 'own',
       bridge: this,
       state: 'open',

@@ -257,9 +257,9 @@ Framework events emitted during execution:
 | `{name}:step_started` | Before each step executes. |
 | `{name}:step_completed` | After each step completes. |
 | `{name}:tool_round_started` | Before a tool execution round. |
-| `{name}:tool_call_started` | Before each tool call. Data: `{ name, callId, title?, kind?, locations?, status? }` — see [Tool calls, plans and agent settings](#tool-calls-plans-and-agent-settings). |
-| `{name}:tool_progress` | A running tool call reported progress. Data: `{ name, callId, status?, title?, kind?, locations?, progress?, content?, event? }`. |
-| `{name}:tool_call_completed` | After each tool call. Data: `{ name, callId, error, output?, content?, result? }`. |
+| `{name}:tool_call_started` | Before each tool call. Data: `{ name, callId, toolId, toolServer?, title?, kind?, locations?, status? }` — see [Tool calls, plans and agent settings](#tool-calls-plans-and-agent-settings). |
+| `{name}:tool_progress` | A running tool call reported progress. Data: `{ name, callId, toolId, toolServer?, status?, title?, kind?, locations?, progress?, content?, event? }`. |
+| `{name}:tool_call_completed` | After each tool call. Data: `{ name, callId, toolId, toolServer?, error, output?, content?, result? }`. |
 | `{name}:tool_model_output_failed` | A tool's `toModelOutput` threw; the model was given the call's JSON output. |
 | `{name}:tool_round_completed` | After all tool calls in a round. |
 | `{name}:model_call_started` | Before each provider call. Data: `{ round, messageCount, toolCount }`. |
@@ -285,6 +285,7 @@ callModel steps support an `emit` option to control step/tool framework event em
 
 Every agent — a `callModel` step's model, a coding agent a step runs, a nested agent — reports its work in one vocabulary, so a trail of what it is doing needs no agent-specific code:
 
+- **Which tool**: every event of a call carries `toolId` — the same for every call to that tool: your tool's `name`, or the name a coding agent gives its own tool (`Read`, `Bash`) — and `toolServer` when it is an MCP tool (`read_file` on `workspace`).
 - **A tool call** starts with `tool_call_started`, carrying its human `title`, its `kind` (`read`, `edit`, `delete`, `move`, `search`, `execute`, `think`, `fetch`, `switch_mode`, `other`), the `locations` it works on (`{ path, line? }`) and `status: 'pending'` while it waits. While it runs, `tool_progress` carries what changed: `status`, `title`, `progress` (0 to 1), `content`. It ends with `tool_call_completed`, whose `content` is what it produced as structure: the content parts a model is given for text and media (`input_text`, `input_image` with a URL or data URL, `input_file`), plus `diff` (`path`, `oldText`, `newText`), `terminal`, `resource_link` and `resource`.
 - **A plan** arrives whole on `plan_updated` (`{ stepId, plan }`, `plan.entries` each `{ content, priority, status }`, or a `markdown` or `uri` plan) and replaces the last one with the same `id`; `plan_removed` drops it.
 - **Settings**: `agent_config_updated` says the agent switched its `mode` or its `model`.

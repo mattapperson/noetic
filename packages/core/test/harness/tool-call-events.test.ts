@@ -406,6 +406,7 @@ describe('model-path tool calls carry the tool presentation', () => {
       {
         name: 'write',
         callId: 'call-1',
+        toolId: 'write',
         kind: 'edit',
         title: 'Write a.ts',
         locations: [
@@ -419,6 +420,7 @@ describe('model-path tool calls carry the tool presentation', () => {
       {
         name: 'write',
         callId: 'call-1',
+        toolId: 'write',
         event: 1,
         progress: 1,
         status: 'in_progress',
@@ -500,6 +502,7 @@ describe('model-path tool calls carry the tool presentation', () => {
       {
         name: 'write',
         callId: 'call-bad',
+        toolId: 'write',
         kind: 'edit',
       },
     ]);

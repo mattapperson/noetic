@@ -17,6 +17,7 @@ import type { AgentScope, LLMResponse, Step } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
 import { defineAcpAgent } from '../src/define';
+import { claudeToolId } from '../src/tool-ids';
 import { claudeToolWiring } from '../src/tool-wiring';
 import { loopbackMachine } from '../src/transport-loopback';
 
@@ -123,6 +124,7 @@ function agentStep(
       },
       machine: loopbackMachine(agent),
       tools: claudeToolWiring,
+      toolIdOf: claudeToolId,
     }),
     prompt: 'go',
     tools,
@@ -329,6 +331,23 @@ describe("an agent step's activity, over the wire", () => {
         rawInput: {
           file_path: '/repo/src/a.ts',
         },
+        _meta: {
+          claudeCode: {
+            toolName: 'Edit',
+          },
+        },
+      });
+      await update(conn, sessionId, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'mcp-1',
+        title: 'Read spec',
+        kind: 'read',
+        status: 'completed',
+        _meta: {
+          claudeCode: {
+            toolName: 'mcp__sw_workspace__read_spec',
+          },
+        },
       });
       await update(conn, sessionId, {
         sessionUpdate: 'tool_call_update',
@@ -409,6 +428,7 @@ describe("an agent step's activity, over the wire", () => {
       {
         name: 'Edit src/a.ts',
         callId: 'edit-1',
+        toolId: 'Edit',
         title: 'Edit src/a.ts',
         kind: 'edit',
         status: 'in_progress',
@@ -418,6 +438,14 @@ describe("an agent step's activity, over the wire", () => {
             line: 3,
           },
         ],
+      },
+      {
+        name: 'Read spec',
+        callId: 'mcp-1',
+        toolId: 'read_spec',
+        toolServer: 'sw_workspace',
+        title: 'Read spec',
+        kind: 'read',
       },
     ]);
     const diff = {
@@ -430,6 +458,7 @@ describe("an agent step's activity, over the wire", () => {
       {
         name: 'Edit src/a.ts',
         callId: 'edit-1',
+        toolId: 'Edit',
         progress: 0.5,
         content: [
           diff,
@@ -438,8 +467,16 @@ describe("an agent step's activity, over the wire", () => {
     ]);
     expect(framework(events, 'tool_call_completed')).toEqual([
       {
+        name: 'Read spec',
+        callId: 'mcp-1',
+        toolId: 'read_spec',
+        toolServer: 'sw_workspace',
+        error: false,
+      },
+      {
         name: 'Edit src/a.ts',
         callId: 'edit-1',
+        toolId: 'Edit',
         error: false,
         content: [
           diff,
@@ -491,6 +528,7 @@ describe("an agent step's activity, over the wire", () => {
 
     const presentation = {
       name: 'write_file',
+      toolId: 'write_file',
       title: 'Write src/a.ts',
       kind: 'edit',
       locations: [

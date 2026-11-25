@@ -316,6 +316,7 @@ describe('AcpEventBridge', () => {
     expect(completed?.data).toEqual({
       name: 'Read',
       callId: 'c3',
+      toolId: 'Read',
       error: false,
       output: 'file body',
       content: [

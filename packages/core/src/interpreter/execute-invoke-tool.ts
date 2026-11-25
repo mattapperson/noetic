@@ -71,6 +71,8 @@ async function consumeToolGenerator(params: {
       data: {
         stepId: params.stepId,
         name: params.tool.name,
+        callId: params.stepId,
+        toolId: params.tool.name,
         toolName: params.tool.name,
         event: next.value,
         ...presentToolProgress(params.tool, events),
@@ -147,6 +149,7 @@ async function runInvokeTool<TContext, I, O>(
     data: {
       name: step.tool.name,
       callId: step.id,
+      toolId: step.tool.name,
     },
   });
   const emitCompleted = (error: boolean, output?: string): void => {
@@ -157,6 +160,7 @@ async function runInvokeTool<TContext, I, O>(
       data: {
         name: step.tool.name,
         callId: step.id,
+        toolId: step.tool.name,
         error,
         output,
       },

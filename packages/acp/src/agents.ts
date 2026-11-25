@@ -18,6 +18,7 @@ import type { AcpAgent, AcpMachineFactory, AcpTransportFactory } from '@noetic-t
 import type { InstructionsMeta } from './connection';
 import { defineAcpAgent } from './define';
 import type { AcpToolWiring } from './tool-bridge';
+import { claudeToolId, codexToolId } from './tool-ids';
 import {
   claudeToolWiring,
   codexToolWiring,
@@ -141,12 +142,14 @@ function preset({
   opts = {},
   wiring,
   instructionsMeta,
+  toolIdOf,
 }: {
   agentId: string;
   base: AcpProcessSpec;
   opts?: AcpPresetOptions;
   wiring: AcpToolWiring;
   instructionsMeta?: InstructionsMeta;
+  toolIdOf?: AcpAgent['toolIdOf'];
 }): AcpAgent {
   const spec: AcpProcessSpec = {
     command: opts.command ?? base.command,
@@ -176,6 +179,7 @@ function preset({
     tools: wiring,
     instructionsMeta,
     sessionMeta: opts.sessionMeta,
+    toolIdOf,
   });
 }
 
@@ -205,6 +209,7 @@ export function claudeCode(opts: AcpPresetOptions = {}): AcpAgent {
     opts,
     wiring: claudeToolWiring,
     instructionsMeta: claudeInstructionsMeta,
+    toolIdOf: claudeToolId,
   });
 }
 
@@ -218,6 +223,7 @@ export function codex(opts: AcpPresetOptions = {}): AcpAgent {
     base: PRESET_COMMANDS.codex,
     opts,
     wiring: codexToolWiring,
+    toolIdOf: codexToolId,
   });
 }
 

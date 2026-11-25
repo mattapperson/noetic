@@ -306,6 +306,7 @@ describe('Tool.toModelOutput', () => {
       {
         name: 'screenshot',
         callId: 'call_screenshot',
+        toolId: 'screenshot',
         error: false,
         output: '{"path":"home.png"}',
       },

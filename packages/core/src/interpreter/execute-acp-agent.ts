@@ -1221,6 +1221,7 @@ async function runAcpStep<TContext, I, O>(params: {
   let reloading = false;
 
   let bridge = new AcpEventBridge(step, baseCtx);
+  bridge.identifyToolCalls(agent.toolIdOf?.bind(agent));
   // A tool pipeline error fails the step, as it does in `callModel`: it is
   // kept, the agent's turn is cancelled, and the error is thrown once the
   // turn has unwound.
@@ -1382,6 +1383,7 @@ async function runAcpStep<TContext, I, O>(params: {
       turnBlocks = undefined;
       retries += 1;
       bridge = new AcpEventBridge(step, baseCtx);
+      bridge.identifyToolCalls(agent.toolIdOf?.bind(agent));
       bindHostToStep(resolution.live.host, bindingFor(bridge));
       continue;
     }

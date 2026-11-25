@@ -114,6 +114,7 @@ describe('agent tool calls carry the generic presentation', () => {
     expect(only(events, 'tool_call_started').data).toEqual({
       name: 'Edit a.ts',
       callId: 'c1',
+      toolId: 'Edit a.ts',
       title: 'Edit a.ts',
       kind: 'edit',
       status: 'pending',
@@ -154,6 +155,7 @@ describe('agent tool calls carry the generic presentation', () => {
     expect(only(events, 'tool_progress').data).toEqual({
       name: 'Run tests',
       callId: 'c1',
+      toolId: 'Run tests',
       title: 'Run tests (3/10)',
       status: 'in_progress',
       progress: 0.3,
@@ -196,6 +198,7 @@ describe('agent tool calls carry the generic presentation', () => {
     expect(only(events, 'tool_call_completed').data).toEqual({
       name: 'Edit a.ts',
       callId: 'c1',
+      toolId: 'Edit a.ts',
       error: false,
       content: [
         {
@@ -241,6 +244,7 @@ describe('agent tool calls carry the generic presentation', () => {
     expect(progress.data).toEqual({
       name: 'Read',
       callId: 'c1',
+      toolId: 'Read',
       title: 'Read missing.ts',
     });
     expect(only(events, 'tool_call_completed').data).toMatchObject({
@@ -706,13 +710,82 @@ describe('a call to one of the step tools', () => {
     expect(started[0]).toEqual({
       name: 'echo',
       callId: 'c1',
+      toolId: 'echo',
     });
     // One that never reached the tool is the agent's call, as it announced it.
     expect(started[1]).toEqual({
       name: 'echo',
       callId: 'c2',
+      toolId: 'echo',
       title: 'mcp__noetic__echo',
       kind: 'other',
     });
+  });
+});
+
+describe("an agent's own call is identified by the tool it is to", () => {
+  it('names the tool as the adapter reads it, on every event of the call', () => {
+    const { bridge, events } = bridgeCtx();
+    bridge.identifyToolCalls((update) =>
+      update.toolCallId === 'mcp'
+        ? {
+            id: 'read_file',
+            server: 'workspace',
+          }
+        : undefined,
+    );
+    bridge.begin();
+    send(bridge, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'mcp',
+      title: 'Read file',
+    });
+    send(bridge, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'mcp',
+      status: 'in_progress',
+    });
+    send(bridge, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'mcp',
+      status: 'completed',
+    });
+    // One the adapter cannot place goes by its title.
+    send(bridge, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'other',
+      title: 'Think',
+    });
+
+    for (const name of [
+      'tool_call_started',
+      'tool_progress',
+      'tool_call_completed',
+    ]) {
+      expect(named(events, name)[0]?.data).toMatchObject({
+        callId: 'mcp',
+        toolId: 'read_file',
+        toolServer: 'workspace',
+      });
+    }
+    expect(named(events, 'tool_call_started')[1]?.data).toMatchObject({
+      toolId: 'Think',
+    });
+    expect(named(events, 'tool_call_started')[1]?.data).not.toHaveProperty('toolServer');
+  });
+
+  it('goes by its title when the adapter throws', () => {
+    const { bridge, events } = bridgeCtx();
+    bridge.identifyToolCalls(() => {
+      throw new Error('unreadable');
+    });
+    bridge.identifyToolCalls(undefined);
+    bridge.begin();
+    send(bridge, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'c1',
+      title: 'Bash',
+    });
+    expect(only(events, 'tool_call_started').data.toolId).toBe('Bash');
   });
 });

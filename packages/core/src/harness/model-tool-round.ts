@@ -57,6 +57,18 @@ export interface ToolRoundScope {
 
 const SKIPPED_FOR_STEER_OUTPUT = 'Skipped: a new message arrived before this tool call ran.';
 
+/**
+ * What every event of a call names it by: its wire `name` and `callId`, and
+ * the tool it is to, by the tool's own name (spec 08 § Tool calls).
+ */
+function callIdentity(fc: FunctionCallItem, tool: Tool | undefined): Record<string, string> {
+  return {
+    name: fc.name,
+    callId: fc.callId,
+    toolId: tool?.name ?? fc.name,
+  };
+}
+
 /** A call's arguments, parsed for its presentation; undefined when they do not parse. */
 function argsForPresentation(fc: FunctionCallItem): unknown {
   try {
@@ -72,8 +84,7 @@ function argsForPresentation(fc: FunctionCallItem): unknown {
  */
 function callStartedData(fc: FunctionCallItem, tool: Tool | undefined): Record<string, unknown> {
   return {
-    name: fc.name,
-    callId: fc.callId,
+    ...callIdentity(fc, tool),
     ...presentToolCall(tool, argsForPresentation(fc)),
   };
 }
@@ -356,8 +367,7 @@ async function executeFunctionCall(
       keyScope: params.calls?.scope,
       onProgress: (progress) =>
         params.emitIfAllowed('tool_progress', {
-          name: fc.name,
-          callId: fc.callId,
+          ...callIdentity(fc, toolForCall),
           ...progress,
         }),
     }));
@@ -447,8 +457,7 @@ async function executeFunctionCall(
       ? undefined
       : presentToolContent(toolForCall, toolResult.result, parsedArgs);
   params.emitIfAllowed('tool_call_completed', {
-    name: fc.name,
-    callId: fc.callId,
+    ...callIdentity(fc, toolForCall),
     error: toolResult.error === true,
     output: toolResult.output,
     ...(content
@@ -638,8 +647,7 @@ function recordUnrunToolCall(
   });
   scope.emitItemAppended(request.ctx, outputItem);
   params.emitIfAllowed('tool_call_completed', {
-    name: fc.name,
-    callId: fc.callId,
+    ...callIdentity(fc, toolForCall),
     error: true,
     output: params.output,
   });
