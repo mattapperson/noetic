@@ -218,7 +218,7 @@ describe('acpAgentTool', () => {
 
     // The model held a conversation with the agent rather than starting cold.
     expect(connects).toBe(1);
-    await rig.harness.closeAcpSessions();
+    await rig.harness.close();
   });
 
   it('rejects a missing agent adapter', () => {

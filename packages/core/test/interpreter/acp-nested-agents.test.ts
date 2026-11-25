@@ -334,7 +334,13 @@ describe('nested agents on the event bridge', () => {
       allowed: true,
       sessionId: 'root',
     });
-    const activity = events.filter((e) => e.type.endsWith(':acp_client_activity'));
+    const activity = events.filter((e) => e.type.endsWith(':workspace_access'));
+    expect(activity[0]?.data).toMatchObject({
+      operation: 'read_file',
+      path: '/w/a.ts',
+      allowed: true,
+    });
+    expect(activity[0]?.data).not.toHaveProperty('method');
     expect(
       activity.map((e) => [
         e.data.path,

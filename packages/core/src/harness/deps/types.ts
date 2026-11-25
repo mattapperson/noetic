@@ -9,8 +9,6 @@ export type {
 } from '@noetic-tools/context';
 export type {
   AcpKeepAlive,
-  AcpLiveSession,
-  AcpSessionInfo,
   AgentConfig,
   AgentHarnessContract,
   AgentHooks,

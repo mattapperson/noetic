@@ -158,11 +158,14 @@ export interface StepMeta {
   serviceTier?: string;
   responseItems?: ReadonlyArray<Item>;
   /**
-   * Why an ACP agent stopped its turn. Set only by `acp-agent` steps, and the
-   * only way a caller can tell a truncated turn (`max_tokens`,
-   * `max_turn_requests`) from a complete one — both return normally.
+   * Why the model or agent stopped. A returning `callModel` step stopped
+   * `end_turn`; an agent step may also return after a cap (`max_tokens`,
+   * `max_turn_requests`), and this is how a caller tells a truncated turn from
+   * a complete one.
    */
-  acpStopReason?: string;
+  stopReason?: 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled';
+  /** The model the step ran with: a `callModel` step's resolved model, or an agent's current one. */
+  model?: string;
   /** Set by `decide` steps. */
   decision?: DecisionMeta;
 }

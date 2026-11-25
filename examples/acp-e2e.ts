@@ -426,7 +426,7 @@ async function main(): Promise<void> {
       'Ask the coding agent to reply with exactly: DELEGATED_OK',
       delegatingHarness.createContext(),
     );
-    await delegatingHarness.closeAcpSessions();
+    await delegatingHarness.close();
     console.log('  model output:', JSON.stringify(outI));
     ok('a real model delegated to a real agent', outI.includes('DELEGATED_OK'));
   } else if (process.env.ACP_LIVE_AGENT === '1') {

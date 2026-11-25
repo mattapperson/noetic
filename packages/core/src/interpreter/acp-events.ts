@@ -2,12 +2,12 @@
  * Maps an ACP turn's `session/update` notifications onto the harness's
  * observable event surface.
  *
- * Every one of the protocol's eight update variants is translated into the same
- * `source: 'sdk'` broadcaster events the model-call path emits, so a coding
- * agent's text, reasoning, and tool calls flow through `getTextStream()` /
+ * A coding agent's text, reasoning, and tool calls are translated into the same
+ * events the model-call path emits, so they flow through `getTextStream()` /
  * `getReasoningStream()` / `getItemStream()` / `getFullStream()` exactly like an
- * LLM step's output. Each notification is *also* re-emitted raw as an
- * `acp_event` framework event for consumers that want the protocol payload.
+ * LLM step's output. Nothing on the stream names the protocol: session state
+ * (modes, commands, config options, plans, context occupancy) is tracked on the
+ * live session, never emitted.
  *
  * `finalize()` guarantees a turn always emits its output: if an agent returns a
  * stop reason without streaming any text or tool calls, the result's content is
@@ -18,6 +18,7 @@ import type {
   AcpChildInfo,
   AcpChildUpdate,
   AcpClientActivity,
+  AcpClientMethod,
   AcpSessionNotification,
   AcpTurnResult,
   AgentScope,
@@ -124,6 +125,17 @@ function announcedState(update: AcpChildUpdate['update']): {
 
 type SessionUpdate = AcpSessionNotification['update'];
 
+/** What a step did through the host's fs or shell adapters, as `workspace_access` names it. */
+const OPERATION_OF: Readonly<Record<AcpClientMethod, string>> = {
+  'fs/read_text_file': 'read_file',
+  'fs/write_text_file': 'write_file',
+  'terminal/create': 'run_command',
+  'terminal/output': 'read_output',
+  'terminal/wait_for_exit': 'wait',
+  'terminal/kill': 'kill',
+  'terminal/release': 'release',
+};
+
 /** Flatten an ACP content block for the text event surface. */
 function blockText(
   block: Extract<
@@ -168,7 +180,7 @@ export class AcpEventBridge {
   private readonly lineages = new Map<string, ReadonlyArray<AcpChildInfo>>();
   /** Each announced child's status, shown once it is. */
   private readonly statuses = new Map<string, ChildStatus>();
-  /** A nested agent's own tool calls by id, named as it announced them. */
+  /** The agent's own (not bridged) tool calls still open, by id, named as it announced them. */
   private readonly ownToolNames = new Map<string, string>();
   private readonly step: Pick<StepAcpAgent, 'id' | 'emit'>;
   private readonly ctx: Context<ContextData>;
@@ -359,8 +371,10 @@ export class AcpEventBridge {
       child.bridge.forwardActivity(activity);
       return;
     }
-    this.framework('acp_client_activity', {
-      ...activity,
+    const { method, sessionId: _session, ...access } = activity;
+    this.framework('workspace_access', {
+      operation: OPERATION_OF[method],
+      ...access,
     });
   }
 
@@ -425,33 +439,12 @@ export class AcpEventBridge {
     });
   }
 
-  /** Forward one notification: a structured framework event + the mapped sdk events. */
+  /** Forward one notification of the turn as the events a model call emits. */
   forward(notification: AcpSessionNotification): void {
     if (!this.broadcaster) {
       return;
     }
-    this.framework('acp_event', {
-      sessionId: notification.sessionId,
-      update: notification.update,
-    });
     this.translate(notification.update);
-  }
-
-  /**
-   * Forward one update `session/load` replayed: the loaded session's history,
-   * not this turn's output. It reaches raw-event consumers as an `acp_event`
-   * marked `replay: true` (same step, agent and session attribution) and is
-   * never translated into text, reasoning or function-call events.
-   */
-  forwardReplay(notification: AcpSessionNotification): void {
-    if (!this.broadcaster) {
-      return;
-    }
-    this.framework('acp_event', {
-      sessionId: notification.sessionId,
-      update: notification.update,
-      replay: true,
-    });
   }
 
   /**
@@ -487,11 +480,6 @@ export class AcpEventBridge {
       this.start();
       this.sdk('response.completed', {
         stopReason: result.stopReason,
-        ...(result.reportedUsage
-          ? {
-              reportedUsage: result.reportedUsage,
-            }
-          : {}),
       });
       this.completed = true;
     }
@@ -517,10 +505,10 @@ export class AcpEventBridge {
   }
 
   /**
-   * A nested agent's tool call that finished, as the generic tool event: its
-   * own tools are not bridged, so nothing else reports it.
+   * One of the agent's own tool calls that finished, as the generic tool
+   * event: its own tools are not bridged, so nothing else reports it.
    */
-  private childToolSettled(
+  private ownToolSettled(
     update: Extract<
       SessionUpdate,
       {
@@ -541,6 +529,31 @@ export class AcpEventBridge {
       error: update.status === 'failed',
     });
     this.ownToolNames.delete(update.toolCallId);
+  }
+
+  /**
+   * One of the agent's own tool calls, after its call item, as the `callModel`
+   * tool loop reports one. A call to one of the step's bridged tools is
+   * reported by the bridge, once.
+   */
+  private ownToolStarted(
+    update: Extract<
+      SessionUpdate,
+      {
+        sessionUpdate: 'tool_call';
+      }
+    >,
+  ): void {
+    if (this.toolNameOf(update.title)) {
+      return;
+    }
+    this.ownToolNames.set(update.toolCallId, update.title);
+    this.framework('tool_call_started', {
+      name: update.title,
+      callId: update.toolCallId,
+    });
+    // A call reported already finished is settled at once.
+    this.ownToolSettled(update);
   }
 
   //#region internals
@@ -679,19 +692,9 @@ export class AcpEventBridge {
   }
 
   private translate(update: SessionUpdate): void {
-    // A nested agent's own tools have no other reporter; a call to one of the
-    // step's bridged tools is reported by the bridge, once.
-    if (this.scope && update.sessionUpdate === 'tool_call' && !this.toolNameOf(update.title)) {
-      this.ownToolNames.set(update.toolCallId, update.title);
-      this.framework('tool_call_started', {
-        name: update.title,
-        callId: update.toolCallId,
-      });
-      // A call reported already finished is settled at once.
-      this.childToolSettled(update);
-    }
-    if (this.scope && update.sessionUpdate === 'tool_call_update') {
-      this.childToolSettled(update);
+    if (update.sessionUpdate === 'tool_call_update') {
+      this.ownToolSettled(update);
+      return;
     }
     if (update.sessionUpdate === 'agent_message_chunk') {
       this.openMessage();
@@ -719,14 +722,11 @@ export class AcpEventBridge {
         this.toolNameOf(update.title) ?? update.title,
         update.rawInput,
       );
+      this.ownToolStarted(update);
       return;
     }
-    // `user_message_chunk` (replayed history), `tool_call_update`, `plan`,
-    // `available_commands_update`, and `current_mode_update` have no model-stream
-    // analogue; they surface on the full stream under their protocol names.
-    this.sdk(`acp.${update.sessionUpdate}`, {
-      update,
-    });
+    // Every other update is session state (modes, commands, config options,
+    // plans, context occupancy) or replayed history: not output.
   }
 
   //#endregion

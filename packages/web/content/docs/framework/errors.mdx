@@ -630,7 +630,7 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Cause:** A step sets `session.reuse` but leaves `keepAlive` at `'step'`, so the connection closes before another step can share it.
 
-**Fix:** Add `keepAlive: 'run'` to share the connection for the rest of the run, or `keepAlive: 'harness'` to keep it past the run and close it yourself with `harness.closeAcpSessions()`.
+**Fix:** Add `keepAlive: 'run'` to share the connection for the rest of the run, or `keepAlive: 'harness'` to keep it past the run and close it yourself with `harness.close()`.
 
 #### ACP_SESSION_AGENT_CONFLICT
 

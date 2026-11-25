@@ -518,11 +518,11 @@ const review = step.acpAgent({
 
 `codex()`, `gemini()`, `opencode()` (native `opencode acp`), `pi()` (community `pi-acp` adapter), and `customAcpAgent({ agentId, command, args, env, transport })` take the same shape. Every preset accepts `command` / `args` / `env` overrides plus a `transport` for non-stdio reach. `claudeCode()` / `codex()` run the maintained `@agentclientprotocol/claude-agent-acp` / `@agentclientprotocol/codex-acp` bridges (`PRESET_COMMANDS`). A local agent runs as its own process group: closing the connection or aborting the step ends stdin, sends `SIGTERM`, waits 2 s, then `SIGKILL`s the group (Windows: `taskkill /T /F`), so a wrapper's grandchild never outlives it; a missing binary rejects at connect with `AcpConnectError`.
 
-The interpreter mirrors `executeCallModel`: it appends the prompt as a user item, opens (or reuses) a connection + session, applies `mode`/`model`, drives one `session/prompt`, forwards each notification as an `acp_event` framework event (`{ stepId, agentId, sessionId, update }`; every current `session/update` variant is accepted, `usage_update` included — context occupancy, never charged as tokens; the prompt answer's `usage` is `AcpTurnResult.reportedUsage` and `reportedUsage` on `response.completed`), appends the turn's items to the item log, charges `ctx.tokens`/`ctx.cost`, records `ctx.lastStepMeta`, tears the connection down per policy, and returns the assistant text (or the parsed `output`).
+The interpreter mirrors `executeCallModel`: it appends the prompt as a user item, opens (or reuses) a connection + session, applies `mode`/`model`, drives one `session/prompt`, streams the turn as the events a `callModel` step emits (text, reasoning, function-call items, `tool_call_started`/`tool_call_completed` for the agent's own tools; session state such as modes, plans and `usage_update` emits nothing), appends the turn's items to the item log, charges `ctx.tokens`/`ctx.cost` (the adapter's usage, else the prompt answer's), records `ctx.lastStepMeta` (`stopReason`, `usage`, `model`, like a `callModel` step), tears the connection down per policy, and returns the assistant text (or the parsed `output`).
 
 **Host death and reattach.** `localMachine()` runs each agent through a detached keeper process (private local socket + token) that owns its stdio and the tool-bridge port, so the agent outlives a crashed or Ctrl-C'd host. Its updates, waiting requests, tool calls and turn result are held. A durable run stores `AcpAgentConnection.reattach` in the step's session record. On resume the step calls `agent.connect({ reattach })` → `attachSession(sessionId)` → `session.resumeTurn()`: the whole in-flight turn streams as output, waiting requests are re-asked, then the result arrives. It prompts (behind `ACP_RESUME_NOTICE`) only when no turn was running, and falls back to `session/load` / a new session when the agent is gone. `AgentHarnessOpts.killAgentsOnExit: true` → `whenHostExits: 'stop'` (the keeper stops the agent when the host's connection drops; directly spawned agents are killed on `exit`). `localMachine(id, { keeper: false, detachedTimeoutMs })` (default `0`, no limit). Remote runners keep agents the same way: `runnerMachine` sends `keep`, the runner launches through a keeper on its machine, and after the channel drops a new channel (`webSocketMachine` / a new `commandMachine` stdio runner) reattaches via `machine.attach(handle)` (`attach` frame). `noetic-acp serve --detached-timeout <ms>`.
 
-**Loaded sessions.** `session.load` (and resume) keep the `modes` and `configOptions` the `session/load` answer advertised, so a follow-up `mode` works on a loaded session. History the agent replays while loading reaches only the raw `acp_event` stream with `replay: true` — never text, reasoning or item events. `model` selects the agent's `model` config option (`session/set_config_option`); `AcpSession.configOptions` lists what the agent advertises. An agent's JSON-RPC rejection fails the step as `step_failed` with its message, `data` detail and code (`Internal error: Authentication required (-32603)`).
+**Loaded sessions.** `session.load` (and resume) keep the `modes` and `configOptions` the `session/load` answer advertised, so a follow-up `mode` works on a loaded session. History the agent replays while loading never reaches the event stream. `model` selects the agent's `model` config option (`session/set_config_option`); `AcpSession.configOptions` lists what the agent advertises. An agent's JSON-RPC rejection fails the step as `step_failed` with its message, `data` detail and code (`Internal error: Authentication required (-32603)`).
 
 **Resume.** On a durable run a cut-off `step.acpAgent` reloads the agent's own session on resume (`session/load`, when the agent advertises `loadSession`; `claudeCode()` and `codex()` do) and sends the prompt behind `ACP_RESUME_NOTICE`; otherwise it opens a new session with the history. Each bridged tool call is recorded as it finishes, keyed by tool, arguments and order, so a call the resumed agent makes again is answered from the record. Tool `durable` applies as in `callModel`: `false` runs again, `true` is held as `outcome` when the host died inside it. A held bridged call waits inside the agent's turn (no parking) until a decision passed to `harness.execute()`; its `HeldCall.callId` is the record id `acp:<step path>/bridged:<tool>:<hash>#<n>`, not the agent's call id.
 
@@ -561,7 +561,7 @@ interface AcpSessionPolicy {
 }
 ```
 
-A connection owns a live agent process, so **keeping one is always an explicit opt-in**: `keepAlive` defaults to `'step'`. `'run'` keeps it for the rest of the root run and the harness collects it; `'harness'` keeps it until the caller runs `await harness.closeAcpSessions()` — nothing closes that one for you, and leaving it open keeps the host process alive.
+A connection owns a live agent process, so **keeping one is always an explicit opt-in**: `keepAlive` defaults to `'step'`. `'run'` keeps it for the rest of the root run and the harness collects it; `'harness'` keeps it until the caller runs `await harness.close()` — nothing closes that one for you, and leaving it open keeps the host process alive.
 
 `reuse` requires `keepAlive: 'run'` or `'harness'` (a connection closed with its step has nothing to share); a reuse key without a scope throws `ACP_REUSE_WITHOUT_KEEPALIVE`. Per-turn state (`permissions`, `onPermissionRequest`, steering, the event stream) is rebound before every turn, so each step gets its own. `clientCapabilities` and the agent itself are connection-level: a step joining an existing session with different ones throws `ACP_SESSION_CAPABILITY_CONFLICT` / `ACP_SESSION_AGENT_CONFLICT`.
 
@@ -635,16 +635,14 @@ for await (const p of harness.getChannelStream(acpPermissionRequests, ACP_PERMIS
 
 Requests are a queue (subscribe ONCE — a second subscriber steals them); decisions are a topic (broadcast, filtered by `requestId`). The handler parks before publishing, since topic delivery reaches only subscribers parked at send time. A prompt waits until answered; it denies on timeout only when one is set (`askUserForPermission({ timeout, onTimeout })`). Because reaching a person means reaching a channel, `onPermissionRequest` receives `(request, ctx, info)` where `info` is `{ agentId, stepId }`.
 
-### Live ACP session control
+### Interrupting and releasing live agents
 
 ```typescript
-harness.listAcpSessions(): AcpSessionInfo[]   // key, agentId, sessionId, keepAlive, mode, commands
-harness.getAcpSession(key): AcpLiveSession | undefined
-harness.cancelAcpSession(key): Promise<boolean>   // session/cancel; connection stays open
-harness.closeAcpSessions(): Promise<void>         // release everything held; idempotent
+harness.abort(scope)    // interrupts a running turn; the agent is sent session/cancel
+harness.close()         // releases every agent connection the harness holds
 ```
 
-Read-and-interrupt only: turns are driven by steps, so a turn started here would bypass the item log, usage accounting, and event bridge. Follow-ups go through a step sharing the `session.reuse` key.
+A host never handles an agent's connection. Follow-ups go through a step sharing the `session.reuse` key, so every turn lands in the item log, usage accounting, and event stream.
 
 ### Serving a harness AS an ACP agent (server direction, spec 31)
 

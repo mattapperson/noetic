@@ -32,6 +32,7 @@ import type {
   FunctionCallItem,
   Item,
   LLMResponse,
+  RoundUsage,
   StepAcpAgent,
   StepMeta,
 } from '@noetic-tools/types';
@@ -127,19 +128,63 @@ function buildContent(opts: {
   return content;
 }
 
+/**
+ * The turn's tokens as a model round reports them: the adapter's own figure
+ * when it supplied one, else what the agent's `session/prompt` answer said.
+ */
+function turnUsage(result: AcpTurnResult): RoundUsage | undefined {
+  if (result.usage) {
+    return {
+      inputTokens: result.usage.input,
+      outputTokens: result.usage.output,
+      cachedTokens: result.usage.cached,
+    };
+  }
+  const reported = result.reportedUsage;
+  if (!reported) {
+    return undefined;
+  }
+  return {
+    inputTokens: reported.inputTokens,
+    outputTokens: reported.outputTokens,
+    ...(typeof reported.cachedReadTokens === 'number'
+      ? {
+          cachedTokens: reported.cachedReadTokens,
+        }
+      : {}),
+    ...(typeof reported.cachedWriteTokens === 'number'
+      ? {
+          cacheWriteTokens: reported.cachedWriteTokens,
+        }
+      : {}),
+  };
+}
+
+/** The turn as a model call's response, for usage accounting and `afterModelCall` layers. */
 function toLlmResponse(result: AcpTurnResult): LLMResponse {
   return {
     items: result.items,
-    usage: {
-      inputTokens: result.usage?.input ?? 0,
-      outputTokens: result.usage?.output ?? 0,
-      cachedTokens: result.usage?.cached,
+    usage: turnUsage(result) ?? {
+      inputTokens: 0,
+      outputTokens: 0,
     },
     cost: result.cost,
   };
 }
 
-function applyTurnResult(ctx: Context<ContextData>, result: AcpTurnResult): void {
+/** The model the session runs with: its `model` config option's current value. */
+function currentModel(session: AcpSession): string | undefined {
+  const option = session.configOptions?.find(
+    (candidate) => candidate.category === 'model' || candidate.id === 'model',
+  );
+  return option?.type === 'select' ? option.currentValue : undefined;
+}
+
+function applyTurnResult(
+  ctx: Context<ContextData>,
+  result: AcpTurnResult,
+  session: AcpSession,
+): void {
   const toolCalls: FunctionCallItem[] = [];
   for (const item of result.items) {
     ctx.itemLog.append(item);
@@ -148,15 +193,21 @@ function applyTurnResult(ctx: Context<ContextData>, result: AcpTurnResult): void
     }
   }
 
-  const llmResponse = toLlmResponse(result);
-  trackUsage(ctx, llmResponse);
+  const usage = turnUsage(result);
+  trackUsage(ctx, toLlmResponse(result));
 
+  const model = currentModel(session);
   const meta: StepMeta = {
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-    usage: result.usage ? llmResponse.usage : undefined,
+    usage,
     cost: result.cost,
     responseItems: result.items,
-    acpStopReason: result.stopReason,
+    stopReason: result.stopReason,
+    ...(model === undefined
+      ? {}
+      : {
+          model,
+        }),
   };
   if (isMutableContext(ctx)) {
     ctx.lastStepMeta = meta;
@@ -527,7 +578,7 @@ function assertReuseIsKeptAlive<TContext, I, O>(step: StepAcpAgent<TContext, I, 
   throw new NoeticConfigError({
     code: 'ACP_REUSE_WITHOUT_KEEPALIVE',
     message: `step.acpAgent(${JSON.stringify(step.id)}) sets session.reuse '${policy.reuse}' but leaves keepAlive at 'step', so the connection closes before any other step can share it.`,
-    hint: "Add `keepAlive: 'run'` to share the connection for the rest of the run, or `keepAlive: 'harness'` to keep it past the run and close it yourself with `harness.closeAcpSessions()`.",
+    hint: "Add `keepAlive: 'run'` to share the connection for the rest of the run, or `keepAlive: 'harness'` to keep it past the run and close it yourself with `harness.close()`.",
   });
 }
 
@@ -1192,8 +1243,8 @@ async function runAcpStep<TContext, I, O>(params: {
     agentId: agent.agentId,
     layers,
     onUpdate: (notification) => {
+      // A loaded session's history is not this turn's output.
       if (reloading) {
-        events.forwardReplay(notification);
         return;
       }
       tools?.observe(notification.update);
@@ -1310,7 +1361,7 @@ async function runAcpStep<TContext, I, O>(params: {
         blocks: turnBlocks,
       }),
     });
-    applyTurnResult(baseCtx, result);
+    applyTurnResult(baseCtx, result, resolution.live.session);
     try {
       assertTurnSucceeded(step.id, result, baseCtx);
     } catch (e) {

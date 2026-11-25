@@ -609,7 +609,7 @@ describe('closing the harness', () => {
       throw new Error('registry close failed');
     };
     let acpClosed = false;
-    harness.closeAcpSessions = async () => {
+    harness.acpSessions.closeAll = async () => {
       acpClosed = true;
     };
     const e = await rejected(harness.close());

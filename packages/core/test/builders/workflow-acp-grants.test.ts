@@ -980,10 +980,10 @@ describe('parseAndRunWorkflow — ACP agent grants', () => {
     // The document opened its own connection rather than taking the host's,
     // and its session ended with its run.
     expect(record.connects).toBe(2);
-    expect(harness.listAcpSessions().map((s) => s.reuseKey)).toEqual([
+    expect(harness.acpSessions.held().map((s) => s.reuseKey)).toEqual([
       'main',
     ]);
-    await harness.closeAcpSessions();
+    await harness.close();
   });
 
   it('still shares one session between two nodes of the same document', async () => {

@@ -119,8 +119,6 @@ import {
   TurnLease,
 } from './deps/runtime';
 import type {
-  AcpLiveSession,
-  AcpSessionInfo,
   AgentConfig,
   AgentHarnessContract,
   CallModelRequest,
@@ -536,9 +534,9 @@ export class AgentHarness<
   /** Threads named by a host-built context's own id, dropped when its run ends. */
   private readonly ownThreads = new Set<string>();
   /**
-   * @internal Live ACP connections. Reached by the interpreter via
-   * `frameworkCast`; use {@link listAcpSessions}, {@link getAcpSession},
-   * {@link cancelAcpSession}, and {@link closeAcpSessions} from outside core.
+   * @internal Live agent connections. Reached by the interpreter via
+   * `frameworkCast`; a host interrupts a turn with {@link abort} and releases
+   * every connection with {@link close}.
    */
   readonly acpSessions = new AcpSessionStore();
   /** @internal Graceful stops in progress; the interpreter and model loop hold on them. */
@@ -549,52 +547,6 @@ export class AgentHarness<
   // must not reach the registry or the secret resolver (spec 35 § Gates, § Secrets).
   // Core modules read the registry and verifier through `harnessInternal`.
   readonly #connections: ConnectionGate;
-
-  /**
-   * Snapshot of every live ACP sub-agent, for a UI that wants to show what is
-   * running and let a user act on it. Read-only: a session's turns are driven
-   * by steps, so nothing here can start work behind the runtime's back.
-   * @public
-   */
-  listAcpSessions(): AcpSessionInfo[] {
-    return this.acpSessions.list();
-  }
-
-  /**
-   * The live connection + session behind a handle from {@link listAcpSessions}
-   * (or a step's `session.reuse` key), or `undefined` when nothing matches.
-   * @public
-   */
-  getAcpSession(key: string): AcpLiveSession | undefined {
-    return this.acpSessions.get(key);
-  }
-
-  /**
-   * Interrupt whatever the sub-agent under `key` is doing, via `session/cancel`.
-   * The connection stays open and the turn still returns — with the `cancelled`
-   * stop reason, which the running step surfaces as a `cancelled` error.
-   * Returns false when nothing matches the key.
-   * @public
-   */
-  async cancelAcpSession(key: string): Promise<boolean> {
-    const entry = this.acpSessions.get(key);
-    if (!entry) {
-      return false;
-    }
-    await entry.session.cancel();
-    return true;
-  }
-
-  /**
-   * Close every ACP connection this harness still holds, whatever its
-   * keep-alive scope. A connection owns a live agent — usually a child process
-   * whose stdio keeps the event loop alive — so a `keepAlive: 'harness'`
-   * session must be closed by its owner or the host will not exit. Idempotent.
-   * @public
-   */
-  async closeAcpSessions(): Promise<void> {
-    await this.acpSessions.closeAll();
-  }
 
   readonly layerStateStore: LayerStateStore;
   /** Per-harness memoization cache for `recallMode: 'eventual'` layers. */
@@ -850,7 +802,7 @@ export class AgentHarness<
         ...this.outputs.values(),
       ].map((output) => () => output.flush()),
       () => this.#connections.close(),
-      () => this.closeAcpSessions(),
+      () => this.acpSessions.closeAll(),
     ]);
   }
 

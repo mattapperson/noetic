@@ -198,7 +198,7 @@ describe('AcpEventBridge', () => {
         currentModeId: 'plan',
       },
     ],
-  ])('surfaces the %s update on the full stream under its protocol name', (name, update) => {
+  ])('emits nothing for the %s update: session state, not output', (_name, update) => {
     const { bridge, events } = bridgeCtx(STEP);
 
     bridge.begin();
@@ -209,21 +209,98 @@ describe('AcpEventBridge', () => {
       }),
     );
 
-    expect(types(events)).toContain(`acp.${name}`);
+    expect(types(events)).toEqual([
+      'response.created',
+    ]);
   });
 
-  it('emits every notification as a raw acp_event framework event', () => {
+  it('never names the protocol on the stream', () => {
     const { bridge, events } = bridgeCtx(STEP);
 
     bridge.begin();
     bridge.forward(textChunk('hello'));
+    bridge.forward({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'c1',
+        title: 'Read',
+        status: 'completed',
+      },
+    });
 
-    // Framework events are namespaced by agent name: `<agent>:<eventType>`.
-    const acpEvent = events.find((e) => e.source === 'framework' && e.type.endsWith(':acp_event'));
-    assert(acpEvent);
-    expect(acpEvent.data.stepId).toBe('review');
-    expect(acpEvent.data.agentId).toBe('claude-code');
-    expect(acpEvent.data.sessionId).toBe('s1');
+    expect(types(events).filter((type) => /acp/.test(type))).toEqual([]);
+  });
+
+  it("reports the agent's own tool calls as the callModel tool loop does, after their call item", () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.forward({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'c1',
+        title: 'Read',
+      },
+    });
+    bridge.forward({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'c1',
+        status: 'in_progress',
+      },
+    });
+    bridge.forward({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'c1',
+        status: 'failed',
+      },
+    });
+    bridge.forward({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'c1',
+        status: 'failed',
+      },
+    });
+
+    const order = types(events).filter(
+      (type) => type === 'response.output_item.done' || /tool_call_(started|completed)$/.test(type),
+    );
+    expect(order).toEqual([
+      'response.output_item.done',
+      'test:tool_call_started',
+      'test:tool_call_completed',
+    ]);
+    const completed = events.find((e) => e.type.endsWith(':tool_call_completed'));
+    expect(completed?.data).toMatchObject({
+      name: 'Read',
+      callId: 'c1',
+      error: true,
+    });
+  });
+
+  it("leaves a call to one of the step's bridged tools to the bridge", () => {
+    const { bridge, events } = bridgeCtx(STEP);
+    bridge.nameToolCalls((title) => (title === 'mcp__noetic__echo' ? 'echo' : undefined));
+
+    bridge.begin();
+    bridge.forward({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'c2',
+        title: 'mcp__noetic__echo',
+        status: 'completed',
+      },
+    });
+
+    expect(types(events).filter((type) => /tool_call_(started|completed)$/.test(type))).toEqual([]);
   });
 
   it('synthesizes text events when the agent streamed nothing', () => {
@@ -376,7 +453,7 @@ describe('AcpEventBridge', () => {
 });
 
 describe('AcpEventBridge — current updates and replay', () => {
-  it('surfaces usage_update raw and on the full stream, never as billed usage (#96)', () => {
+  it('emits nothing for usage_update: context occupancy is not output or billed usage (#96)', () => {
     const { bridge, events } = bridgeCtx(STEP);
 
     bridge.begin();
@@ -389,18 +466,12 @@ describe('AcpEventBridge — current updates and replay', () => {
       },
     });
 
-    const raw = events.find((e) => e.type.endsWith(':acp_event'));
-    assert(raw);
-    expect(raw.data.update).toEqual({
-      sessionUpdate: 'usage_update',
-      used: 22001,
-      size: 258400,
-    });
-    expect(types(events)).toContain('acp.usage_update');
-    expect(types(events)).not.toContain('response.output_text.delta');
+    expect(types(events)).toEqual([
+      'response.created',
+    ]);
   });
 
-  it("puts the prompt answer's reported usage on response.completed", () => {
+  it('closes the turn with only its stop reason, whatever usage the agent reported', () => {
     const { bridge, events } = bridgeCtx(STEP);
 
     bridge.begin();
@@ -416,10 +487,8 @@ describe('AcpEventBridge — current updates and replay', () => {
 
     const completed = events.find((e) => e.type === 'response.completed');
     assert(completed);
-    expect(completed.data.reportedUsage).toEqual({
-      inputTokens: 3,
-      outputTokens: 4,
-      totalTokens: 7,
+    expect(completed.data).toEqual({
+      stopReason: 'end_turn',
     });
   });
 
@@ -435,50 +504,5 @@ describe('AcpEventBridge — current updates and replay', () => {
     const completed = events.find((e) => e.type === 'response.completed');
     assert(completed);
     expect(completed.data.error).toBe('Authentication required (-32000)');
-  });
-
-  it('marks replayed history as replay and never translates it (#100)', () => {
-    const { bridge, events } = bridgeCtx(STEP);
-
-    bridge.forwardReplay(textChunk('what I said yesterday'));
-    bridge.forwardReplay({
-      sessionId: 's1',
-      update: {
-        sessionUpdate: 'tool_call',
-        toolCallId: 'old-call',
-        title: 'Read config',
-      },
-    });
-
-    expect(events).toHaveLength(2);
-    for (const event of events) {
-      expect(event.type.endsWith(':acp_event')).toBe(true);
-      expect(event.data).toMatchObject({
-        stepId: 'review',
-        agentId: 'claude-code',
-        sessionId: 's1',
-        replay: true,
-      });
-    }
-    // The turn itself is still opened by fresh output, not by replay.
-    bridge.begin();
-    bridge.forward(textChunk('new answer'));
-    const deltas = events.filter((e) => e.type === 'response.output_text.delta');
-    expect(deltas.map((e) => e.data.delta)).toEqual([
-      'new answer',
-    ]);
-    const fresh = events.filter((e) => e.type.endsWith(':acp_event') && e.data.replay !== true);
-    expect(fresh).toHaveLength(1);
-  });
-
-  it('honours step.emit for replayed events', () => {
-    const { bridge, events } = bridgeCtx({
-      id: 'quiet',
-      emit: false,
-    });
-
-    bridge.forwardReplay(textChunk('old'));
-
-    expect(events).toHaveLength(0);
   });
 });

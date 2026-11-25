@@ -343,10 +343,8 @@ describe('an ACP step resumed after its host died', () => {
 
     expect(after.newSessions).toBe(0);
     expect(after.loaded).toHaveLength(1);
-    // What the agent replayed while it loaded is marked replay, never new output.
-    const replayed = events.filter((e) => e.type.endsWith(':acp_event') && e.data.replay === true);
-    expect(replayed).toHaveLength(1);
-    expect(JSON.stringify(replayed[0]?.data.update)).toContain('what I said before the crash');
+    // What the agent replayed while it loaded is its history, never new output.
+    expect(JSON.stringify(events)).not.toContain('what I said before the crash');
     const deltas = events
       .filter((e) => e.type === 'response.output_text.delta')
       .map((e) => String(e.data.delta));

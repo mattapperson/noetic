@@ -126,6 +126,22 @@ describe('executeCallModel', () => {
     expect(ctx.lastStepMeta.serviceTier).toBe('priority');
   });
 
+  it('records the model it ran with and that it stopped end_turn', async () => {
+    const step: StepCallModel<ContextData, string, string> = {
+      kind: 'callModel',
+      id: 'test',
+      model: 'gpt-4',
+    };
+    const ctx = makeMockContextWithClient([
+      makeLLMResponse('ok'),
+    ]);
+
+    await executeCallModel(step, 'hi', ctx);
+    assert(ctx.lastStepMeta);
+    expect(ctx.lastStepMeta.stopReason).toBe('end_turn');
+    expect(ctx.lastStepMeta.model).toBe('gpt-4');
+  });
+
   it('leaves lastStepMeta.serviceTier unset when the provider reports none', async () => {
     const step: StepCallModel<ContextData, string, string> = {
       kind: 'callModel',

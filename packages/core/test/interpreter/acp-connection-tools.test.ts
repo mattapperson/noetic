@@ -316,7 +316,7 @@ describe('ACP connection tools', () => {
       'phone_reboot',
     ]);
     expect(released()).toBe(0);
-    await harness.closeAcpSessions();
+    await harness.close();
     await Promise.resolve();
     expect(released()).toBe(1);
   });
