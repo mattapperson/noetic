@@ -54,6 +54,38 @@ describe('streamToChatChunks', () => {
     ]);
   });
 
+  test("leaves a nested agent's output out of the reply", async () => {
+    const chunks = await collect(
+      streamToChatChunks(
+        asStream<StreamEvent>([
+          fwEvent('turn_started', TURN),
+          {
+            ...messageAdded('child-msg'),
+            scope: {
+              id: 'step/agent:child',
+            },
+          },
+          {
+            ...delta('worker draft'),
+            scope: {
+              id: 'step/agent:child',
+            },
+          },
+          delta('the answer'),
+          fwEvent('turn_completed', {
+            turnId: 'turn-1',
+          }),
+        ]),
+        {
+          messageId: MESSAGE_ID,
+        },
+      ),
+    );
+    expect(chunks).toEqual([
+      'the answer',
+    ]);
+  });
+
   test('follows a turn that parks to the end of the turn that is woken', async () => {
     const chunks = await collect(
       streamToChatChunks(

@@ -2,6 +2,7 @@ import type { LLMResponse } from './common';
 import type { Context } from './context';
 import type { ContextLayer } from './context-layer';
 import type { DecideRequest, DecideResponse, DecisionRecord } from './decide';
+import type { AgentScope } from './harness-result';
 import type { OnSteerParams, SteeringDecision, SteerVerdict } from './steering';
 
 /**
@@ -122,6 +123,12 @@ export interface HeldCall {
   readonly request?: unknown;
   /** The question, on a call held with `reason: 'question'`. */
   readonly question?: HeldQuestion;
+  /**
+   * The nested agent that asked (spec 08 § Nested agents), when it was not the
+   * step's own agent. The held call is still the run's to answer: its event is
+   * never scoped, so every host that answers held calls sees it.
+   */
+  readonly scope?: AgentScope;
 }
 
 /**

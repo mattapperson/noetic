@@ -282,6 +282,30 @@ export type AcpBoundElicitationHandler = (
   info: AcpElicitationInfo,
 ) => Promise<acp.CreateElicitationResponse>;
 
+/**
+ * @public One update about a subagent's child session: its announcement on the
+ * session that started it, or the child's own update.
+ */
+export interface AcpChildUpdate {
+  /** The child session. */
+  readonly sessionId: string;
+  readonly update: acp.SessionNotification['update'];
+  /** True for the announcement (`subagent_update` / `subagent_spawned`) on the parent. */
+  readonly announcement: boolean;
+  /**
+   * The child and every subagent above it, outermost first, as last announced:
+   * enough to place it under its whole parent chain on its first activity.
+   */
+  readonly lineage: ReadonlyArray<AcpChildInfo>;
+}
+
+/** @public One subagent as its announcements describe it. */
+export interface AcpChildInfo {
+  readonly sessionId: string;
+  readonly title?: string;
+  readonly description?: string;
+}
+
 /** @public What identifies an agent's question beyond its params. */
 export interface AcpElicitationInfo {
   /**
@@ -359,6 +383,8 @@ export type AcpClientMethod =
 export interface AcpClientActivity {
   /** The ACP client method invoked, e.g. `fs/read_text_file`. */
   method: AcpClientMethod;
+  /** The session that made the call: the step's own, or a subagent's. */
+  sessionId?: string;
   /** Path involved, for the `fs/*` family and `terminal/create`'s cwd. */
   path?: string;
   /** Command line, for `terminal/create`. */
@@ -414,6 +440,12 @@ export interface AcpClientHost {
   onPermissionRequest?: AcpBoundPermissionHandler;
   /** Answers `elicitation/create`. Per-turn; none answers `cancel`. */
   onElicitation?: AcpBoundElicitationHandler;
+  /**
+   * Receives a subagent's child-session traffic and each announcement of a
+   * child, which the runtime shows as a nested agent. Per-turn. Child-session
+   * updates never reach {@link onSessionUpdate}.
+   */
+  onChildUpdate?: (update: AcpChildUpdate) => void;
   /**
    * Receive every `session/update` notification for the active session. Also
    * per-turn — it routes to the running step's event bridge, so a reused

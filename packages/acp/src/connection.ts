@@ -19,6 +19,8 @@ import type * as acp from '@agentclientprotocol/sdk';
 import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import type {
   AcpAgentConnection,
+  AcpChildInfo,
+  AcpChildUpdate,
   AcpClientHost,
   AcpContentBlock,
   AcpLoadSessionOptions,
@@ -499,6 +501,8 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
   private readonly sessions = new Map<string, AcpSessionImpl>();
   /** Each subagent's child session, to the session that announced it. */
   private readonly children = new Map<string, string>();
+  /** What each child's announcements said of it. */
+  private readonly childInfo = new Map<string, AcpChildInfo>();
   /** Updates for a session not yet known, oldest first. */
   private early: AcpSessionNotification[] = [];
   /** Set by {@link openAcpConnection}. */
@@ -515,6 +519,8 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     setup?: Readonly<Record<string, unknown>>;
     /** Where an update of one of this connection's own sessions goes. */
     deliver?: (notification: AcpSessionNotification) => void;
+    /** Where a subagent's child-session traffic goes. */
+    toChild?: (update: AcpChildUpdate) => void;
   } = {};
 
   constructor(
@@ -586,8 +592,27 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     const child = announcedChild(notification.update);
     if (child !== undefined && child !== owner && this.owns(owner)) {
       this.adoptChild(child, owner);
+      this.describe(child, notification.update);
+      this.settings.toChild?.({
+        sessionId: child,
+        update: notification.update,
+        announcement: true,
+        lineage: this.lineageOf(child),
+      });
+      this.drainChild(child);
     }
-    if (this.children.has(owner)) {
+    const parent = this.children.get(owner);
+    if (parent !== undefined) {
+      // A child still speaking is never the oldest to forget.
+      this.adoptChild(owner, parent);
+      if (child === undefined || child === owner) {
+        this.settings.toChild?.({
+          sessionId: owner,
+          update: notification.update,
+          announcement: false,
+          lineage: this.lineageOf(owner),
+        });
+      }
       return;
     }
     if (this.sessions.has(owner)) {
@@ -604,13 +629,97 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     return this.sessions.has(sessionId) || this.children.has(sessionId);
   }
 
+  /** Note a child as the most recently heard from, under its latest parent. */
   private adoptChild(child: string, parent: string): void {
+    // Re-set so a child announced again, or speaking, counts as the newest.
+    this.children.delete(child);
     this.children.set(child, parent);
-    const oldest = this.children.keys().next().value;
-    if (this.children.size > CHILD_LIMIT && oldest !== undefined) {
-      this.children.delete(oldest);
+    this.trimChildren();
+  }
+
+  /**
+   * Forget the children heard from least recently past the cap, never one
+   * another kept child was announced under: a grandchild must still be placed
+   * under its whole chain.
+   */
+  private trimChildren(): void {
+    if (this.children.size <= CHILD_LIMIT) {
+      return;
     }
-    this.early = this.early.filter((held) => held.sessionId !== child);
+    const parents = new Set(this.children.values());
+    for (const child of this.children.keys()) {
+      if (this.children.size <= CHILD_LIMIT) {
+        return;
+      }
+      if (parents.has(child)) {
+        continue;
+      }
+      this.children.delete(child);
+      this.childInfo.delete(child);
+    }
+  }
+
+  /** Keep what an announcement says of a child: its title and description. */
+  private describe(child: string, update: AcpSessionNotification['update']): void {
+    const fields: Record<string, unknown> = {
+      ...update,
+    };
+    const text = (...names: string[]): string | undefined => {
+      for (const name of names) {
+        const value = fields[name];
+        if (typeof value === 'string') {
+          return value;
+        }
+      }
+      return undefined;
+    };
+    const known = this.childInfo.get(child);
+    const title = text('title', 'name') ?? known?.title;
+    const description = text('description', 'task') ?? known?.description;
+    this.childInfo.set(child, {
+      sessionId: child,
+      ...(title === undefined
+        ? {}
+        : {
+            title,
+          }),
+      ...(description === undefined
+        ? {}
+        : {
+            description,
+          }),
+    });
+  }
+
+  /** `sessionId` and the children above it, outermost first. */
+  private lineageOf(sessionId: string): AcpChildInfo[] {
+    const chain: AcpChildInfo[] = [];
+    const seen = new Set<string>();
+    for (let at: string | undefined = sessionId; at !== undefined && this.children.has(at); ) {
+      if (seen.has(at)) {
+        break;
+      }
+      seen.add(at);
+      chain.unshift(
+        this.childInfo.get(at) ?? {
+          sessionId: at,
+        },
+      );
+      at = this.children.get(at);
+    }
+    return chain;
+  }
+
+  /** A child's updates held before it was announced, routed now as its own, in order. */
+  private drainChild(child: string): void {
+    const held = this.early.filter((notification) => notification.sessionId === child);
+    if (held.length === 0) {
+      return;
+    }
+    this.early = this.early.filter((notification) => notification.sessionId !== child);
+    for (const notification of held) {
+      this.route(notification);
+    }
   }
 
   /** The sink the client hands every `session/update` notification. */
@@ -712,6 +821,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
   async letGo(): Promise<void> {
     this.sessions.clear();
     this.children.clear();
+    this.childInfo.clear();
     this.early = [];
     this.watch.shutdown();
     await this.transport.detach?.().catch(() => undefined);
@@ -722,6 +832,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
   async close(): Promise<void> {
     this.sessions.clear();
     this.children.clear();
+    this.childInfo.clear();
     this.early = [];
     // Reject anything still in flight first. Once the transport is down
     // nothing can answer it, so a pending request would hang forever.
@@ -766,6 +877,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     }
     for (const child of gone) {
       this.children.delete(child);
+      this.childInfo.delete(child);
     }
   }
 
@@ -963,6 +1075,8 @@ export async function openAcpConnection(
       sink?.(notification);
       host.onSessionUpdate(notification);
     },
+    // Read at call time: the runtime rebinds it for every turn.
+    toChild: (update) => host.onChildUpdate?.(update),
   };
   return connection;
 }

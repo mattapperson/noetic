@@ -696,14 +696,107 @@ interface SdkStreamEvent {
   readonly data: Record<string, unknown>;
   readonly outputIndex?: number;
   readonly contentIndex?: number;
+  readonly scope?: AgentScope;  // a nested agent's event (§ Nested agents)
 }
 
 interface FrameworkStreamEvent {
   readonly source: 'framework';
   readonly type: `${string}:${string}`;  // e.g. 'myagent:step_started'
   readonly data: Record<string, unknown>;
+  readonly scope?: AgentScope;
+}
+
+interface AgentScope {
+  readonly id: string;        // unique in the execution, stable for the agent's life
+  readonly parentId?: string; // the nested agent that started this one
+  readonly title?: string;    // what the agent that started it calls it
 }
 ```
+
+### Nested agents
+
+An agent step's agent may run **subagents** of its own (`27-acp-agent-steps`
+§ Subagents). Each is a nested agent: its events carry a `scope` naming it,
+and everything else about them is the ordinary event surface — its text,
+reasoning and tool calls are the same `sdk` events a `callModel` step emits,
+its items the same `item_appended`. A host needs nothing agent-specific to
+show one.
+
+- **The run's own output carries no scope.** `getTextStream()`,
+  `getReasoningStream()` and `getItemStream()` — and the display output a
+  session persists, which folds the same way — leave scoped events out:
+  a nested agent's answer is never the run's. `getFullStream()` keeps them.
+  Every flat transcript built from the full stream does the same: a chat
+  reply (`29-chat-platform-integration`) and a served session's updates to its
+  editor (`31-acp-server`) carry the run's own output only.
+- **It shows when it works.** A nested agent appears with its first activity
+  in a turn — an update, a request, a call — opened under its whole parent
+  chain, ancestors first. Being announced alone shows nothing: a subagent that
+  does no work in a turn is not one of its nested agents.
+- **Everything a nested agent does is its own.** Its tool calls are the
+  generic `tool_call_started` / `tool_call_completed` (scoped), once each; a
+  call it makes through the step's tool bridge is reported by the bridge, on
+  its scope, and never joins the step's items. The bridge places a call by the
+  `tool_call` that announced it — the MCP request names no session. A call
+  the step's own agent announced is the step's at once, whatever a subagent
+  announces under the same id — even one a subagent announced first and that
+  is already running, whose result then goes to the step. Any other call runs at once as the step's,
+  provisionally. In a turn where no subagent has spoken yet, it is the step's
+  for good the moment it finishes, and its result item joins the step's items
+  and item stream at once. Once a subagent has spoken in the turn, the call
+  first waits a moment for its announcement, and if it is still unannounced:
+  it is never dropped, its `tool_call_started` / `tool_call_completed` are
+  reported on the step as it runs, and its result item waits for the turn's
+  end — whether the turn finishes or fails — when, with every announcement
+  in, a subagent that announced it by then takes it (the item goes to that
+  nested agent) and otherwise it joins the step's items and item stream. A
+  step result that finishes after a waiting one waits behind it, so the step's
+  item stream keeps the order calls finished. A call the agent gives up on
+  while its owner is being settled never runs. When the step's items are
+  merged with the agent's own record of the turn, a bridged call replaces the
+  agent's pair for it — matched first by the exact call id, then by the tool's
+  exact title, each pair at most once — and a call the agent never recorded is
+  added in the order it finished.
+  A call that needs approval or leaves its result open is held as the run's,
+  its held event unscoped, naming the subagent in `scope` — the subagent known
+  when the hold opens, and a hold opened before its subagent was known is
+  renamed once it is. When another host asks a still-unanswered hold again,
+  the hold keeps its id and its answer and takes that host's `scope`. Opening,
+  renaming, answering and dropping one call take turns in a process, so a
+  renaming never writes back a hold already dropped; across processes
+  renaming is a compare-and-set, so it never writes over an answer, and a
+  renaming never touches a question that replaced the one it read. An answer
+  that loses to a renaming is given again — to the question it was given for
+  only: one whose call was replaced meanwhile by a new question (other
+  arguments, another reason) is refused. A nested agent's place in the turn is
+  learnt before its announcement renames anything, so a subagent's first word
+  can be the announcement itself. Its file and terminal calls
+  are reported on its scope.
+- **Its questions are the run's to answer.** A permission request or a
+  question a nested agent raises is held like any other (§ Held tool calls),
+  its event unscoped so every host that answers held calls sees it; the
+  `HeldCall` names the asker in `scope`.
+- **Each nested agent brackets its own output** with `response.created` /
+  `response.completed`, and its output indexes are its own, so a consumer
+  folding one scope never collides with another.
+- **Its life** is three framework events, each scoped: `agent_started`
+  (`{ title?, description? }`), `agent_status` (`{ status: 'running' | 'idle'
+  | 'waiting' | 'unknown', stopReason? }`) as the agent reports it, and
+  `agent_completed` (`{ status: 'completed' | 'failed' | 'cancelled' }`) when
+  the turn that ran it ends — from its last stop reason; running again clears
+  an earlier one. Once that turn has ended nothing more of it is shown: an
+  update that arrives late opens no new nested agent.
+- **Ids.** `scope.id` is the nested agent's identity — scoped events carry no
+  adapter id. It is the step's dispatch path, the turn, and the subagent's own
+  id (`<path>/turn:<turn>/agent:<id>`), so a steering retry or a later prompt
+  that reuses a child id is another nested agent; `parentId` names the nested
+  agent that started it, absent when the step's own agent did.
+- **Usage.** A nested agent's spend is the step's: the agent reports its turn's
+  usage with its subagents' included, and nothing is charged twice.
+
+`spawn` is not a nested agent. It is a context boundary — a fresh context
+window for the same agent — and its child's output is the run's output, as a
+`loop(spawn(callModel))` relies on; it carries no scope.
 
 ### Framework Events
 
@@ -713,7 +806,7 @@ interface FrameworkStreamEvent {
 | `{name}:item_appended` | Emitted whenever a framework-authored item enters the session log — turn input messages (after `turn_started`), between-rounds inbox injections, tool result items, and the items a step with `emitItems` adds when it finishes, or streams again on replay under `emitItemsOnReplay` (`01-step-type` § Emitting items). Data: `{ item }`. Backs `getItemStream` for everything the SDK stream cannot carry, so it is emitted unconditionally — never filtered by `step.emit`. |
 | `{name}:custom_item_event` | One event of a declared custom item, as a step yields it (`34-custom-items`). Data: `{ id, type, event }`; `id` is the one its final item takes. Emitted unconditionally, like `item_appended`. |
 | `{name}:turn_completed` | Emitted when a turn completes. Data: `{ turnId, durationMs }` |
-| `{name}:tool_call_held` | Emitted when a tool call is held for a person (§ Held tool calls). Data: the `HeldCall`: `{ callId, name, args, argsHash, reason, dueAt?, onDue?, request? }` |
+| `{name}:tool_call_held` | Emitted when a tool call is held for a person (§ Held tool calls). Never scoped. Data: the `HeldCall`: `{ callId, name, args, argsHash, reason, dueAt?, onDue?, request?, question?, scope? }` — `scope` names the nested agent asking |
 | `{name}:tool_call_settled` | Emitted when a call this process announced held stops being held (§ Held tool calls). Data: the `HeldCallSettled`: `{ callId, name, argsHash, reason, by }` |
 | `{name}:turn_replayed` | Emitted when a message delivered again is answered from its finished turn's record (`23a-step-level-resume` § Sessions). Data: `{ messageIds, text }`, `text` being the recorded answer |
 | `{name}:turn_parked` | Emitted in place of `turn_completed` when a turn parks (`23-durable-execution` § Parked turns). Data: `{ turnId, durationMs, wakeAt }` |
@@ -739,12 +832,15 @@ interface FrameworkStreamEvent {
 | `{name}:stream_pipe_error` | Emitted when SDK stream piping fails. Data: `{ error }` |
 | `{name}:spend_pending` | Emitted when a paid call is left with no settled bill, or `restore()` finds one (`23-durable-execution` § Paid dispatches). Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }`, or `{ id, unreadable: true, unbounded: true }` for a record that no longer reads |
 | `{name}:spend_settled` | Emitted when a pending paid call is settled or written off. Data: `{ id, cost, writtenOff? }` |
+| `{name}:agent_started` | A nested agent started (§ Nested agents). Scoped. Data: `{ stepId, title?, description? }` |
+| `{name}:agent_status` | A nested agent reported its status. Scoped. Data: `{ stepId, status, stopReason? }` |
+| `{name}:agent_completed` | The turn that ran a nested agent ended. Scoped. Data: `{ stepId, status }` |
 | `{name}:drain_started` | Emitted when a graceful stop begins (see Graceful Stop). Data: `{ executionId, deadline, inFlight }` |
 | `{name}:drain_finished` | Emitted when a graceful stop ends, just before the cancel. Data: `{ executionId, reason, durationMs, finished, cutOff }` |
 
 ### Streaming Scope
 
-Events from the entire step composition tree flow through `HarnessResult`. All callModel steps encountered during execution (including within loops, conditionals, inParallel paths, and spawns) emit SDK stream events. Non-callModel steps emit framework lifecycle events only.
+Events from the entire step composition tree flow through `HarnessResult`. All callModel steps encountered during execution (including within loops, conditionals, inParallel paths, and spawns) emit SDK stream events, as do agent steps; an agent step's subagents emit them scoped (§ Nested agents). Every other step emits framework lifecycle events only.
 
 ### Event Emission Control
 
@@ -1041,6 +1137,8 @@ const harness = new AgentHarness({
 - **It never blocks the turn.** The harness does not wait on the handler: the call waits on its record, as it would for any answer, and a turn may park meanwhile. A handler that throws is logged; the call stays held.
 - **The signal.** It aborts when the call is settled any way: a decision passed to `execute()`, a deadline, a steer applied at the `held` point, a cancelled or interrupted turn, an agent that stopped waiting, or `harness.close()`. On storage with `swap`, another harness may settle the call and finish its turn: while any call is watched, the harness reads their records again every two seconds, and settles as `answer` each one that is gone, answered, or held now for another question: another harness settled it, and this one cannot tell how, so a turn the other harness cancelled reads as answered too. Each emits `{name}:tool_call_settled` on the stream the call was announced on, except `close()`, which only aborts. An answer the handler itself returns settles the call the same way.
 - **After a restart.** A handler lives in the process that saw the call held. A turn parked on a held call in a process that died has no handler waiting on it; a host lists such calls with `pending()` on start and answers them with `execute()`.
+
+A held call raised by a nested agent carries `scope` (`AgentScope`, § Nested agents): the run still holds it and any host answers it, and the scope says who is waiting.
 
 `HeldCall`, `HeldCallSettled`, `HeldCallHandler`, `HeldCallContext` and `HeldQuestion` are exported from `@noetic-tools/core` and `@noetic-tools/types`. `readHeldCallEvent(event)` reads a stream event as `{ type: 'held', call: HeldCall }` or `{ type: 'settled', settled: HeldCallSettled }`, validated — every reason, a question's `question` included — and `undefined` for any other event, so a host that follows the stream rather than `onHeld` never parses the data by hand.
 

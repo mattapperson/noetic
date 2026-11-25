@@ -394,3 +394,348 @@ describe('a held question', () => {
     }
   });
 });
+
+describe('a hold asked again by another host', () => {
+  it('keeps its id and answer, and takes the asking host’s scope while unanswered', async () => {
+    const holds = new HeldCalls(createInMemoryStorage(), () => 0);
+    const first = {
+      ...question('q2'),
+      scope: {
+        id: 'step/turn:aaaa/agent:c1',
+        title: 'Explore',
+      },
+    };
+    await holds.open('exec', first);
+    const again = await holds.open('exec', {
+      ...question('q2'),
+      scope: {
+        id: 'step/turn:bbbb/agent:c1',
+        title: 'Explore',
+      },
+    });
+    expect(again.scope?.id).toBe('step/turn:bbbb/agent:c1');
+    expect((await holds.load('exec', 'q2'))?.scope?.id).toBe('step/turn:bbbb/agent:c1');
+
+    await holds.resolve('exec', {
+      callId: 'q2',
+      resolution: {
+        action: 'deny',
+      },
+    });
+    const answered = await holds.open('exec', {
+      ...question('q2'),
+      scope: {
+        id: 'step/turn:cccc/agent:c1',
+      },
+    });
+    // Answered, it is left as it was: the answer is what matters now.
+    expect(answered.scope?.id).toBe('step/turn:bbbb/agent:c1');
+    expect(answered.resolution?.action).toBe('deny');
+  });
+});
+
+describe('naming who asks, racing an answer', () => {
+  /** Storage that runs `between` once, just before the first compare-and-set. */
+  function racing(between: () => Promise<void>): ReturnType<typeof createInMemoryStorage> {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const swap = storage.swap?.bind(storage);
+    let raced = false;
+    return {
+      ...storage,
+      async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
+        if (!raced) {
+          raced = true;
+          await between();
+        }
+        return (await swap?.(key, prev, next)) ?? false;
+      },
+    };
+  }
+
+  it('a rescope that loses to an answer never writes over it', async () => {
+    let other: HeldCalls | undefined;
+    const storage = racing(async () => {
+      await other?.resolve('exec', {
+        callId: 'q3',
+        resolution: {
+          action: 'deny',
+        },
+      });
+    });
+    const holds = new HeldCalls(storage, () => 0);
+    other = new HeldCalls(storage, () => 0);
+    await holds.open('exec', question('q3'));
+    const after = await holds.rescope('exec', 'q3', {
+      id: 'new-scope',
+    });
+    expect(after?.resolution?.action).toBe('deny');
+    expect((await holds.load('exec', 'q3'))?.resolution?.action).toBe('deny');
+  });
+
+  it('an answer that loses to a rescope is answered again, not refused', async () => {
+    let other: HeldCalls | undefined;
+    const storage = racing(async () => {
+      await other?.rescope('exec', 'q4', {
+        id: 'another-host',
+      });
+    });
+    const holds = new HeldCalls(storage, () => 0);
+    other = new HeldCalls(storage, () => 0);
+    await holds.open('exec', question('q4'));
+    await holds.resolve('exec', {
+      callId: 'q4',
+      resolution: {
+        action: 'deny',
+      },
+    });
+    const record = await holds.load('exec', 'q4');
+    expect(record?.resolution?.action).toBe('deny');
+    expect(record?.scope?.id).toBe('another-host');
+  });
+});
+
+describe('naming who asks on storage without compare-and-set', () => {
+  it('a rescope and an answer in one process take turns: the answer survives', async () => {
+    const storage = createInMemoryStorage();
+    const set = storage.set.bind(storage);
+    let release: () => void = () => undefined;
+    let paused = false;
+    const holds = new HeldCalls(
+      {
+        ...storage,
+        async set<T>(key: string, value: T): Promise<void> {
+          // Hold the rescope's write until the answer has been submitted.
+          if (!paused && JSON.stringify(value).includes('late-scope')) {
+            paused = true;
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+          }
+          await set(key, value);
+        },
+      },
+      () => 0,
+    );
+    await holds.open('exec', question('q5'));
+    const renaming = holds.rescope('exec', 'q5', {
+      id: 'late-scope',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const answering = holds.resolve('exec', {
+      callId: 'q5',
+      resolution: {
+        action: 'deny',
+      },
+    });
+    release();
+    await Promise.all([
+      renaming,
+      answering,
+    ]);
+    const record = await holds.load('exec', 'q5');
+    expect(record?.resolution?.action).toBe('deny');
+  });
+
+  it('an answer retried after a renaming never lands on a question that replaced it meanwhile', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const swap = storage.swap?.bind(storage);
+    let swaps = 0;
+    const holds = new HeldCalls(
+      {
+        ...storage,
+        async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
+          swaps += 1;
+          // First another host renames the hold; then, as the answer is given
+          // again, another replaces the question.
+          await storage.set(
+            key,
+            swaps === 1
+              ? {
+                  ...question('q7'),
+                  scope: {
+                    id: 'other-host',
+                  },
+                }
+              : {
+                  ...question('q7'),
+                  args: {
+                    message: 'something else',
+                  },
+                },
+          );
+          return (await swap?.(key, prev, next)) ?? false;
+        },
+      },
+      () => 0,
+    );
+    await holds.open('exec', question('q7'));
+    const error = await holds
+      .resolve('exec', {
+        callId: 'q7',
+        resolution: {
+          action: 'deny',
+        },
+      })
+      .catch((e: unknown) => e);
+    assert(isNoeticError(error));
+    expect(error.message).toContain('replaced');
+    expect(swaps).toBe(2);
+    const record = await holds.load('exec', 'q7');
+    expect(record?.resolution).toBeUndefined();
+  });
+
+  it('a renaming that loses to a replacement leaves the new question alone', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const swap = storage.swap?.bind(storage);
+    let raced = false;
+    const holds = new HeldCalls(
+      {
+        ...storage,
+        async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
+          if (!raced) {
+            raced = true;
+            // Another process moves the call on to a question of another kind.
+            await storage.set(key, {
+              ...question('q9'),
+              reason: 'result',
+            });
+          }
+          return (await swap?.(key, prev, next)) ?? false;
+        },
+      },
+      () => 0,
+    );
+    await holds.open('exec', question('q9'));
+    const now = await holds.rescope('exec', 'q9', {
+      id: 'late-scope',
+    });
+    expect(now?.reason).toBe('result');
+    expect(now?.scope).toBeUndefined();
+    const stored = await holds.load('exec', 'q9');
+    expect(stored?.scope).toBeUndefined();
+  });
+
+  it('dropping a hold while its answer is being written settles it as answered', async () => {
+    const storage = createInMemoryStorage();
+    const set = storage.set.bind(storage);
+    let release: () => void = () => undefined;
+    let paused = false;
+    const holds = new HeldCalls(
+      {
+        ...storage,
+        async set<T>(key: string, value: T): Promise<void> {
+          // Stall the answer's write until the hold is being dropped.
+          if (!paused && JSON.stringify(value).includes('"resolution"')) {
+            paused = true;
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+          }
+          await set(key, value);
+        },
+      },
+      () => 0,
+    );
+    const record = question('q10');
+    await holds.open('exec', record);
+    const settled: string[] = [];
+    holds.watch('exec', toHeldCall(record), (event) => {
+      settled.push(event.by);
+    });
+    const answering = holds.resolve('exec', {
+      callId: 'q10',
+      resolution: {
+        action: 'deny',
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const closing = holds.close('exec', 'q10');
+    release();
+    await Promise.all([
+      answering,
+      closing,
+    ]);
+    expect(settled).toEqual([
+      'answer',
+    ]);
+    expect(await holds.load('exec', 'q10')).toBeUndefined();
+  });
+
+  it('a renaming still running when the hold is dropped never writes it back', async () => {
+    const storage = createInMemoryStorage();
+    const set = storage.set.bind(storage);
+    let release: () => void = () => undefined;
+    let paused = false;
+    const holds = new HeldCalls(
+      {
+        ...storage,
+        async set<T>(key: string, value: T): Promise<void> {
+          if (!paused && JSON.stringify(value).includes('late-scope')) {
+            paused = true;
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+          }
+          await set(key, value);
+        },
+      },
+      () => 0,
+    );
+    await holds.open('exec', question('q8'));
+    const renaming = holds.rescope('exec', 'q8', {
+      id: 'late-scope',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const closing = holds.close('exec', 'q8');
+    release();
+    await Promise.all([
+      renaming,
+      closing,
+    ]);
+    expect(await holds.load('exec', 'q8')).toBeUndefined();
+  });
+
+  it('an answer racing a replacement with other arguments is refused, never applied to it', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const swap = storage.swap?.bind(storage);
+    let raced = false;
+    const holds = new HeldCalls(
+      {
+        ...storage,
+        async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
+          if (!raced) {
+            raced = true;
+            // Another host replaces the hold with one for other arguments.
+            await storage.set(key, {
+              ...question('q6'),
+              args: {
+                message: 'something else',
+              },
+            });
+          }
+          return (await swap?.(key, prev, next)) ?? false;
+        },
+      },
+      () => 0,
+    );
+    await holds.open('exec', question('q6'));
+    const error = await holds
+      .resolve('exec', {
+        callId: 'q6',
+        resolution: {
+          action: 'deny',
+        },
+      })
+      .catch((e: unknown) => e);
+    assert(isNoeticError(error));
+    expect(error.message).toContain('replaced');
+  });
+});

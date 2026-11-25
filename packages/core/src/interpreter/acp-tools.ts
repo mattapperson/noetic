@@ -14,6 +14,7 @@ import type {
   AcpToolCall,
   AcpToolHost,
   AcpToolResult,
+  AgentScope,
   Context,
   ContextData,
   ContextLayer,
@@ -44,6 +45,7 @@ import {
   heldScopeOf,
   mayWriteHolds,
   noticeHeld,
+  toHeldCall,
   waitOnHeldCalls,
 } from '../runtime/held-calls';
 import { createToolResultItem, executeToolCall, resolveWireJsonSchema } from '../runtime/tool-call';
@@ -69,6 +71,14 @@ export interface AcpToolBinding {
    * results. A `callModel` step fails on such an error, so the turn must too.
    */
   fail: (error: unknown) => void;
+}
+
+/** One call's binding: where it reports as it runs. */
+interface CallBinding extends AcpToolBinding {
+  /** The nested agent making it, when known to be a subagent's as it starts. */
+  scope?: AgentScope;
+  /** The step's own events: held calls are announced there, never scoped. */
+  stepEvents: AcpEventBridge;
 }
 
 /** One finished bridged call: the pair of items it adds to the log. */
@@ -202,31 +212,48 @@ export function mergeBridgedItems(
   /** Bridge `callId`s now standing where an agent record with another id was. */
   adopted: string[];
 } {
+  // Only the agent's own records are matched — never a pair this merge added —
+  // exact ids before titles, each record claimed once.
+  const slotOf = matchBridgedCalls(items, calls);
   const adopted: string[] = [];
-  const merged = [
-    ...items,
-  ];
-  const claimed = new Set<string>();
-  const unclaimedCall = (match: (item: FunctionCallItem) => boolean): number =>
-    merged.findIndex((item) => isFunctionCall(item) && !claimed.has(item.callId) && match(item));
-  for (const call of calls) {
-    const byId = unclaimedCall((item) => item.callId === call.callItem.callId);
-    const index = byId >= 0 ? byId : unclaimedCall((item) => namesBridgedCall(item, call.wireName));
-    const found = index >= 0 ? merged[index] : undefined;
-    if (!found || !isFunctionCall(found)) {
-      merged.push(call.callItem, call.outputItem);
+  const byRecord = new Map<string, BridgedCall>();
+  for (const [call, index] of slotOf) {
+    const record = items[index];
+    if (!record || !isFunctionCall(record)) {
       continue;
     }
-    claimed.add(found.callId);
-    if (found.callId !== call.callItem.callId) {
+    byRecord.set(record.callId, call);
+    if (record.callId !== call.callItem.callId) {
       adopted.push(call.callItem.callId);
     }
-    const outputIndex = merged.findIndex((item) => isOutputFor(item, found.callId));
-    merged[index] = call.callItem;
-    if (outputIndex >= 0) {
-      merged[outputIndex] = call.outputItem;
-    } else {
-      merged.splice(index + 1, 0, call.outputItem);
+  }
+  const merged: Item[] = [];
+  const placedOutput = new Set<string>();
+  for (const item of items) {
+    if (isFunctionCall(item) && byRecord.has(item.callId)) {
+      const call = byRecord.get(item.callId);
+      if (call) {
+        merged.push(call.callItem);
+        if (!items.some((other) => isOutputFor(other, item.callId))) {
+          merged.push(call.outputItem);
+          placedOutput.add(item.callId);
+        }
+      }
+      continue;
+    }
+    const replacing = [
+      ...byRecord.entries(),
+    ].find(([recordId]) => isOutputFor(item, recordId));
+    if (replacing && !placedOutput.has(replacing[0])) {
+      merged.push(replacing[1].outputItem);
+      placedOutput.add(replacing[0]);
+      continue;
+    }
+    merged.push(item);
+  }
+  for (const call of calls) {
+    if (!slotOf.has(call)) {
+      merged.push(call.callItem, call.outputItem);
     }
   }
   return {
@@ -235,7 +262,70 @@ export function mergeBridgedItems(
   };
 }
 
+/**
+ * Which of the agent's own records each bridged call stands for: by exact id
+ * first, then by the first unclaimed record whose title names its tool. A
+ * call with no record is absent.
+ */
+function matchBridgedCalls(
+  items: ReadonlyArray<Item>,
+  calls: ReadonlyArray<BridgedCall>,
+): Map<BridgedCall, number> {
+  const slotOf = new Map<BridgedCall, number>();
+  const claimed = new Set<number>();
+  const claim = (call: BridgedCall, match: (item: FunctionCallItem) => boolean): void => {
+    const index = items.findIndex(
+      (item, at) => !claimed.has(at) && isFunctionCall(item) && match(item),
+    );
+    if (index >= 0) {
+      claimed.add(index);
+      slotOf.set(call, index);
+    }
+  };
+  for (const call of calls) {
+    claim(call, (item) => item.callId === call.callItem.callId);
+  }
+  for (const call of calls) {
+    if (!slotOf.has(call)) {
+      claim(call, (item) => namesBridgedCall(item, call.wireName));
+    }
+  }
+  return slotOf;
+}
+
 //#endregion
+
+/** Who announced a bridged call: the step's own agent, or a subagent. */
+type CallOwner =
+  | {
+      kind: 'step';
+    }
+  | {
+      kind: 'subagent';
+      sessionId: string;
+    };
+
+/** What the turn knows of one of the agent's tool calls, by its id. */
+interface KnownCall {
+  /** The title its announcement gave. */
+  title?: string;
+  /** Who announced it; the step's own announcement is final. */
+  owner?: CallOwner;
+  /** The record it is held under while it waits on a person. */
+  heldAs?: string;
+}
+
+/** A finished call, in the order calls finished. */
+interface SettledCall extends BridgedCall {
+  readonly callId: string;
+  /**
+   * Set while the call's result item is not yet on the stream: published on
+   * these step events, in queue order, when the turn's calls are taken.
+   */
+  readonly pending?: AcpEventBridge;
+  /** Nobody had announced it: a subagent announcing it by the turn's end takes it. */
+  readonly provisional?: boolean;
+}
 
 //#region Runner
 
@@ -251,12 +341,21 @@ export class AcpToolRunner implements AcpToolHost {
   private readonly wrapped: ReadonlySet<string>;
   private binding: AcpToolBinding | undefined;
   private queue: Promise<unknown> = Promise.resolve();
-  private finished: BridgedCall[] = [];
+  private finished: SettledCall[] = [];
   private round = 0;
   /** Set when a call's pipeline threw: the turn is failing, so no further call runs. */
   private failed = false;
-  /** The agent's announced tool calls, by id, with their titles. */
-  private readonly announced = new Map<string, string>();
+  /** The turn's tool calls the runner has heard of: announced, or held. */
+  private readonly calls = new Map<string, KnownCall>();
+  /** The one call waiting for its announcement (calls run one at a time). */
+  private waiter:
+    | {
+        callId: string;
+        wake: () => void;
+      }
+    | undefined;
+  /** Set once a subagent is heard from this turn: calls may then be theirs. */
+  private subagentsThisTurn = false;
   /** Ids already given to a call this session; an agent may not reuse one. */
   private readonly claimed = new Set<string>();
   /** What each call recorded, so a resumed step replays it (spec 27 § Resuming a step). */
@@ -295,12 +394,14 @@ export class AcpToolRunner implements AcpToolHost {
     this.binding = binding;
     this.round = 0;
     this.failed = false;
+    this.subagentsThisTurn = false;
+    // A new turn: what the last one announced is settled, its leftovers taken.
+    this.calls.clear();
   }
 
   /** Stop running calls: the turn they belonged to has ended. */
   unbind(): void {
     this.binding = undefined;
-    this.announced.clear();
   }
 
   /**
@@ -327,19 +428,180 @@ export class AcpToolRunner implements AcpToolHost {
       ?.name;
   }
 
+  private known(callId: string): KnownCall {
+    const existing = this.calls.get(callId);
+    if (existing) {
+      return existing;
+    }
+    const created: KnownCall = {};
+    this.calls.set(callId, created);
+    return created;
+  }
+
   /** Note an agent `tool_call`, so a call without an id in `_meta` can take its id. */
   observe(update: SessionUpdate): void {
     if (update.sessionUpdate !== 'tool_call') {
       return;
     }
-    this.announced.set(update.toolCallId, update.title);
+    const call = this.known(update.toolCallId);
+    call.title = update.title;
+    // The step's own announcement places a call; no subagent's can take it after.
+    call.owner = {
+      kind: 'step',
+    };
+    this.wake(update.toolCallId);
   }
 
-  /** The calls finished since the last take, in the order they ran. */
+  /**
+   * Note a subagent's update. Its `tool_call` makes a bridged call it makes its
+   * nested agent's — its events go there, and it stays out of the step's items.
+   */
+  observeChild(sessionId: string, update: SessionUpdate): void {
+    this.subagentsThisTurn = true;
+    if (update.sessionUpdate !== 'tool_call') {
+      return;
+    }
+    const call = this.known(update.toolCallId);
+    call.title = update.title;
+    if (call.owner?.kind !== 'step') {
+      call.owner = {
+        kind: 'subagent',
+        sessionId,
+      };
+      this.renameAsker(call, sessionId);
+    }
+    this.wake(update.toolCallId);
+  }
+
+  /** A call already held for a person turns out to be a subagent's: the hold names it. */
+  private renameAsker(call: KnownCall, sessionId: string): void {
+    const binding = this.binding;
+    if (call.heldAs === undefined || !binding || !mayWriteHolds(binding.ctx)) {
+      return;
+    }
+    const scope = binding.events.scopeFor(sessionId);
+    void heldCallsOf(binding.ctx.harness)
+      .rescope(heldScopeOf(binding.ctx), call.heldAs, scope)
+      .catch(() => undefined);
+  }
+
+  private wake(callId: string): void {
+    if (this.waiter?.callId === callId) {
+      this.waiter.wake();
+    }
+  }
+
+  /**
+   * Who made a call, settled before it runs; undefined while nobody has
+   * announced it. The MCP request names no session, so a call is placed by the
+   * `tool_call` that announced it. Once a subagent has spoken this turn, a call
+   * nobody has announced yet first waits a moment for its announcement.
+   */
+  private async ownerOf(callId: string): Promise<CallOwner | undefined> {
+    const known = this.calls.get(callId)?.owner;
+    if (known || !this.subagentsThisTurn) {
+      return known;
+    }
+    await new Promise<void>((resolve) => {
+      const done = (): void => {
+        clearTimeout(timer);
+        this.waiter = undefined;
+        resolve();
+      };
+      const timer = setTimeout(done, ANNOUNCEMENT_GRACE_MS);
+      this.waiter = {
+        callId,
+        wake: done,
+      };
+    });
+    return this.calls.get(callId)?.owner;
+  }
+
+  /** The binding a call reports through: its subagent's nested agent, or the step's. */
+  private bindingFor(binding: AcpToolBinding, owner: CallOwner | undefined): CallBinding {
+    const child =
+      owner?.kind === 'subagent' ? binding.events.childBridge(owner.sessionId) : undefined;
+    const scope = owner?.kind === 'subagent' ? binding.events.scopeFor(owner.sessionId) : undefined;
+    return {
+      ...binding,
+      ...(child
+        ? {
+            events: child,
+          }
+        : {}),
+      ...(scope
+        ? {
+            scope,
+          }
+        : {}),
+      stepEvents: binding.events,
+    };
+  }
+
+  /**
+   * The calls finished since the last take, in the order they ran. A call run
+   * provisionally as the step's is settled now: a subagent that announced it
+   * since takes it — its result item goes to that nested agent, never the
+   * step's items — and otherwise it is the step's.
+   */
   takeFinished(): BridgedCall[] {
-    const finished = this.finished;
+    const taken: BridgedCall[] = [];
+    for (const call of this.finished) {
+      const owner = call.provisional ? this.calls.get(call.callId)?.owner : undefined;
+      if (owner?.kind === 'subagent') {
+        call.pending?.childBridge(owner.sessionId)?.itemAppended(call.outputItem);
+        continue;
+      }
+      call.pending?.itemAppended(call.outputItem);
+      taken.push(call);
+    }
     this.finished = [];
-    return finished;
+    return taken;
+  }
+
+  /**
+   * Put a finished call's result item where it belongs, read from who has
+   * announced the call by now. One queue, in the order calls finished: a
+   * subagent's goes to its nested agent; one nobody announced while a subagent
+   * has spoken this turn waits for the turn's end, and any step result after
+   * it waits behind it, so the stream keeps the order calls finished.
+   */
+  private publish(
+    binding: CallBinding,
+    finished: Omit<SettledCall, 'pending' | 'provisional'>,
+  ): void {
+    const known = this.known(finished.callId);
+    const owner = known.owner;
+    if (owner?.kind === 'subagent') {
+      (binding.stepEvents.childBridge(owner.sessionId) ?? binding.events).itemAppended(
+        finished.outputItem,
+      );
+      return;
+    }
+    const provisional = owner === undefined && this.subagentsThisTurn;
+    if (owner === undefined && !provisional) {
+      // With no subagent about, an unannounced call is the step's for good.
+      known.owner = {
+        kind: 'step',
+      };
+    }
+    const behind = provisional || this.finished.some((settled) => settled.pending !== undefined);
+    this.finished.push({
+      ...finished,
+      ...(provisional
+        ? {
+            provisional,
+          }
+        : {}),
+      ...(behind
+        ? {
+            pending: binding.stepEvents,
+          }
+        : {}),
+    });
+    if (!behind) {
+      binding.stepEvents.itemAppended(finished.outputItem);
+    }
   }
 
   readonly call = (call: AcpToolCall): Promise<AcpToolResult> => {
@@ -372,8 +634,16 @@ export class AcpToolRunner implements AcpToolHost {
         isError: true,
       };
     }
+    const owner = await this.ownerOf(callId);
+    // Waiting for its owner was a wait too: nothing starts once the call is off.
+    if (this.failed || binding.ctx.aborted || call.signal.aborted) {
+      return {
+        output: CANCELLED_OUTPUT,
+        isError: true,
+      };
+    }
     try {
-      return await this.runInRound(binding, call, callId);
+      return await this.runInRound(this.bindingFor(binding, owner), call, callId);
     } catch (e) {
       this.failed = true;
       if (this.binding === binding) {
@@ -387,7 +657,7 @@ export class AcpToolRunner implements AcpToolHost {
   }
 
   private async runInRound(
-    binding: AcpToolBinding,
+    binding: CallBinding,
     call: AcpToolCall,
     callId: string,
   ): Promise<AcpToolResult> {
@@ -440,8 +710,9 @@ export class AcpToolRunner implements AcpToolHost {
   }
 
   private announcedId(wireName: string): string | undefined {
-    for (const [id, title] of this.announced) {
+    for (const [id, { title }] of this.calls) {
       if (
+        title !== undefined &&
         !this.claimed.has(id) &&
         namesBridgedToolCall(this.serverName, wireName, {
           toolCallId: id,
@@ -471,7 +742,7 @@ export class AcpToolRunner implements AcpToolHost {
    * step cut off in between asks again rather than runs again.
    */
   private async settle(
-    binding: AcpToolBinding,
+    binding: CallBinding,
     record: BridgedCallRecord,
     call: {
       params: Parameters<typeof executeToolCall>[0];
@@ -479,16 +750,70 @@ export class AcpToolRunner implements AcpToolHost {
       signal: AbortSignal;
     },
   ): ReturnType<typeof executeToolCall> {
+    const { signal } = call;
+    const callId = call.params.callId;
+    try {
+      return await this.settleHeld(binding, record, call, signal);
+    } finally {
+      // However the call ends, it is no longer waiting on a person.
+      const known = callId === undefined ? undefined : this.calls.get(callId);
+      if (known) {
+        known.heldAs = undefined;
+      }
+    }
+  }
+
+  /**
+   * The nested agent a call is now known to be from — read when each hold opens,
+   * since an announcement can land while the call is running.
+   */
+  private latestScope(binding: CallBinding, callId: string | undefined): AgentScope | undefined {
+    const owner = callId === undefined ? undefined : this.calls.get(callId)?.owner;
+    return owner?.kind === 'subagent' ? binding.stepEvents.scopeFor(owner.sessionId) : undefined;
+  }
+
+  private async settleHeld(
+    binding: CallBinding,
+    record: BridgedCallRecord,
+    call: {
+      params: Parameters<typeof executeToolCall>[0];
+      signal: AbortSignal;
+    },
+    signal: AbortSignal,
+  ): ReturnType<typeof executeToolCall> {
     const { ctx } = binding;
-    const { params, signal } = call;
-    let result = await executeToolCall(params);
+    const params = {
+      ...call.params,
+    };
+    const withLatestScope = (): Parameters<typeof executeToolCall>[0] => {
+      const scope = this.latestScope(binding, params.callId);
+      return scope
+        ? {
+            ...params,
+            scope,
+          }
+        : params;
+    };
+    let result = await executeToolCall(withLatestScope());
     let announced: string | undefined;
     while (result.held !== undefined) {
-      const { held } = result;
+      let held = result.held;
+      // The call may have turned out to be a subagent's since its hold opened.
+      const scope = this.latestScope(binding, params.callId);
+      if (scope && held.scope?.id !== scope.id && mayWriteHolds(ctx)) {
+        const renamed = await heldCallsOf(ctx.harness).rescope(
+          heldScopeOf(ctx),
+          held.callId,
+          scope,
+        );
+        held = renamed ? toHeldCall(renamed) : held;
+      }
       // Said once per question, under the id the agent's other events carry.
       if (announced !== held.reason) {
         announced = held.reason;
-        binding.events.toolEvent('tool_call_held', {
+        // A held call is the run's to answer: announced on the step's events,
+        // never scoped, naming the asker in its data (`HeldCall.scope`).
+        binding.stepEvents.toolEvent('tool_call_held', {
           ...held,
           callId: params.callId ?? held.callId,
           heldAs: held.callId,
@@ -498,13 +823,15 @@ export class AcpToolRunner implements AcpToolHost {
           ctx,
           held,
           emit: (settled) =>
-            binding.events.toolEvent('tool_call_settled', {
+            binding.stepEvents.toolEvent('tool_call_settled', {
               ...settled,
               callId: params.callId ?? settled.callId,
               heldAs: settled.callId,
             }),
         });
       }
+      // While it waits, a subagent identified as its caller renames the asker.
+      this.known(params.callId ?? held.callId).heldAs = held.callId;
       // The wait throws `cancelled` when the agent's signal ends it, as it does for
       // the turn's own abort: only the latter is the turn's to handle.
       const gaveUp = await waitOnHeldCalls({
@@ -526,6 +853,7 @@ export class AcpToolRunner implements AcpToolHost {
       );
       // The agent stopped waiting for this call: nobody is left to give an answer to.
       if (gaveUp) {
+        this.known(params.callId ?? held.callId).heldAs = undefined;
         if (mayWriteHolds(ctx)) {
           await heldCallsOf(ctx.harness).close(heldScopeOf(ctx), held.callId, 'cancelled');
         }
@@ -534,7 +862,7 @@ export class AcpToolRunner implements AcpToolHost {
           error: true,
         };
       }
-      result = await executeToolCall(params);
+      result = await executeToolCall(withLatestScope());
     }
     const stored = await record.store(result);
     if (!mayWriteHolds(ctx)) {
@@ -551,7 +879,7 @@ export class AcpToolRunner implements AcpToolHost {
   }
 
   private async execute(
-    binding: AcpToolBinding,
+    binding: CallBinding,
     call: AcpToolCall,
     callId: string,
     tool: Tool | undefined,
@@ -592,6 +920,11 @@ export class AcpToolRunner implements AcpToolHost {
           layers: binding.layers,
           callId,
           recordId: record.id,
+          ...(binding.scope
+            ? {
+                scope: binding.scope,
+              }
+            : {}),
         },
       }));
     const callItem: FunctionCallItem = {
@@ -612,12 +945,15 @@ export class AcpToolRunner implements AcpToolHost {
       result: result.result,
       error: result.error,
     });
-    this.finished.push({
+    const finished = {
       wireName: call.name,
       callItem,
       outputItem,
+    };
+    this.publish(binding, {
+      ...finished,
+      callId,
     });
-    binding.events.itemAppended(outputItem);
     binding.events.toolEvent('tool_call_completed', {
       name: call.name,
       callId,

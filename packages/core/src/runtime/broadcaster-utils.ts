@@ -1,4 +1,4 @@
-import type { Context } from '@noetic-tools/types';
+import type { AgentScope, Context } from '@noetic-tools/types';
 import type { EventBroadcaster } from './event-broadcaster';
 
 //#region Types
@@ -72,11 +72,18 @@ export function emitFrameworkEvent(opts: {
   agentName: string;
   eventType: string;
   data: Record<string, unknown>;
+  /** The nested agent the event belongs to (spec 08 § Nested agents). */
+  scope?: AgentScope;
 }): void {
   opts.broadcaster?.emit({
     source: 'framework',
     type: `${opts.agentName}:${opts.eventType}`,
     data: opts.data,
+    ...(opts.scope
+      ? {
+          scope: opts.scope,
+        }
+      : {}),
   });
 }
 

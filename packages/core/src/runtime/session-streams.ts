@@ -221,7 +221,7 @@ const ACCUMULATOR_UPDATES: Record<string, AccumulatorUpdate | undefined> = {
 /** @internal Yield text deltas from the session broadcaster. */
 export async function* filterTextStream(broadcaster: EventBroadcaster): AsyncIterable<string> {
   for await (const event of broadcaster) {
-    if (event.source !== 'sdk' || event.type !== 'response.output_text.delta') {
+    if (event.scope || event.source !== 'sdk' || event.type !== 'response.output_text.delta') {
       continue;
     }
     const delta = event.data.delta;
@@ -234,7 +234,7 @@ export async function* filterTextStream(broadcaster: EventBroadcaster): AsyncIte
 /** @internal Yield reasoning-token deltas from the session broadcaster. */
 export async function* filterReasoningStream(broadcaster: EventBroadcaster): AsyncIterable<string> {
   for await (const event of broadcaster) {
-    if (event.source !== 'sdk' || event.type !== 'response.reasoning.delta') {
+    if (event.scope || event.source !== 'sdk' || event.type !== 'response.reasoning.delta') {
       continue;
     }
     const delta = event.data.delta;
@@ -286,6 +286,10 @@ export class ItemStream {
 
   /** The snapshots `event` produces: none, or one. */
   *push(event: StreamEvent): Generator<StreamingItem> {
+    // A nested agent's output is not the run's: only the full stream carries it.
+    if (event.scope) {
+      return;
+    }
     if (event.source === 'framework') {
       yield* frameworkSnapshots(event);
       return;

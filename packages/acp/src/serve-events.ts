@@ -223,6 +223,11 @@ export async function pumpTurnEvents(params: PumpTurnParams): Promise<ServeTurnO
       continue;
     }
     params.observe?.(event);
+    // A nested agent's events are not the session's turn: the editor sees the
+    // agent's own answer, as getTextStream does (spec 08 § Nested agents).
+    if (event.scope) {
+      continue;
+    }
     if (event.source === 'sdk') {
       await handleSdkEvent(state, event);
       continue;

@@ -15,9 +15,12 @@
  */
 
 import type {
+  AcpChildInfo,
+  AcpChildUpdate,
   AcpClientActivity,
   AcpSessionNotification,
   AcpTurnResult,
+  AgentScope,
   Context,
   ContextData,
   Item,
@@ -25,9 +28,99 @@ import type {
 } from '@noetic-tools/types';
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
+import { ContextImpl } from '../runtime/context-impl';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import { errorMessage } from '../util/error-message';
 import { isFunctionCall } from './typeguards';
+
+/** A subagent's status, as the harness's agent events name it. */
+type AgentStatus = 'running' | 'idle' | 'waiting' | 'unknown';
+
+/** How a nested agent ended, as `agent_completed` says. */
+type AgentEnd = 'completed' | 'failed' | 'cancelled';
+
+/** One subagent of the turn, shown as a nested agent. */
+interface ChildAgent {
+  readonly scope: AgentScope;
+  readonly bridge: AcpEventBridge;
+}
+
+/** What a child last announced of its work. */
+interface ChildStatus {
+  status?: AgentStatus;
+  /** Why its work last stopped, when the agent said. */
+  stopReason?: string;
+}
+
+function statusData(status: ChildStatus): Record<string, unknown> {
+  return {
+    status: status.status,
+    ...(status.stopReason === undefined
+      ? {}
+      : {
+          stopReason: status.stopReason,
+        }),
+  };
+}
+
+/** The RFD's `state` and codex-acp's draft states, as agent statuses. */
+const STATUS_OF: Readonly<Record<string, AgentStatus>> = {
+  running: 'running',
+  idle: 'idle',
+  requires_action: 'waiting',
+  unknown: 'unknown',
+  completed: 'idle',
+  failed: 'idle',
+  cancelled: 'idle',
+  disconnected: 'unknown',
+};
+
+/** How a subagent's last stop reason ends it. */
+function endOf(stopReason: string | undefined): AgentEnd {
+  if (stopReason === 'cancelled') {
+    return 'cancelled';
+  }
+  if (stopReason === 'error' || stopReason === 'refusal' || stopReason === 'failed') {
+    return 'failed';
+  }
+  return 'completed';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The state an announcement reports: the RFD's `state.state`, or the draft's `state`. */
+function announcedState(update: AcpChildUpdate['update']): {
+  status?: AgentStatus;
+  stopReason?: string;
+} {
+  const fields: Record<string, unknown> = {
+    ...update,
+  };
+  const state = fields.state;
+  if (typeof state === 'string') {
+    return {
+      status: STATUS_OF[state],
+      ...(state === 'completed' || state === 'failed' || state === 'cancelled'
+        ? {
+            stopReason: state,
+          }
+        : {}),
+    };
+  }
+  if (!isRecord(state) || typeof state.state !== 'string') {
+    return {};
+  }
+  return {
+    status: STATUS_OF[state.state],
+    ...(typeof state.stopReason === 'string'
+      ? {
+          stopReason: state.stopReason,
+        }
+      : {}),
+  };
+}
 
 type SessionUpdate = AcpSessionNotification['update'];
 
@@ -66,14 +159,182 @@ export class AcpEventBridge {
   /** Tool call ids already announced, so a `tool_call_update` never re-opens one. */
   private readonly announcedToolCalls = new Set<string>();
   /** Maps an agent's title for a bridged tool call to the tool's wire name. */
-  private toolNameOf: (title: string) => string | undefined = () => undefined;
+  toolNameOf: (title: string) => string | undefined = () => undefined;
+  /** The turn's subagents by child session id (spec 08 § Nested agents). */
+  private readonly children = new Map<string, ChildAgent>();
+  /** Set when the turn ended: no nested agent opens after that. */
+  private childrenClosed = false;
+  /** Each announced child and the subagents above it, as last announced. */
+  private readonly lineages = new Map<string, ReadonlyArray<AcpChildInfo>>();
+  /** Each announced child's status, shown once it is. */
+  private readonly statuses = new Map<string, ChildStatus>();
+  /** A nested agent's own tool calls by id, named as it announced them. */
+  private readonly ownToolNames = new Map<string, string>();
+  private readonly step: Pick<StepAcpAgent, 'id' | 'emit'>;
+  private readonly ctx: Context<ContextData>;
+  /** Prefix of the scope ids of this turn's subagents: the step's dispatch path. */
+  private readonly scopeBase: string;
 
-  constructor(step: Pick<StepAcpAgent, 'id' | 'emit'>, agentId: string, ctx: Context<ContextData>) {
+  constructor(
+    step: Pick<StepAcpAgent, 'id' | 'emit'>,
+    agentId: string,
+    ctx: Context<ContextData>,
+    /** The nested agent this bridge speaks for; absent for the step's own agent. */
+    private readonly scope?: AgentScope,
+  ) {
     this.broadcaster = getBroadcaster(ctx);
     this.agentName = ctx.harness.config.name;
     this.stepId = step.id;
     this.agentId = agentId;
     this.emitOption = step.emit;
+    this.step = step;
+    this.ctx = ctx;
+    // One turn's subagents are not another's, even when a steering retry runs
+    // the same dispatch path and the agent reuses a child session id.
+    const path = (ctx instanceof ContextImpl ? ctx.currentDispatch()?.path : undefined) ?? step.id;
+    this.scopeBase = `${path}/turn:${crypto.randomUUID().slice(0, 8)}`;
+  }
+
+  /**
+   * One update about a subagent. Its announcement only registers it — what it
+   * is and its status — so an announcement replayed for a child that does no
+   * work this turn shows nothing. Its own updates open it, under its whole
+   * parent chain, and stream as its output, scoped, never the step's.
+   */
+  forwardChild(child: AcpChildUpdate): void {
+    // Once the turn is over its nested agents are closed: a late update opens
+    // nothing it could never complete.
+    if (!this.broadcaster || this.childrenClosed) {
+      return;
+    }
+    this.lineages.set(child.sessionId, child.lineage);
+    if (child.announcement) {
+      this.noteStatus(child);
+      return;
+    }
+    const agent = this.openChild(child.sessionId);
+    agent?.bridge.forward({
+      sessionId: child.sessionId,
+      update: child.update,
+    });
+  }
+
+  /**
+   * The nested agent a request or a call from session `sessionId` belongs to,
+   * opened if this turn has not shown it yet; undefined for the step's own
+   * session or one never announced.
+   */
+  scopeFor(sessionId: string | undefined): AgentScope | undefined {
+    if (sessionId === undefined) {
+      return undefined;
+    }
+    const known = this.children.get(sessionId);
+    if (known) {
+      return known.scope;
+    }
+    if (this.childrenClosed) {
+      return undefined;
+    }
+    return this.openChild(sessionId)?.scope;
+  }
+
+  /** Remember an announced status; tell it now if the nested agent is showing. */
+  private noteStatus(child: AcpChildUpdate): void {
+    const { status, stopReason } = announcedState(child.update);
+    const previous = this.statuses.get(child.sessionId);
+    // Running again clears an earlier stop: a recovered child does not end
+    // with its old failure.
+    const next: ChildStatus = {
+      status: status ?? previous?.status,
+      stopReason: status === 'running' ? undefined : (stopReason ?? previous?.stopReason),
+    };
+    this.statuses.set(child.sessionId, next);
+    const agent = this.children.get(child.sessionId);
+    if (agent && status !== undefined) {
+      agent.bridge.framework('agent_status', statusData(next));
+    }
+  }
+
+  /** Open `sessionId`'s nested agent, and every one above it first. */
+  private openChild(sessionId: string): ChildAgent | undefined {
+    const lineage = this.lineages.get(sessionId);
+    if (!lineage || lineage.length === 0) {
+      return undefined;
+    }
+    let parent: AgentScope | undefined = this.scope;
+    let agent: ChildAgent | undefined;
+    for (const info of lineage) {
+      agent = this.children.get(info.sessionId) ?? this.startChild(info, parent);
+      parent = agent.scope;
+    }
+    return agent;
+  }
+
+  private startChild(info: AcpChildInfo, parent: AgentScope | undefined): ChildAgent {
+    const scope: AgentScope = {
+      id: `${this.scopeBase}/agent:${info.sessionId}`,
+      ...(parent === undefined
+        ? {}
+        : {
+            parentId: parent.id,
+          }),
+      ...(info.title === undefined
+        ? {}
+        : {
+            title: info.title,
+          }),
+    };
+    const agent: ChildAgent = {
+      scope,
+      bridge: new AcpEventBridge(this.step, this.agentId, this.ctx, scope),
+    };
+    agent.bridge.toolNameOf = this.toolNameOf;
+    this.children.set(info.sessionId, agent);
+    agent.bridge.begin();
+    agent.bridge.framework('agent_started', {
+      ...(info.title === undefined
+        ? {}
+        : {
+            title: info.title,
+          }),
+      ...(info.description === undefined
+        ? {}
+        : {
+            description: info.description,
+          }),
+    });
+    const status = this.statuses.get(info.sessionId);
+    if (status?.status !== undefined) {
+      agent.bridge.framework('agent_status', statusData(status));
+    }
+    return agent;
+  }
+
+  /** The turn is over: every subagent's bracket closes, and it is reported ended. */
+  private closeChildren(fallback: AgentEnd): void {
+    this.childrenClosed = true;
+    for (const [sessionId, agent] of this.children) {
+      const stopReason = this.statuses.get(sessionId)?.stopReason;
+      const end = stopReason === undefined ? fallback : endOf(stopReason);
+      agent.bridge.end(stopReason ?? (end === 'completed' ? 'end_turn' : end));
+      agent.bridge.framework('agent_completed', {
+        status: end,
+      });
+    }
+    // Kept, closed: a call or an audit record that arrives late is still its own.
+  }
+
+  /** Close this bracket without a turn result: a nested agent's work is over. */
+  end(stopReason: string): void {
+    if (!this.broadcaster || this.completed) {
+      return;
+    }
+    this.closeMessage();
+    this.start();
+    this.sdk('response.completed', {
+      stopReason,
+    });
+    this.completed = true;
   }
 
   /**
@@ -90,9 +351,22 @@ export class AcpEventBridge {
    * actually asked us to do, refusals included.
    */
   forwardActivity(activity: AcpClientActivity): void {
+    // A subagent's own file and terminal calls are its nested agent's.
+    const scope = this.scopeFor(activity.sessionId);
+    const child =
+      scope && activity.sessionId !== undefined ? this.children.get(activity.sessionId) : undefined;
+    if (child) {
+      child.bridge.forwardActivity(activity);
+      return;
+    }
     this.framework('acp_client_activity', {
       ...activity,
     });
+  }
+
+  /** The event bridge of the subagent in child session `sessionId`, when the turn has one. */
+  childBridge(sessionId: string): AcpEventBridge | undefined {
+    return this.children.get(sessionId)?.bridge;
   }
 
   /**
@@ -127,6 +401,7 @@ export class AcpEventBridge {
       agentName: this.agentName,
       eventType,
       data,
+      scope: this.scope,
     });
   }
 
@@ -143,6 +418,7 @@ export class AcpEventBridge {
       broadcaster: this.broadcaster,
       agentName: this.agentName,
       eventType: 'item_appended',
+      scope: this.scope,
       data: {
         item,
       },
@@ -186,6 +462,7 @@ export class AcpEventBridge {
     if (!this.broadcaster) {
       return;
     }
+    this.closeChildren(result.stopReason === 'cancelled' ? 'cancelled' : 'completed');
     if (!this.sawText && result.text.length > 0) {
       this.openMessage();
       this.sdk(
@@ -229,6 +506,7 @@ export class AcpEventBridge {
     if (!this.broadcaster || this.completed) {
       return;
     }
+    this.closeChildren('cancelled');
     this.closeMessage();
     this.start();
     this.sdk('response.completed', {
@@ -238,6 +516,33 @@ export class AcpEventBridge {
     this.completed = true;
   }
 
+  /**
+   * A nested agent's tool call that finished, as the generic tool event: its
+   * own tools are not bridged, so nothing else reports it.
+   */
+  private childToolSettled(
+    update: Extract<
+      SessionUpdate,
+      {
+        sessionUpdate: 'tool_call' | 'tool_call_update';
+      }
+    >,
+  ): void {
+    if (update.status !== 'completed' && update.status !== 'failed') {
+      return;
+    }
+    // Not one of its own announced calls: a bridged one, reported by the bridge.
+    if (!this.ownToolNames.has(update.toolCallId)) {
+      return;
+    }
+    this.framework('tool_call_completed', {
+      name: this.ownToolNames.get(update.toolCallId) ?? update.title ?? update.toolCallId,
+      callId: update.toolCallId,
+      error: update.status === 'failed',
+    });
+    this.ownToolNames.delete(update.toolCallId);
+  }
+
   //#region internals
 
   /**
@@ -245,15 +550,21 @@ export class AcpEventBridge {
    * below does the same job for the model-stream surface; both gate on
    * `emitOption` so `emit: false` silences every surface at once.
    */
-  private framework(eventType: string, payload: Record<string, unknown>): void {
+  framework(eventType: string, payload: Record<string, unknown>): void {
     if (!this.broadcaster) {
       return;
     }
-    const data = {
-      stepId: this.stepId,
-      agentId: this.agentId,
-      ...payload,
-    };
+    // A nested agent is named by its scope alone; the adapter's id is the step's.
+    const data = this.scope
+      ? {
+          stepId: this.stepId,
+          ...payload,
+        }
+      : {
+          stepId: this.stepId,
+          agentId: this.agentId,
+          ...payload,
+        };
     if (!shouldEmit(this.emitOption, eventType, data)) {
       return;
     }
@@ -262,6 +573,7 @@ export class AcpEventBridge {
       agentName: this.agentName,
       eventType,
       data,
+      scope: this.scope,
     });
   }
 
@@ -277,6 +589,11 @@ export class AcpEventBridge {
       type,
       data,
       outputIndex,
+      ...(this.scope
+        ? {
+            scope: this.scope,
+          }
+        : {}),
     });
   }
 
@@ -362,6 +679,20 @@ export class AcpEventBridge {
   }
 
   private translate(update: SessionUpdate): void {
+    // A nested agent's own tools have no other reporter; a call to one of the
+    // step's bridged tools is reported by the bridge, once.
+    if (this.scope && update.sessionUpdate === 'tool_call' && !this.toolNameOf(update.title)) {
+      this.ownToolNames.set(update.toolCallId, update.title);
+      this.framework('tool_call_started', {
+        name: update.title,
+        callId: update.toolCallId,
+      });
+      // A call reported already finished is settled at once.
+      this.childToolSettled(update);
+    }
+    if (this.scope && update.sessionUpdate === 'tool_call_update') {
+      this.childToolSettled(update);
+    }
     if (update.sessionUpdate === 'agent_message_chunk') {
       this.openMessage();
       this.sdk(

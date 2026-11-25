@@ -6,6 +6,7 @@
  */
 
 import type {
+  AgentScope,
   BudgetConfig,
   HarnessStatus,
   Item,
@@ -44,6 +45,8 @@ export interface LayerStateResult {
 export interface ForwardedEvent {
   type: string;
   data: Record<string, unknown>;
+  /** The nested agent the event belongs to; absent for the run's own. */
+  scope?: AgentScope;
 }
 
 /** Frames published on the agent child's `GET /stream`. */

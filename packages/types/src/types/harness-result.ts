@@ -12,6 +12,22 @@ export interface SdkStreamEvent {
   readonly data: Record<string, unknown>;
   readonly outputIndex?: number;
   readonly contentIndex?: number;
+  /** The nested agent this event belongs to; absent for the run's own output. */
+  readonly scope?: AgentScope;
+}
+
+/**
+ * @public A nested agent an event belongs to: an agent step's subagent (spec 08
+ * § Nested agents). The run's own output carries none, and the text, reasoning and
+ * item streams leave scoped events out; the full stream keeps them.
+ */
+export interface AgentScope {
+  /** Unique within the execution; stable for the agent's life. */
+  readonly id: string;
+  /** The nested agent that started this one; absent when the step's own agent did. */
+  readonly parentId?: string;
+  /** What the agent that started it calls it (`Explore`, `worker`). */
+  readonly title?: string;
 }
 
 /** @public Framework-originated event, prefixed with the harness config.name. */
@@ -20,6 +36,8 @@ export interface FrameworkStreamEvent {
   /** Prefixed event type (e.g., 'myagent:step_started'). */
   readonly type: `${string}:${string}`;
   readonly data: Record<string, unknown>;
+  /** The nested agent this event belongs to; absent for the run's own events. */
+  readonly scope?: AgentScope;
 }
 
 /** @public Union of all stream event types emitted during execution. */

@@ -270,6 +270,7 @@ export interface AcpTestRigOptions {
   /** Additionally observe the agent's `fs/*` and `terminal/*` calls. */
   onActivity?: (activity: AcpClientActivity) => void;
   onElicitation?: AcpClientHost['onElicitation'];
+  onChildUpdate?: AcpClientHost['onChildUpdate'];
   instructionsMeta?: InstructionsMeta;
   sessionMeta?: Readonly<Record<string, unknown>>;
 }
@@ -386,6 +387,7 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
     steerPermission: opts.steer,
     onPermissionRequest: opts.handler,
     onElicitation: opts.onElicitation,
+    onChildUpdate: opts.onChildUpdate,
     onSessionUpdate: (notification) => {
       updates.push(notification);
     },

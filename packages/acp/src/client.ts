@@ -44,6 +44,9 @@ export function clientCapabilitiesFor(host: AcpClientHost): acp.ClientCapabiliti
             form: {},
           },
         }),
+    // Always: each subagent runs in its own child session and is shown as a
+    // nested agent, never mixed into the step's output (spec 27 § Subagents).
+    subagents: {},
   };
 }
 
@@ -257,6 +260,7 @@ export class NoeticAcpClient implements acp.Client {
     return this.audited(
       {
         method: 'fs/read_text_file',
+        sessionId: params.sessionId,
         path: params.path,
       },
       async () => {
@@ -274,6 +278,7 @@ export class NoeticAcpClient implements acp.Client {
     return this.audited(
       {
         method: 'fs/write_text_file',
+        sessionId: params.sessionId,
         path: params.path,
       },
       async () => {
@@ -300,6 +305,7 @@ export class NoeticAcpClient implements acp.Client {
     return this.audited(
       {
         method: 'terminal/create',
+        sessionId: params.sessionId,
         command: buildCommandLine(params.command, params.args),
         path: params.cwd ?? undefined,
       },

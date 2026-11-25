@@ -6,9 +6,10 @@
  */
 
 import type {
-  AcpBoundElicitationHandler,
   AcpCreateElicitationRequest,
   AcpCreateElicitationResponse,
+  AcpElicitationInfo,
+  AgentScope,
   Context,
   ContextData,
   HeldQuestion,
@@ -111,7 +112,12 @@ function acceptOf(output: unknown): AcpCreateElicitationResponse {
 
 /** Asks an agent's questions as held questions; see {@link questionAsker}. */
 export interface QuestionAsker {
-  readonly ask: AcpBoundElicitationHandler;
+  /** Ask one question; `scope` names the nested agent asking, when not the step's own. */
+  readonly ask: (
+    request: AcpCreateElicitationRequest,
+    info: AcpElicitationInfo,
+    scope?: AgentScope,
+  ) => Promise<AcpCreateElicitationResponse>;
   /** Drop every question this step asked, answered or not: the step is over. */
   release(): Promise<void>;
 }
@@ -153,7 +159,7 @@ export function questionAsker(opts: QuestionAskerOptions): QuestionAsker {
     return `${dispatchOf(opts.ctx, opts.stepId)}:question:${identity}#${ordinal}`;
   };
   return {
-    ask: async (request, info) => {
+    ask: async (request, info, scope) => {
       const base = idOf(request, info.requestId);
       const again = answeredHere.get(base) ?? 0;
       answeredHere.set(base, again + 1);
@@ -175,6 +181,11 @@ export function questionAsker(opts: QuestionAskerOptions): QuestionAsker {
           argsHash: heldArgsHash(name, args),
           reason: 'question',
           question,
+          ...(scope === undefined
+            ? {}
+            : {
+                scope,
+              }),
         },
       });
       return responseOf(answer.resolution);

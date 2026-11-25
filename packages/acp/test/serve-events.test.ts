@@ -61,6 +61,36 @@ const START = fw('turn_started', {
 });
 
 describe('pumpTurnEvents', () => {
+  it("never sends a nested agent's output to the editor as the session's", async () => {
+    const scope = {
+      id: 'step/agent:child',
+    };
+    const { updates } = await pump([
+      START,
+      {
+        ...sdk('response.output_text.delta', {
+          delta: 'worker draft',
+        }),
+        scope,
+      },
+      {
+        ...sdk('response.reasoning.delta', {
+          delta: 'worker thinks',
+        }),
+        scope,
+      },
+      sdk('response.output_text.delta', {
+        delta: 'the answer',
+      }),
+      fw('turn_completed', {
+        turnId: 't1',
+      }),
+    ]);
+    const text = JSON.stringify(updates);
+    expect(text).toContain('the answer');
+    expect(text).not.toContain('worker');
+  });
+
   it('flushes open tool calls as failed when the turn aborts', async () => {
     const { outcome, updates } = await pump([
       START,

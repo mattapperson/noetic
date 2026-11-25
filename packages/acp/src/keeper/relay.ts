@@ -21,6 +21,11 @@
  *   `_noetic/keeper/turn` (hand the session to this host: send the turn's
  *   updates and the agent's waiting requests again, then the turn's result
  *   once there is one).
+ * - Follows the agent's subagents: a child session announced on a session it
+ *   knows (`subagent_update`, or codex-acp's draft `subagent_spawned`) belongs
+ *   to that session's root, so the child's updates and requests — and a
+ *   grandchild's — are delivered, held, journaled and asked again exactly as
+ *   the root's own, each line unchanged.
  */
 
 //#region Types
@@ -48,6 +53,15 @@ type Answer =
       error: unknown;
     };
 
+/** One of the agent's requests still waiting on an answer. */
+interface Pending {
+  readonly line: string;
+  /** The session it names: the root's own, or one of its descendants'. */
+  readonly sessionId?: string;
+  /** The attachment it was last sent to. */
+  askedEpoch?: number;
+}
+
 interface SessionState {
   modes?: unknown;
   configOptions?: unknown;
@@ -66,8 +80,11 @@ interface SessionState {
     epoch: number;
     hostId: Id;
   };
-  /** The agent's requests still waiting on an answer, by the agent's id. */
-  pending: Map<Id, string>;
+  /**
+   * The agent's requests still waiting on an answer, by the agent's id: the
+   * session's own and its descendants'.
+   */
+  pending: Map<Id, Pending>;
 }
 
 /** What {@link AcpRelay} sends. */
@@ -97,6 +114,21 @@ export const KEEPER_METHODS = {
 /** Updates kept per session while no host holds it, beyond which the oldest go. */
 const MAX_BACKLOG = 1e4;
 
+/** Descendant sessions remembered, beyond which the oldest with nothing pending go. */
+const MAX_DESCENDANTS = 1e3;
+
+/** Sessions with updates held before the relay can place them. */
+const MAX_PROVISIONAL_SESSIONS = 64;
+
+/** Updates held per session the relay cannot place yet, beyond which the oldest go. */
+const MAX_PROVISIONAL_UPDATES = 256;
+
+/** Where each announcement names the child session it announces. */
+const CHILD_SESSION_KEYS: Readonly<Record<string, string>> = {
+  subagent_update: 'sessionId',
+  subagent_spawned: 'subagentSessionId',
+};
+
 //#endregion
 
 //#region Helpers
@@ -122,6 +154,19 @@ function sessionIdOf(params: unknown): string | undefined {
   return isRecord(params) && typeof params.sessionId === 'string' ? params.sessionId : undefined;
 }
 
+function updateOf(params: unknown): Json | undefined {
+  return isRecord(params) && isRecord(params.update) ? params.update : undefined;
+}
+
+/** The child session a `session/update` announces, if it announces one. */
+function announcedChild(params: unknown): string | undefined {
+  const update = updateOf(params);
+  const kind = update?.sessionUpdate;
+  const key = typeof kind === 'string' ? CHILD_SESSION_KEYS[kind] : undefined;
+  const child = update && key ? update[key] : undefined;
+  return typeof child === 'string' ? child : undefined;
+}
+
 function line(message: Json): string {
   return JSON.stringify({
     jsonrpc: '2.0',
@@ -141,8 +186,23 @@ export class AcpRelay {
   private nextId = 1;
   private readonly asked = new Map<number, Asked>();
   private readonly sessions = new Map<string, SessionState>();
-  /** The agent's requests that name no session. */
-  private readonly unscoped = new Map<Id, string>();
+  /**
+   * The agent's requests that name no session, or a session the relay cannot
+   * place: every attachment is asked, so none waits on a host forever.
+   */
+  private readonly unscoped = new Map<Id, Pending>();
+  /** Each descendant session, by id, to the root session it belongs to. */
+  private readonly owners = new Map<string, string>();
+  /**
+   * The latest line that announced each descendant, kept in the order the
+   * descendants were first announced (a parent before its children), to tell
+   * a fresh host of them.
+   */
+  private readonly announcements = new Map<string, string>();
+  /** Each descendant's immediate parent session. */
+  private readonly parents = new Map<string, string>();
+  /** Updates for sessions not placed yet, held until one is announced. */
+  private readonly provisional = new Map<string, string[]>();
   private initialized?: unknown;
 
   constructor(private readonly send: RelaySenders) {}
@@ -151,7 +211,7 @@ export class AcpRelay {
   attach(): void {
     this.attached = true;
     for (const pending of this.unscoped.values()) {
-      this.send.toHost(pending);
+      this.ask(pending);
     }
   }
 
@@ -215,7 +275,7 @@ export class AcpRelay {
     const sessionId = sessionIdOf(params);
     if (sessionId && (method === 'session/prompt' || method === 'session/load')) {
       const session = this.session(sessionId);
-      this.claim(session, false);
+      this.claim(sessionId, session, false);
       if (method === 'session/prompt') {
         session.turn = keeperId;
         session.finished = undefined;
@@ -228,6 +288,9 @@ export class AcpRelay {
         id: keeperId,
       }),
     );
+    if (sessionId) {
+      this.adopt(sessionId);
+    }
   }
 
   private sessionInfo(sessionId: string | undefined): KeeperSessionInfo {
@@ -261,7 +324,7 @@ export class AcpRelay {
       });
       return;
     }
-    this.claim(session, true);
+    this.claim(sessionId, session, true);
     if (session.finished) {
       const finished = session.finished;
       session.finished = undefined;
@@ -286,19 +349,35 @@ export class AcpRelay {
    * The current attachment takes the session: what it missed (the whole turn
    * when resuming one, else the backlog) and the agent's waiting requests.
    */
-  private claim(session: SessionState, replayTurn: boolean): void {
+  private claim(sessionId: string | undefined, session: SessionState, replayTurn: boolean): void {
     if (session.claimedBy === this.epoch) {
       return;
     }
     session.claimedBy = this.epoch;
     const missed = replayTurn ? session.journal : session.backlog;
+    // A host that never saw the root's children announced — they were started
+    // by an earlier turn — is told of them first, so it can place their
+    // traffic. Parents come before the children they announced.
+    // Every one, even if the journal repeats it: a journal entry may come
+    // after a grandchild's, and a parent must be placed first.
+    for (const announcement of this.ancestryOf(sessionId)) {
+      this.send.toHost(announcement);
+    }
     for (const update of missed) {
       this.send.toHost(update);
     }
     session.backlog = [];
     for (const pending of session.pending.values()) {
-      this.send.toHost(pending);
+      if (pending.askedEpoch !== this.epoch) {
+        this.ask(pending);
+      }
     }
+  }
+
+  /** Send one of the agent's requests to the attached host. */
+  private ask(pending: Pending): void {
+    pending.askedEpoch = this.epoch;
+    this.send.toHost(pending.line);
   }
 
   private forget(agentId: Id): void {
@@ -307,6 +386,8 @@ export class AcpRelay {
     }
     for (const session of this.sessions.values()) {
       if (session.pending.delete(agentId)) {
+        // A child kept past the cap only while waited on can go now.
+        this.trimOwners();
         return;
       }
     }
@@ -359,7 +440,15 @@ export class AcpRelay {
         : {
             result: message.result,
           };
-    this.remember(asked, answer);
+    const sessionId = this.remember(asked, answer);
+    this.answered(asked, answer);
+    if (sessionId) {
+      // A session it now knows: what the agent sent for it before is placed.
+      this.adopt(sessionId);
+    }
+  }
+
+  private answered(asked: Asked, answer: Answer): void {
     if (asked.method === 'session/prompt') {
       this.turnEnded(asked, answer);
       return;
@@ -369,20 +458,20 @@ export class AcpRelay {
     }
   }
 
-  /** Keep what an answer says about the agent and its sessions. */
-  private remember(asked: Asked, answer: Answer): void {
+  /** Keep what an answer says about the agent and its sessions; the session it names. */
+  private remember(asked: Asked, answer: Answer): string | undefined {
     if (!('result' in answer) || !isRecord(answer.result)) {
-      return;
+      return undefined;
     }
     const result = answer.result;
     if (asked.method === 'initialize') {
       this.initialized = result;
-      return;
+      return undefined;
     }
     const sessionId =
       asked.method === 'session/new' ? sessionIdOf(result) : sessionIdOf(asked.params);
     if (!sessionId) {
-      return;
+      return undefined;
     }
     const session = this.session(sessionId);
     if (asked.method === 'session/new') {
@@ -400,6 +489,7 @@ export class AcpRelay {
         currentModeId: asked.params.modeId,
       };
     }
+    return sessionId;
   }
 
   private turnEnded(asked: Asked, answer: Answer): void {
@@ -425,17 +515,27 @@ export class AcpRelay {
 
   private agentRequest(agentId: Id, params: unknown, raw: string): void {
     const sessionId = sessionIdOf(params);
-    if (!sessionId) {
-      this.unscoped.set(agentId, raw);
+    const rootId = sessionId ? this.rootOf(sessionId) : undefined;
+    if (rootId === undefined) {
+      // No session, or one not placed yet: ask whoever is attached.
+      const pending: Pending = {
+        line: raw,
+        sessionId,
+      };
+      this.unscoped.set(agentId, pending);
       if (this.attached) {
-        this.send.toHost(raw);
+        this.ask(pending);
       }
       return;
     }
-    const session = this.session(sessionId);
-    session.pending.set(agentId, raw);
+    const session = this.session(rootId);
+    const pending: Pending = {
+      line: raw,
+      sessionId,
+    };
+    session.pending.set(agentId, pending);
     if (this.holds(session)) {
-      this.send.toHost(raw);
+      this.ask(pending);
     }
   }
 
@@ -447,8 +547,24 @@ export class AcpRelay {
       }
       return;
     }
-    const session = this.session(sessionId);
-    this.track(session, params);
+    const rootId = this.rootOf(sessionId);
+    if (rootId === undefined) {
+      this.hold(sessionId, raw);
+      return;
+    }
+    const session = this.session(rootId);
+    if (rootId === sessionId) {
+      this.track(session, params);
+    }
+    this.deliver(session, raw);
+    const child = announcedChild(params);
+    if (child) {
+      this.adoptChild(child, sessionId, rootId, raw);
+    }
+  }
+
+  /** An update for a session's root: live to its holder, else kept. */
+  private deliver(session: SessionState, raw: string): void {
     if (session.turn !== undefined) {
       session.journal.push(raw);
     }
@@ -466,7 +582,7 @@ export class AcpRelay {
 
   /** Follow the mode and config option updates a session reports. */
   private track(session: SessionState, params: unknown): void {
-    const update = isRecord(params) && isRecord(params.update) ? params.update : undefined;
+    const update = updateOf(params);
     if (!update) {
       return;
     }
@@ -483,7 +599,153 @@ export class AcpRelay {
 
   //#endregion
 
+  //#region Subagents
+
+  /** A child session, announced under `rootId`'s tree, now belongs to that root. */
+  private adoptChild(child: string, parent: string, rootId: string, announcement: string): void {
+    if (child === rootId || this.sessions.has(child)) {
+      return;
+    }
+    // Re-set so a re-announced child counts as the newest.
+    this.owners.delete(child);
+    this.owners.set(child, rootId);
+    this.parents.set(child, parent);
+    // `set` on a known key keeps its place: first-announced order, latest line.
+    this.announcements.set(child, announcement);
+    // Its waiting requests become its root's before anything is trimmed, so
+    // a child with a request pending is never the one forgotten.
+    this.adoptRequests(child, this.session(rootId));
+    this.trimOwners();
+    this.adopt(child);
+  }
+
+  /**
+   * The announcements of `rootId`'s descendants, each the first that named it,
+   * in the order they were first announced: a parent before its children.
+   */
+  private ancestryOf(rootId: string | undefined): string[] {
+    if (rootId === undefined) {
+      return [];
+    }
+    const lines: string[] = [];
+    for (const [child, announcement] of this.announcements) {
+      if (this.owners.get(child) === rootId) {
+        lines.push(announcement);
+      }
+    }
+    return lines;
+  }
+
+  /**
+   * Forget the descendants heard from least recently past the cap, never one
+   * with a request pending.
+   */
+  private trimOwners(): void {
+    for (const [child, rootId] of this.owners) {
+      if (this.owners.size <= MAX_DESCENDANTS) {
+        return;
+      }
+      if (!this.isWaitedOn(child, rootId) && !this.isParentOfKept(child)) {
+        this.owners.delete(child);
+        this.announcements.delete(child);
+        this.parents.delete(child);
+      }
+    }
+  }
+
+  /** Whether a descendant still kept was announced under `child`: its chain must stay. */
+  private isParentOfKept(child: string): boolean {
+    for (const [kept, parent] of this.parents) {
+      if (parent === child && this.owners.has(kept)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private isWaitedOn(child: string, rootId: string): boolean {
+    const session = this.sessions.get(rootId);
+    if (!session) {
+      return false;
+    }
+    for (const pending of session.pending.values()) {
+      if (pending.sessionId === child) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * A session the relay can now place: its requests asked so far of every
+   * attachment become its root's, and the updates held for it are taken as
+   * if they arrived now (an announcement among them places a grandchild).
+   */
+  private adopt(sessionId: string): void {
+    const rootId = this.rootOf(sessionId);
+    if (rootId === undefined) {
+      return;
+    }
+    this.adoptRequests(sessionId, this.session(rootId));
+    const held = this.provisional.get(sessionId);
+    if (!held) {
+      return;
+    }
+    this.provisional.delete(sessionId);
+    for (const raw of held) {
+      this.fromAgent(raw);
+    }
+  }
+
+  private adoptRequests(sessionId: string, root: SessionState): void {
+    for (const [agentId, pending] of this.unscoped) {
+      if (pending.sessionId !== sessionId) {
+        continue;
+      }
+      this.unscoped.delete(agentId);
+      root.pending.set(agentId, pending);
+    }
+  }
+
+  /** Hold an update for a session the relay cannot place yet. */
+  private hold(sessionId: string, raw: string): void {
+    let held = this.provisional.get(sessionId);
+    if (!held) {
+      held = [];
+      this.provisional.set(sessionId, held);
+      this.trimProvisional();
+    }
+    held.push(raw);
+    if (held.length > MAX_PROVISIONAL_UPDATES) {
+      held.shift();
+    }
+  }
+
+  private trimProvisional(): void {
+    for (const sessionId of this.provisional.keys()) {
+      if (this.provisional.size <= MAX_PROVISIONAL_SESSIONS) {
+        return;
+      }
+      this.provisional.delete(sessionId);
+    }
+  }
+
+  //#endregion
+
   //#region State
+
+  /** The root session a session belongs to: its owner, itself, or none known. */
+  private rootOf(sessionId: string): string | undefined {
+    const owner = this.owners.get(sessionId);
+    if (owner !== undefined) {
+      // A child still heard from is never the oldest to forget — the same
+      // order a host's connection keeps, so both forget the same children.
+      this.owners.delete(sessionId);
+      this.owners.set(sessionId, owner);
+      return owner;
+    }
+    return this.sessions.has(sessionId) ? sessionId : undefined;
+  }
 
   private session(sessionId: string): SessionState {
     let session = this.sessions.get(sessionId);

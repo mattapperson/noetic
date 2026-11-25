@@ -15,6 +15,7 @@ import type {
   AcpClientHost,
   AcpConnectOptions,
   AcpContentBlock,
+  AcpCreateElicitationRequest,
   AcpKeepAlive,
   AcpLiveSession,
   AcpNewSessionOptions,
@@ -47,6 +48,7 @@ import {
 import { assertAgentTakesTools } from '../builders/acp-agent-checks';
 import { runtimeOf } from '../connections/model-tools';
 import type { AcpSessionStore } from '../runtime/acp-session-store';
+import { awaitApproval } from '../runtime/tool-approval';
 import { isRpcError, RpcFailure } from '../util/error-message';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
@@ -230,18 +232,25 @@ function buildSteerer(
  * would not survive the turn stopping, so the turn stays live while the request is
  * held.
  */
-function buildApprover(ctx: Context<ContextData>): AcpPermissionSteerer | undefined {
-  const approve = ctx.harness.approve?.bind(ctx.harness);
-  if (!approve) {
+function buildApprover(
+  ctx: Context<ContextData>,
+  events: AcpEventBridge,
+): AcpPermissionSteerer | undefined {
+  // A harness with no approval seam has none to give.
+  if (!ctx.harness.approve) {
     return undefined;
   }
   return async (request): Promise<AcpPermissionOutcome | undefined> => {
-    const decision = await approve({
+    // `harness.approve()` itself, plus who asks: a subagent's request is held
+    // as the run's, named as its nested agent's.
+    const { decision } = await awaitApproval({
+      harness: ctx.harness,
       toolName: request.toolCall.title ?? request.toolCall.toolCallId,
       toolArgs: request.toolCall.rawInput,
       callId: request.toolCall.toolCallId,
       ctx,
       park: false,
+      scope: events.scopeFor(request.sessionId),
     });
     if (decision.action === SteeringAction.Allow) {
       return {
@@ -266,6 +275,8 @@ interface HostBindingOptions<TContext, I, O> {
   onActivity: NonNullable<AcpClientHost['onClientActivity']>;
   layers?: ContextLayer[];
   onUpdate: AcpClientHost['onSessionUpdate'];
+  /** A subagent's traffic: a nested agent of this turn (spec 08 § Nested agents). */
+  onChildUpdate: NonNullable<AcpClientHost['onChildUpdate']>;
   /** The step's tools, served to the agent; `undefined` when it gave none. */
   tools?: AcpToolRunner;
   events: AcpEventBridge;
@@ -288,7 +299,7 @@ function bindHostToStep<TContext, I, O>(
 ): void {
   host.permissions = opts.step.permissions;
   host.steerPermission = buildSteerer(opts.ctx, opts.layers);
-  host.approvePermission = buildApprover(opts.ctx);
+  host.approvePermission = buildApprover(opts.ctx, opts.events);
   // Bind the executing context into the handler so the protocol client never
   // has to know about `Context` — it just asks a question and gets an answer.
   const handler = opts.step.onPermissionRequest;
@@ -301,8 +312,10 @@ function bindHostToStep<TContext, I, O>(
     : undefined;
   // An agent's question is a question for a person: held like any other (spec 27
   // § Questions the agent asks), answered by whoever answers held calls.
-  host.onElicitation = opts.questions.ask;
+  host.onElicitation = (request, info) =>
+    opts.questions.ask(request, info, opts.events.scopeFor(sessionOfQuestion(request)));
   host.onSessionUpdate = opts.onUpdate;
+  host.onChildUpdate = opts.onChildUpdate;
   host.onClientActivity = opts.onActivity;
   // A step that gives no tools gets none, even on a session another step
   // opened with tools. The session's runner stays listed, so the agent's
@@ -488,6 +501,12 @@ function sessionIsGone(error: unknown): boolean {
     return false;
   }
   return Reflect.get(error, 'code') === RESOURCE_NOT_FOUND;
+}
+
+/** The session a question names, when it names one (form and URL questions do). */
+function sessionOfQuestion(request: AcpCreateElicitationRequest): string | undefined {
+  const sessionId = Reflect.get(request, 'sessionId');
+  return typeof sessionId === 'string' ? sessionId : undefined;
 }
 
 /** Keeping a connection is always explicit; the default closes it with the step. */
@@ -1016,6 +1035,8 @@ async function runTurn<TContext, I, O>(params: {
       }));
   } catch (e) {
     await settle(tools);
+    // What the turn's calls did still reaches the stream, settled to their owners.
+    tools?.takeFinished();
     // Close the turn on the event surface before rethrowing. A consumer driving
     // a UI off `getFullStream()` saw `response.created` and would otherwise
     // wait forever for a completion that never comes — the stream just stops.
@@ -1027,6 +1048,7 @@ async function runTurn<TContext, I, O>(params: {
   }
   await settle(tools);
   if (turnError.error !== undefined) {
+    tools?.takeFinished();
     const failure = stepFailure(step, turnError.error, baseCtx);
     bridge.abort(failure);
     await discardIfFresh(resolution, baseCtx);
@@ -1176,6 +1198,16 @@ async function runAcpStep<TContext, I, O>(params: {
       }
       tools?.observe(notification.update);
       events.forward(notification);
+    },
+    onChildUpdate: (update) => {
+      // A loaded session's history is not this turn's work, its subagents' included.
+      if (reloading) {
+        return;
+      }
+      // Its lineage first: a hold the announcement renames names the nested
+      // agent only once the turn knows where it sits.
+      events.forwardChild(update);
+      tools?.observeChild(update.sessionId, update.update);
     },
     onActivity: (activity: AcpClientActivity) => {
       events.forwardActivity(activity);
