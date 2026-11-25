@@ -24,6 +24,7 @@ import type {
 } from '@noetic-tools/types';
 import { AcpConnectError } from '@noetic-tools/types';
 import { z } from 'zod';
+import type { InstructionsMeta } from './connection';
 import { openAcpConnection } from './connection';
 import { spawnOn } from './spawn';
 import type { AcpToolWiring, ToolBridge, ToolBridgeCredentials } from './tool-bridge';
@@ -55,6 +56,18 @@ export interface DefineAcpAgentOptions {
    * the bridge joins `session/new` with no agent-specific settings.
    */
   tools?: AcpToolWiring;
+  /**
+   * How this agent takes a step's `instructions` when it does not advertise
+   * `sessionCapabilities.systemPrompt`: the `_meta` to send instead. Without
+   * one, such instructions are refused (spec 27 § Instructions).
+   */
+  instructionsMeta?: InstructionsMeta;
+  /**
+   * This agent's own session options, sent as `_meta` on every session it
+   * opens (Claude Code's `{ claudeCode: { options } }`). Vendor options live
+   * here, never on a step.
+   */
+  sessionMeta?: Readonly<Record<string, unknown>>;
 }
 
 /** How one connection reaches its agent: the stream, and the bridge's way there. */
@@ -103,6 +116,8 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
           host: opts.host,
           signal,
           tools: bridge,
+          instructionsMeta: def.instructionsMeta,
+          sessionMeta: def.sessionMeta,
           reattach: reattachHandle(transport.reattach, bridge),
         });
       } catch (e) {
@@ -214,9 +229,15 @@ function lazyLocalMachine(agentId: string): AcpMachineFactory {
 
 /** Closing the agent's stream releases the machine it runs on. */
 function closingWith(transport: AcpTransport, opened: Opened): AcpTransport {
+  const detach = transport.detach?.bind(transport);
   return {
     readable: transport.readable,
     writable: transport.writable,
+    ...(transport.reattach
+      ? {
+          reattach: transport.reattach,
+        }
+      : {}),
     async close() {
       try {
         await transport.close();
@@ -224,6 +245,12 @@ function closingWith(transport: AcpTransport, opened: Opened): AcpTransport {
         await opened.close();
       }
     },
+    // Letting go keeps the machine: it runs the agent a later host reattaches to.
+    ...(detach
+      ? {
+          detach,
+        }
+      : {}),
   };
 }
 
@@ -250,6 +277,7 @@ async function reattachTo(
     whenHostExits,
   });
   let bridge: ToolBridge | undefined;
+  let attached: AcpTransport | undefined;
   try {
     if (!machine.attach) {
       throw new AcpConnectError({
@@ -258,6 +286,7 @@ async function reattachTo(
       });
     }
     const transport = await machine.attach(handle);
+    attached = transport;
     bridge = await openBridge(def, opts, {
       reach: (address) => machine.reach(address),
       reuse: bridgeOf(handle),
@@ -272,14 +301,29 @@ async function reattachTo(
       host: opts.host,
       signal,
       tools: bridge,
+      instructionsMeta: def.instructionsMeta,
+      sessionMeta: def.sessionMeta,
       reattach: reattachHandle(transport.reattach ?? handle, bridge),
       reattached: true,
     });
   } catch (e) {
     await bridge?.close();
-    await machine.close().catch(() => undefined);
+    await letGoOf(attached, machine);
     throw e;
   }
+}
+
+/**
+ * A reattach that failed before this host adopted the agent: let go of it, so
+ * it keeps running for a host that can — never stop it. Only a machine that
+ * reached nothing is closed.
+ */
+async function letGoOf(attached: AcpTransport | undefined, machine: AcpMachine): Promise<void> {
+  if (attached?.detach) {
+    await attached.detach().catch(() => undefined);
+    return;
+  }
+  await machine.close().catch(() => undefined);
 }
 
 const BridgeCredentialsSchema = z.object({

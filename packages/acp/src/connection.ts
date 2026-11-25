@@ -55,7 +55,31 @@ export interface OpenAcpConnectionOptions {
   reattach?: AcpReattachHandle;
   /** The transport reaches an agent an earlier host started (through its keeper). */
   reattached?: boolean;
+  /**
+   * The agent's own way to take instructions when it does not advertise
+   * `sessionCapabilities.systemPrompt`: the `_meta` to send instead.
+   */
+  instructionsMeta?: InstructionsMeta;
+  /**
+   * The agent's own session options, sent as `_meta` on every session this
+   * connection opens. Its keys win over {@link instructionsMeta}'s.
+   */
+  sessionMeta?: Readonly<Record<string, unknown>>;
 }
+
+/** @public See {@link OpenAcpConnectionOptions.instructionsMeta}. */
+export type InstructionsMeta = (instructions: string) => Record<string, unknown>;
+
+/** The `_meta` and `systemPrompt` a session request carries. */
+interface SessionFields {
+  _meta?: Record<string, unknown>;
+  systemPrompt?: acp.SystemPrompt;
+}
+
+/** Updates held for a session nobody has claimed yet, at most. */
+const EARLY_UPDATE_LIMIT = 1e3;
+/** Child sessions remembered per connection, at most; the oldest go first. */
+const CHILD_LIMIT = 1e3;
 
 /** Routes a session's notifications to whichever turn is currently running. */
 type NotificationSink = (notification: AcpSessionNotification) => void;
@@ -126,8 +150,66 @@ const KeeperTurnSchema = z.discriminatedUnion('state', [
   }),
 ]);
 
-function isRecord(value: unknown): boolean {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * What a session is set up with beyond its request, stable across hosts: the
+ * tools the bridge serves (names, descriptions, schemas), the bridge's name and
+ * how it is declared, and the client's path rules. Snapshotted when the
+ * connection opens, which is when the agent reads its tool list.
+ */
+function setupOf(host: AcpClientHost, tools: ToolBridge | undefined): Record<string, unknown> {
+  return {
+    tools: (host.tools?.tools ?? []).map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    })),
+    bridge: tools
+      ? {
+          serverName: tools.server.name,
+          declare: tools.declare ?? null,
+        }
+      : null,
+    paths: {
+      additionalDirectories: [
+        ...(host.capabilities?.additionalDirectories ?? []),
+      ].sort(),
+      allowAnyPath: host.capabilities?.allowAnyPath === true,
+    },
+  };
+}
+
+/** JSON with object keys sorted, so two spellings of one value compare equal. */
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) => {
+    if (!isRecord(inner)) {
+      return inner;
+    }
+    return Object.fromEntries(
+      Object.entries(inner).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+    );
+  });
+}
+
+/**
+ * The child session an update announces: the subagents RFD's
+ * `subagent_update`, or codex-acp's earlier draft `subagent_spawned`.
+ */
+export function announcedChild(update: AcpSessionNotification['update']): string | undefined {
+  if (update.sessionUpdate === 'subagent_update') {
+    return update.sessionId;
+  }
+  // A draft variant the library does not know arrives as sent (update-filter).
+  const draft: Record<string, unknown> = {
+    ...update,
+  };
+  if (draft.sessionUpdate !== 'subagent_spawned') {
+    return undefined;
+  }
+  return typeof draft.subagentSessionId === 'string' ? draft.subagentSessionId : undefined;
 }
 
 /** JSON-RPC's "method not found". */
@@ -167,6 +249,8 @@ class AcpSessionImpl implements AcpSession {
     private readonly death: Promise<never>,
     /** What the agent said it accepts, enforced before a turn goes on the wire. */
     private readonly promptCapabilities: acp.PromptCapabilities | undefined,
+    /** What the session was opened with; undefined on a reattached session. */
+    readonly fingerprint?: string,
   ) {}
 
   get modes(): acp.SessionModeState | undefined {
@@ -308,10 +392,14 @@ class AcpSessionImpl implements AcpSession {
       if (!response) {
         return undefined;
       }
-      return accumulator.result({
+      const result = accumulator.result({
         stopReason: response.stopReason,
         reportedUsage: response.usage ?? undefined,
       });
+      return {
+        ...result,
+        currentModeId: result.currentModeId ?? this.modeState?.currentModeId,
+      };
     } finally {
       opts.signal?.removeEventListener('abort', onAbort);
       this.activeTurn = undefined;
@@ -409,6 +497,25 @@ class AcpSessionImpl implements AcpSession {
 
 class AcpAgentConnectionImpl implements AcpAgentConnection {
   private readonly sessions = new Map<string, AcpSessionImpl>();
+  /** Each subagent's child session, to the session that announced it. */
+  private readonly children = new Map<string, string>();
+  /** Updates for a session not yet known, oldest first. */
+  private early: AcpSessionNotification[] = [];
+  /** Set by {@link openAcpConnection}. */
+  settings: {
+    instructionsMeta?: InstructionsMeta;
+    sessionMeta?: Readonly<Record<string, unknown>>;
+    /** What `initialize` advertised. */
+    capabilities?: acp.ClientCapabilities;
+    /**
+     * What else the agent was set up with when this connection opened, without
+     * anything that changes from host to host (addresses, tokens): the tools
+     * served to it, the bridge's name, and the client's path rules.
+     */
+    setup?: Readonly<Record<string, unknown>>;
+    /** Where an update of one of this connection's own sessions goes. */
+    deliver?: (notification: AcpSessionNotification) => void;
+  } = {};
 
   constructor(
     private readonly agentId: string,
@@ -425,6 +532,9 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
   ) {
     if (reattached) {
       this.attachSession = (sessionId) => this.attachTo(sessionId);
+    }
+    if (transport.detach) {
+      this.detach = () => this.letGo();
     }
   }
 
@@ -448,6 +558,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
       throw new AcpConnectError({
         agentId: this.agentId,
         message: `ACP agent '${this.agentId}' no longer has session ${sessionId}.`,
+        gone: true,
       });
     }
     const session = new AcpSessionImpl(
@@ -462,6 +573,44 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     );
     session.enableResume();
     return this.track(session);
+  }
+
+  /**
+   * Route one `session/update` (spec 27 § Subagents' own sessions): an update
+   * of one of this connection's sessions is delivered; a subagent's child
+   * session's is dropped, never the step's output; one for a session not known
+   * yet is held until it is.
+   */
+  route(notification: AcpSessionNotification): void {
+    const owner = notification.sessionId;
+    const child = announcedChild(notification.update);
+    if (child !== undefined && child !== owner && this.owns(owner)) {
+      this.adoptChild(child, owner);
+    }
+    if (this.children.has(owner)) {
+      return;
+    }
+    if (this.sessions.has(owner)) {
+      this.settings.deliver?.(notification);
+      return;
+    }
+    this.early.push(notification);
+    if (this.early.length > EARLY_UPDATE_LIMIT) {
+      this.early.shift();
+    }
+  }
+
+  private owns(sessionId: string): boolean {
+    return this.sessions.has(sessionId) || this.children.has(sessionId);
+  }
+
+  private adoptChild(child: string, parent: string): void {
+    this.children.set(child, parent);
+    const oldest = this.children.keys().next().value;
+    if (this.children.size > CHILD_LIMIT && oldest !== undefined) {
+      this.children.delete(oldest);
+    }
+    this.early = this.early.filter((held) => held.sessionId !== child);
   }
 
   /** The sink the client hands every `session/update` notification. */
@@ -480,11 +629,22 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     ]);
   }
 
+  fingerprintFor(opts: AcpNewSessionOptions): string {
+    return canonicalJson({
+      cwd: opts.cwd,
+      fields: this.sessionFields(opts),
+      mcpServers: (opts.mcpServers ?? []).map((server) => server.name),
+      capabilities: this.settings.capabilities ?? {},
+      setup: this.settings.setup ?? {},
+    });
+  }
+
   async newSession(opts: AcpNewSessionOptions): Promise<AcpSession> {
     const response = await Promise.race([
       this.agent.newSession({
         cwd: opts.cwd,
         mcpServers: this.sessionMcpServers(opts.mcpServers),
+        ...this.sessionFields(opts),
       }),
       this.watch.death,
     ]);
@@ -498,6 +658,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         [],
         this.watch.death,
         this.agentCapabilities.promptCapabilities,
+        this.fingerprintFor(opts),
       ),
     );
   }
@@ -509,6 +670,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         capability: 'loadSession',
       });
     }
+    const fields = this.sessionFields(opts);
     // Register before the call: `session/load` replays the conversation through
     // `session/update` notifications, which must not be dropped on the floor.
     const session = this.track(
@@ -521,6 +683,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         [],
         this.watch.death,
         this.agentCapabilities.promptCapabilities,
+        this.fingerprintFor(opts),
       ),
     );
     const response = await Promise.race([
@@ -528,17 +691,38 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         sessionId: opts.sessionId,
         cwd: opts.cwd,
         mcpServers: this.sessionMcpServers(opts.mcpServers),
+        ...fields,
       }),
       this.watch.death,
-    ]);
+    ]).catch((error: unknown) => {
+      // A failed load leaves nothing behind: no session, no children of it.
+      this.forget(opts.sessionId);
+      throw error;
+    });
     if (response) {
       session.applySettings(response);
     }
     return session;
   }
 
+  /** Set when the transport can let go of an agent that outlives this host. */
+  detach?: () => Promise<void>;
+
+  /** Release this host's side, leaving the agent running for a later host. */
+  async letGo(): Promise<void> {
+    this.sessions.clear();
+    this.children.clear();
+    this.early = [];
+    this.watch.shutdown();
+    await this.transport.detach?.().catch(() => undefined);
+    await this.client.dispose();
+    await this.tools?.close().catch(() => undefined);
+  }
+
   async close(): Promise<void> {
     this.sessions.clear();
+    this.children.clear();
+    this.early = [];
     // Reject anything still in flight first. Once the transport is down
     // nothing can answer it, so a pending request would hang forever.
     this.watch.shutdown();
@@ -553,7 +737,36 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
 
   private track(session: AcpSessionImpl): AcpSessionImpl {
     this.sessions.set(session.sessionId, session);
+    // Everything held while no session was known goes through the routing
+    // again, in order: the new session's own updates are delivered, a child
+    // announced on it is adopted (dropping that child's held updates), and
+    // the rest stays held.
+    const held = this.early;
+    this.early = [];
+    for (const notification of held) {
+      this.route(notification);
+    }
     return session;
+  }
+
+  /** Forget a session and every descendant it announced. */
+  private forget(sessionId: string): void {
+    this.sessions.delete(sessionId);
+    const gone = new Set([
+      sessionId,
+    ]);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const [child, parent] of this.children) {
+        if (gone.has(parent) && !gone.has(child)) {
+          gone.add(child);
+          grew = true;
+        }
+      }
+    }
+    for (const child of gone) {
+      this.children.delete(child);
+    }
   }
 
   /**
@@ -573,6 +786,62 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
           ]
         : []),
     ]);
+  }
+
+  /**
+   * The `_meta` and system prompt a session request carries (spec 27
+   * § Instructions): instructions as the protocol's `systemPrompt` when the
+   * agent advertises it, else through the adapter's extension, else refused
+   * rather than dropped; the adapter's `sessionMeta` over that extension.
+   */
+  private sessionFields(opts: AcpNewSessionOptions): SessionFields {
+    const instructions = opts.instructions;
+    const native = instructions !== undefined && this.advertisesInstructions();
+    const fallback =
+      instructions !== undefined && !native ? this.instructionsFallback(instructions) : undefined;
+    const sessionMeta = this.settings.sessionMeta;
+    const meta =
+      fallback || sessionMeta
+        ? {
+            ...fallback,
+            ...sessionMeta,
+          }
+        : undefined;
+    return {
+      ...(meta
+        ? {
+            _meta: meta,
+          }
+        : {}),
+      ...(native && instructions !== undefined
+        ? {
+            systemPrompt: {
+              mode: 'append',
+              content: [
+                {
+                  type: 'text',
+                  text: instructions,
+                },
+              ],
+            },
+          }
+        : {}),
+    };
+  }
+
+  private advertisesInstructions(): boolean {
+    return Boolean(this.agentCapabilities.sessionCapabilities?.systemPrompt);
+  }
+
+  private instructionsFallback(instructions: string): Record<string, unknown> {
+    const make = this.settings.instructionsMeta;
+    if (!make) {
+      throw new AcpCapabilityError({
+        agentId: this.agentId,
+        capability: 'sessionCapabilities.systemPrompt',
+      });
+    }
+    return make(instructions);
   }
 
   /** Reject HTTP/SSE MCP transports the agent never advertised support for. */
@@ -624,6 +893,7 @@ export async function openAcpConnection(
   // policy and event sink to whichever step opened the connection, silently
   // ignoring the configuration of every step that later reuses the session.
   let sink: NotificationSink | undefined;
+  let connection: AcpAgentConnectionImpl | undefined;
   const host = opts.host;
 
   const client = new NoeticAcpClient({
@@ -635,8 +905,11 @@ export async function openAcpConnection(
   // so without this a dead agent leaves every request hanging forever.
   const watch = watchTransport(opts.agentId, opts.transport, opts.signal);
   const notify = (notification: AcpSessionNotification): void => {
-    sink?.(notification);
-    host.onSessionUpdate(notification);
+    // Only this connection's own sessions produce the step's output.
+    if (!connection) {
+      return;
+    }
+    connection.route(notification);
   };
   const agent = new ClientSideConnection(
     () => client,
@@ -654,7 +927,12 @@ export async function openAcpConnection(
     ]);
   } catch (error) {
     watch.shutdown('failed the initialize handshake');
-    await opts.transport.close().catch(() => undefined);
+    // An agent reached for an earlier host is let go of, never stopped.
+    const release =
+      opts.reattached && opts.transport.detach
+        ? opts.transport.detach.bind(opts.transport)
+        : opts.transport.close.bind(opts.transport);
+    await release().catch(() => undefined);
     throw new AcpConnectError({
       agentId: opts.agentId,
       message: `ACP agent '${opts.agentId}' failed the initialize handshake.`,
@@ -662,7 +940,7 @@ export async function openAcpConnection(
     });
   }
 
-  const connection = new AcpAgentConnectionImpl(
+  connection = new AcpAgentConnectionImpl(
     opts.agentId,
     agent,
     opts.transport,
@@ -676,6 +954,16 @@ export async function openAcpConnection(
     opts.reattached === true,
   );
   sink = connection.sink;
+  connection.settings = {
+    instructionsMeta: opts.instructionsMeta,
+    sessionMeta: opts.sessionMeta,
+    capabilities: clientCapabilitiesFor(host),
+    setup: setupOf(host, opts.tools),
+    deliver: (notification) => {
+      sink?.(notification);
+      host.onSessionUpdate(notification);
+    },
+  };
   return connection;
 }
 

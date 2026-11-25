@@ -15,6 +15,7 @@
  */
 
 import type { AcpAgent, AcpMachineFactory, AcpTransportFactory } from '@noetic-tools/types';
+import type { InstructionsMeta } from './connection';
 import { defineAcpAgent } from './define';
 import type { AcpToolWiring } from './tool-bridge';
 import {
@@ -127,6 +128,11 @@ export interface AcpPresetOptions {
   machine?: AcpMachineFactory;
   /** Attach to an agent this package does not start, in place of the preset's command. */
   transport?: AcpTransportFactory;
+  /**
+   * The agent's own session options, sent as `_meta` on every session it opens
+   * (Claude Code's `{ claudeCode: { options } }`).
+   */
+  sessionMeta?: Readonly<Record<string, unknown>>;
 }
 
 function preset({
@@ -134,11 +140,13 @@ function preset({
   base,
   opts = {},
   wiring,
+  instructionsMeta,
 }: {
   agentId: string;
   base: AcpProcessSpec;
   opts?: AcpPresetOptions;
   wiring: AcpToolWiring;
+  instructionsMeta?: InstructionsMeta;
 }): AcpAgent {
   const spec: AcpProcessSpec = {
     command: opts.command ?? base.command,
@@ -166,10 +174,22 @@ function preset({
         }),
     env: spec.env,
     tools: wiring,
+    instructionsMeta,
+    sessionMeta: opts.sessionMeta,
   });
 }
 
 //#endregion
+
+/**
+ * claude-agent-acp's own system prompt extension, read by bridges that predate
+ * `sessionCapabilities.systemPrompt`: appended to Claude Code's own prompt.
+ */
+const claudeInstructionsMeta: InstructionsMeta = (instructions) => ({
+  systemPrompt: {
+    append: instructions,
+  },
+});
 
 //#region Presets
 
@@ -184,6 +204,7 @@ export function claudeCode(opts: AcpPresetOptions = {}): AcpAgent {
     base: PRESET_COMMANDS['claude-code'],
     opts,
     wiring: claudeToolWiring,
+    instructionsMeta: claudeInstructionsMeta,
   });
 }
 

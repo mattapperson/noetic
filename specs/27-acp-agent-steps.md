@@ -175,7 +175,7 @@ An agent is reached one of two ways:
 
 | Machine or transport | Use |
 |---|---|
-| `localMachine(agentId?, { keeper?, detachedTimeoutMs? })` (`@noetic-tools/acp/stdio`) | This machine. `launch` starts the agent through its keeper (§ A local agent outlives its host), `reach` serves the bridge on the keeper's own loopback port, `attach` reaches a kept agent again; `spawn` starts a child process. `keeper: false` (or no keeper script on disk, as in a single-file bundle) starts the agent as a child process and `reach` returns the bridge's own address. The default for every preset, loaded through a lazy `import()`. |
+| `localMachine(agentId?, { keeper?, detachedTimeoutMs?, wrap?, onStderr? })` (`@noetic-tools/acp/stdio`) | This machine. `launch` starts the agent through its keeper (§ A local agent outlives its host), `reach` serves the bridge on the keeper's own loopback port, `attach` reaches a kept agent again; `spawn` starts a child process. `keeper: false` (or no keeper script on disk, as in a single-file bundle) starts the agent as a child process and `reach` returns the bridge's own address. The default for every preset, loaded through a lazy `import()`. |
 | `webSocketMachine({ url, token, ca? })` (`@noetic-tools/acp/remote`) | A remote runner over WebSocket. Every upgrade carries the runner's bearer token; `ws://` is refused except to a loopback host, so a hop off the machine is TLS. |
 | `commandMachine({ command, args })` (`@noetic-tools/acp/remote`) | A remote runner started by a local command and spoken to over its stdio: `ssh host npx -y @noetic-tools/acp serve --stdio`, `docker exec -i ctr noetic-acp serve --stdio`. The command's own channel carries everything. |
 | `runnerMachine(openLink)` (`@noetic-tools/acp/remote`) | A remote runner over any `FrameLink`. |
@@ -204,6 +204,19 @@ a signal already aborted, rejects when the transport is opened, with
 the agent itself — a sandbox-wrapped command, a transport that rewrites lines —
 gets the same shutdown from `stopProcessTree(child, { graceMs? })`
 (`@noetic-tools/acp/stdio`), given a child spawned with `detached: true`.
+
+**A wrapped launch.** A host that must start the agent its own way — inside a
+sandbox (`sandbox-exec`, `bwrap`), with an environment it built, from a
+binary it ships — keeps the machine and changes the command:
+`localMachine(id, { wrap })`. `wrap(command, { bridges })` runs just before
+the agent starts. It receives the command the preset built, with `env` already
+the complete environment the agent would get (this process's, plus the
+preset's and the tool wiring's), and the bridge addresses `reach` handed out,
+so a sandbox can let exactly those loopback ports through. The command it
+returns runs with exactly its own `args`, `env` and `cwd` — nothing is merged
+back in — as the leader of its own process group, through the keeper or not,
+with the shutdown above. `onStderr` receives the agent's stderr, which
+otherwise goes to the host's.
 
 ### A local agent outlives its host
 
@@ -373,6 +386,7 @@ the whole environment.
 | `fs/write_text_file` | `ctx.fs.writeFile`, parent directories via `ctx.fs.mkdir` |
 | `terminal/create`·`output`·`wait_for_exit`·`kill`·`release` | A terminal registry over `ctx.shell.exec`: `onData` feeds an `outputByteLimit` ring buffer, one `AbortController` per terminal backs `kill`, and `ShellExecResult.exitCode` becomes the exit status |
 | `session/request_permission` | The permission resolver (below) |
+| `elicitation/create` | A held question (§ Questions the agent asks) |
 | `session/update` | The event bridge (below) |
 
 Advertised `ClientCapabilities` are computed from what the host can actually
@@ -528,6 +542,141 @@ so an unsupported block raises `AcpCapabilityError` before the turn is sent.
 
 An empty `prompt` means "use the step's runtime input as the prompt".
 
+### A host does not need to know a step is an agent
+
+A host runs a workflow; whether one of its steps is a model call or a coding
+agent is the workflow's business. So an ACP step meets the host only through
+the concepts every step uses: its input is a prompt and `instructions`, its
+questions to a person are held calls (`08-runtime` § Held tool calls), its
+output is the harness's ordinary events and items, and its failures are
+Noetic errors. What is agent-specific — which binary, which vendor options —
+is the agent adapter's, set up once, like a model provider.
+
+### Instructions
+
+`instructions` gives the session trusted instructions, as `callModel`'s
+`instructions` does: an eager string or a `(ctx) => string | undefined` getter
+(a string in a JSON `acp-agent` node). They are **added to** the agent's own
+system prompt, never in place of it: the agent keeps its own identity, tools
+and safety prompt. A blank value is no instructions.
+
+They go to the agent when the step opens its session (`session/new`, or
+`session/load` on a resume):
+
+- as the protocol's `systemPrompt` (`{ mode: 'append', content: [text] }`)
+  when the agent advertises `sessionCapabilities.systemPrompt`;
+- otherwise through the adapter's own extension, when it has one:
+  `claudeCode()` sends claude-agent-acp's `_meta.systemPrompt.append`, which
+  bridges that predate the capability read (`defineAcpAgent({
+  instructionsMeta })` declares one for any agent);
+- otherwise the step fails with `NoeticConfigError`
+  `AGENT_CAPABILITY_MISSING` before the request goes out. Instructions are
+  never silently dropped.
+
+**Vendor session options belong to the adapter.** An agent may read options of
+its own from a session request's `_meta` (Claude Code's
+`{ claudeCode: { options } }`). Those are set where the agent is set up —
+`claudeCode({ sessionMeta })`, `defineAcpAgent({ sessionMeta })` — and sent on
+every session the adapter opens; a step's `agent` may be a `(ctx) => AcpAgent`
+getter, so a host can build one per run. The step itself names no vendor, and a
+JSON document cannot carry `_meta`. The adapter's extension for instructions
+and its `sessionMeta` merge into one `_meta`; a key `sessionMeta` sets wins.
+
+**What a session was opened with.** Instructions, `_meta`, the working
+directory, the tools and the client capabilities are fixed when a session
+opens. The connection keeps a fingerprint of what it actually sent — the
+request's instructions and `_meta`, cwd and MCP server names, the advertised
+client capabilities, and what else the agent was set up with when the
+connection opened: the tools the bridge serves (names, descriptions, schemas),
+the bridge's name, and the client's path rules — never an address or token
+that changes from host to host
+(`AcpSession.fingerprint`), and can say what it would send for a step
+(`AcpAgentConnection.fingerprintFor`). A step that reuses a live session
+(`session.reuse`) with a different fingerprint fails with
+`ACP_SESSION_SETTING_CONFLICT`; so does a resumed step that reattaches to a
+session whose stored fingerprint differs from its own (§ Resuming a step).
+Fingerprints compare canonical JSON, so key order is no difference.
+
+### Questions the agent asks
+
+An agent may ask the user for input mid-turn (`elicitation/create`, a form or a
+URL) — claude-agent-acp presents Claude Code's `AskUserQuestion` this way. It
+is a question for a person, so it goes where every such question goes: the
+harness holds it (`08-runtime` § Held tool calls) as a **held question**.
+
+- It is announced with `tool_call_held`, listed by `pending()`, and put to the
+  harness's `onHeld`, with `reason: 'question'`, `name` `<agentId>:question`,
+  and `question: { message, schema?, url? }` (the form's JSON Schema, or the
+  URL to open).
+- A `{ output }` decision answers it: the agent gets `accept` with that
+  content. An output that does not match `schema` is refused (`hold_refused`)
+  and the question stays held. `{ action: 'deny' }` declines it: the agent
+  gets `decline`.
+- Settled any other way — its turn aborted or interrupted, a deadline, a steer
+  applied at the `held` point, the harness closed — the agent gets `cancel`.
+- The agent's process is waiting on the answer, so the turn stays live while
+  the question is held (it does not park).
+- Its id is made from the step's dispatch path and a hash of the request with
+  the agent's own JSON-RPC id for it, which a keeper keeps when it asks a
+  reattached host again. The client reads that id off the wire and carries it
+  in the request's own `_meta` to the handler, so it cannot drift onto another
+  request; where it is unknown, the request's ordinal among identical ones
+  stands in. An agent that asks again under an id this host already asked
+  under is asking a new question. The answer is kept until the step ends, not
+  dropped once taken, so a host that died after taking it and before the agent
+  got it is not asked again: the resumed host finds the question answered.
+- An agent's form is closed: the agent takes only the fields it described, so
+  the held question's `schema` says `additionalProperties: false`, and an
+  answer with any other field is refused before the question settles.
+
+The client advertises form elicitation (`elicitation: { form: {} }`) by
+default — asking is gated, never opted into — and URL elicitation never, since
+nothing here opens a URL. `clientCapabilities.elicitation: false` withdraws it,
+and the agent then cannot ask: a question it asks anyway is answered `cancel`
+without reaching anyone. A JSON `acp-agent` node takes the same flag,
+within the host's grant: `elicitation` is granted by default
+(`AcpCapabilityGrant.elicitation`), and a host with nobody to answer grants
+`false`.
+
+**A served run** (spec 31) has a person on the other end of the wire: each
+question its turn holds is put to the editor as `elicitation/create` when the
+editor advertised form elicitation, its answer passed back as a decision
+(`accept` → the output, `decline` → `deny`, `cancel` → left held), and
+declined at once when the editor cannot show forms, fails the request, or
+gives an answer the question refuses. A served turn never waits on nobody.
+
+### Subagents' own sessions
+
+An agent may run subagents as child sessions of the step's session (the ACP
+subagents RFD: `subagent_update` announces a child; codex-acp's earlier draft,
+`subagent_spawned`). Only the step's own session produces the step's output: a
+child session's updates never reach its text, items, events or result, nor do
+updates for a session the connection does not know. An update that arrives
+for a session before the connection knows whose it is — the agent's first
+updates for a session it creates, sent before its `session/new` answer — is
+held (at most 1000) until the session is known, then delivered or dropped.
+A failed `session/load` forgets the session and every child it announced.
+Updates held before a session was known go through the same routing once it
+is, in order, so a child announced early is still a child. (Showing children
+as nested agents in the harness's events is specified in `08-runtime` once it
+lands; until then the client does not advertise `subagents`.)
+
+### Failures are Noetic errors
+
+Whatever goes wrong reaches the host as a Noetic error, both from `execute()`
+and on the event stream (the turn's `response.completed` with an `error`
+reason carries the same error):
+
+- a missing capability the step needs (prompt content, a mode, a model,
+  instructions) is `NoeticConfigError` `AGENT_CAPABILITY_MISSING`, naming the
+  capability;
+- an agent that cannot be started or reached, that dies, or that rejects a
+  request is `NoeticError` `step_failed`, its message the agent's own
+  (`Internal error: Authentication required (-32603)`), the original in
+  `cause`;
+- a configuration conflict keeps its `ACP_*` code: those are the workflow
+  author's, about a step they wrote as an agent step.
+
 ### Conversation history
 
 An ACP session owns its history on the agent side, but a freshly opened session
@@ -588,8 +737,9 @@ An ACP step is cut off like any other: the host dies while the agent works. On a
 durable run (`23a-step-level-resume`) the step keeps two things so a resume does
 not start the agent's work over.
 
-**The agent's session.** When the step opens a session it stores the session id
-— and, when the agent can outlive its host, its reattach handle — with the run's
+**The agent's session.** When the step opens a session it stores the session id,
+its fingerprint (§ Instructions) — and, when the agent can outlive its host,
+its reattach handle — with the run's
 pending entries, under `execution:<root id>:pending:<step path>/acp-session`,
 and removes it when the step finishes. A resumed step that finds one, written by
 the same agent id:
@@ -599,7 +749,21 @@ the same agent id:
    the turn the dead host left running — every update of it as this step's
    output, the requests the agent still waits on answered by this host, then its
    result — instead of prompting. Only when no turn was running does it prompt,
-   behind `ACP_RESUME_NOTICE`. When the agent is gone it goes on as below.
+   behind `ACP_RESUME_NOTICE`. When the agent or its session is confirmed gone
+   — an `AcpConnectError` with `gone: true`: the keeper's socket is missing or
+   refuses, the keeper runs no agent, or the agent has no such session — it
+   goes on as below. Any other failure fails the step, since the old turn may
+   already have changed things. Before it collects anything it compares the
+   session's stored fingerprint with the step's (§ Instructions): a different
+   one fails the step with `ACP_SESSION_SETTING_CONFLICT`, and the host lets
+   go of the agent (`AcpAgentConnection.detach`) rather than stopping it, so a
+   host that resumes with the settings it started with can still take the
+   turn. Letting go tells the keeper so (`release`): the agent keeps running
+   whatever exit policy this host's hello set. Every failure before the host
+   adopts the agent — the bridge, the handshake — lets go the same way. A record written before fingerprints were kept has none and is
+   accepted; a reattached session keeps its stored fingerprint for later
+   reuse, and a reloaded one is stored with the fingerprint it was reloaded
+   with.
 1. connects, and when the agent advertises `loadSession` calls `session/load`
    with the stored id. The `session/update` notifications the agent replays
    while it loads are its history, not this turn's work: they reach only
@@ -609,8 +773,10 @@ the same agent id:
    conversation history is not prepended: the session has it.
 
 An agent that does not advertise `loadSession`, or that fails the load because
-it no longer has the session, gets a new session and the prompt with the
-conversation history, as on a first run, and the new id replaces the stored one.
+it no longer has the session (JSON-RPC `-32002`, and nothing else), gets a new session and the prompt with the conversation
+history, as on a first run, and the new id replaces the stored one. Any other
+failure of the load fails the step rather than starting the work over. A failed
+load leaves nothing tracked on the connection.
 A step that names `session.load` itself keeps no record: its session is the
 caller's.
 
@@ -815,12 +981,14 @@ One node kind, with the agent named by a registry key:
   "id": "review",
   "agent": "claude-code",
   "prompt": "Review the diff",
+  "instructions": "Never push to main.",
   "mode": "plan",
   "permissions": { "default": "deny", "allow": [{ "kind": "read" }] }
 }
 ```
 
-The hydrator resolves `agent` from `HydrationContext.acpAgents`, an **open**
+`instructions` is a string (§ Instructions); a document cannot set the
+adapter's `sessionMeta`. The hydrator resolves `agent` from `HydrationContext.acpAgents`, an **open**
 registry: supporting a new agent needs another entry, not a schema change. An
 unregistered reference fails hydration with `UNKNOWN_ACP_AGENT_REFERENCE`. The
 published JSON Schema is regenerated from the Zod source (`bun run gen:schema`).
@@ -873,8 +1041,8 @@ serves it). Runtime import graph clean; install graph not.
   the stable 1.x entry rejects an `acp` server), and an agent that advertises
   it — none of
   Claude Code, Codex (`acp: false`), Gemini CLI, opencode or pi-acp does yet.
-- Protocol features still in draft upstream (`session/resume`, `session/list`,
-  `elicitation/*`) arrive with a version bump of `@agentclientprotocol/sdk`.
+- Protocol features still in draft upstream (`session/resume`, `session/list`)
+  arrive with a version bump of `@agentclientprotocol/sdk`.
   Its 2.x line drops `ClientSideConnection` for a builder API
   (`client({ name }).connectWith(...)`), so moving to it is a rewrite of the
   connection driver, not a version bump.

@@ -14,7 +14,15 @@ const HeldReasonSchema = z.enum([
   'approval',
   'result',
   'outcome',
+  'question',
 ]);
+
+/** A question put to a person (`HeldQuestion`). */
+const HeldQuestionSchema = z.object({
+  message: z.string(),
+  schema: z.record(z.string(), z.unknown()).optional(),
+  url: z.string().optional(),
+});
 
 /** @public The data of a `{name}:tool_call_held` event. */
 export const HeldCallSchema = z.object({
@@ -31,6 +39,8 @@ export const HeldCallSchema = z.object({
     ])
     .optional(),
   request: z.unknown().optional(),
+  /** The question, on a call held with `reason: 'question'`. */
+  question: HeldQuestionSchema.optional(),
   /** A coding agent's call: `callId` is the agent's id, and this the id a decision names. */
   heldAs: z.string().optional(),
 });

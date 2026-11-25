@@ -15,7 +15,7 @@ import type {
   HeldCall,
   Tool,
 } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import { frameworkCast, isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { step } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
@@ -64,6 +64,8 @@ function agent(opts: {
   canLoad?: boolean;
   /** The session ids this agent still has. Loading any other fails. */
   has?: string[];
+  /** The load fails some way other than "no such session". */
+  loadCrashes?: boolean;
 }): AcpAgent {
   const { log } = opts;
   let made = 0;
@@ -113,14 +115,22 @@ function agent(opts: {
         },
         authMethods: [],
         protocolVersion: 1,
+        fingerprintFor: (): string => 'fake',
         async authenticate() {},
         async newSession() {
           log.newSessions += 1;
           return session(`s-${crypto.randomUUID()}`);
         },
         async loadSession(load) {
+          if (opts.loadCrashes) {
+            throw new Error('the agent crashed while loading');
+          }
           if (opts.has && !opts.has.includes(load.sessionId)) {
-            throw new Error(`no session ${load.sessionId}`);
+            // JSON-RPC "resource not found": the agent no longer has it.
+            throw {
+              code: -32002,
+              message: `Resource not found: ${load.sessionId}`,
+            };
           }
           // The agent replays the session's conversation while it loads.
           connect.host.onSessionUpdate({
@@ -416,6 +426,33 @@ describe('an ACP step resumed after its host died', () => {
     expect(after.loaded).toEqual([]);
     expect(after.newSessions).toBe(1);
     expect(after.prompts[0]).not.toContain(ACP_RESUME_NOTICE);
+  });
+
+  it('fails rather than start the work over when the load fails another way', async () => {
+    const storage = createInMemoryStorage();
+    const runs: string[] = [];
+    const tools = [
+      counted('write', runs),
+      counted('test', runs),
+    ];
+    const executionId = await cutOff(storage, tools, agentLog());
+
+    const after = agentLog();
+    const { running } = await resume({
+      storage,
+      executionId,
+      acpAgent: agent({
+        log: after,
+        calls: THREE,
+        loadCrashes: true,
+      }),
+      tools,
+    });
+    const error = await running.catch((e: unknown) => e);
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('step_failed');
+    expect(after.newSessions).toBe(0);
+    expect(after.prompts).toEqual([]);
   });
 
   it('runs a call the agent makes differently this time', async () => {

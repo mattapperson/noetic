@@ -917,6 +917,7 @@ A tool call can be left open for a person. Nothing is written to the conversatio
 - A call needs approval and the harness has no approver. This is the one rule for `needsApproval` tools and for a model's call to a connection operation that needs approval (`35-connections` § Gates).
 - A tool returns `hold({ request?, dueAt?, onDue? })` in place of a result. The tool has done its part; the answer becomes its result.
 - A `durable: true` tool was running when the host died (`23a-step-level-resume` § Tool calls in a round). Its reason is `outcome`: nobody knows whether its effect landed.
+- Something asks a person a question: a long task's `input_required` (`35-connections`), or a coding agent's `elicitation/create` (`27-acp-agent-steps` § Questions the agent asks). Its reason is `question`, and the call carries `question: { message, schema?, url? }` — `schema` a JSON Schema object the answer must match, `url` a page the person is sent to.
 
 `hold` is the approver's answer only. From a `beforeToolCall` layer it is a denial.
 
@@ -948,6 +949,7 @@ A call is looked for in the turn of the thread `execute()` was called on. A run 
 The decisions in one list are all read before any is acted on, so a list with a malformed decision changes nothing. They are then taken in order. One the thread's state refuses throws, and those before it stay taken.
 
 - `allow` runs the tool. `deny` and `guide` give the refusal an approver's would. An `output` becomes the call's result; the tool body does not run again.
+- A `question` takes an `output` — the person's answer — or `deny`, which declines it. An `output` that does not match the question's `schema` is refused (`hold_refused`), and the question stays held. `allow` and `guide` are the wrong kind. Settled any other way (a deadline, a skip, a cancelled turn), it was not answered.
 - A call held as `outcome` takes either kind: an `output` says it landed, `allow` runs it again with the same idempotency key, and `deny` or `guide` refuses it.
 - The first answer wins, by `swap` where storage has it. The same answer again is a no-op; a different one is refused.
 - `argsHash` is the hash the call was shown with. An answer for other arguments is refused, so an approval never applies to an action other than the one a person saw. A record whose arguments no longer match its call is void, and the call is asked about again.
@@ -980,7 +982,8 @@ A parked response lists the calls its turn holds as `held`, the same list `pendi
 | Asker | When |
 |---|---|
 | A `needsApproval` tool; a model's or a step's call to a connection operation that needs approval | Always |
-| A long task's question (MCP Tasks `input_required`) | Always; held as `result`, and the answer goes back to the task |
+| A long task's question (MCP Tasks `input_required`) | Always; held as `question`, and the answer goes back to the task |
+| A coding agent's question (`elicitation/create`, `27-acp-agent-steps`) | Unless the step withdrew `clientCapabilities.elicitation`; held as `question`, live (`park: false`) |
 | A coding agent's permission request (`27-acp-agent-steps`) | When no policy rule, steering decision or handler settled it and the policy names no `default` |
 | The served-agent gate (`31-acp-server`) | When `askTimeoutMs` is set and the editor did not answer within it |
 | Chat tools that need approval (`29-chat-platform-integration`) | Always, unless built with `approval: 'channel'`. `chatApprover()` is the approver that asks in chat |
@@ -1034,12 +1037,12 @@ const harness = new AgentHarness({
 
 - **When it is called.** Once per question per process: when a call is first announced held here (`tool_call_held`), whichever path held it — a model's round, an `invokeTool` step, `harness.approve()`, or a coding agent's tool. A call announced again (a turn that parked and woke in this process, a round that walks its calls again) is not asked again while its first handler is still waiting. A call held for a new question (approved, then left its result open with `hold()`) is a new question.
 - **Answering.** Return a `HeldResolution`. It is taken exactly as a `DecisionItem` passed to `execute()` is: by the record, under `argsHash` the call was shown with, and the turn goes on, woken when it parked. It goes to the execution that held the call, never to a later turn on the same thread. Return `undefined` to leave the call held for an answer that comes another way. A resolution returned after `signal` aborted is dropped: the call was settled first, and nothing is refused or thrown. One that is still refused (`hold_refused`, say, an `output` for an approval) is logged, and the call stays held.
-- **The reason sets the question.** `call.reason` is `approval` for a call that has not run, `result` for a tool that left its result open (answer with `{ output }`), and `outcome` for a `durable` tool cut off with its effect unknown (`{ output }` says it landed, `allow` runs it again, `deny` refuses it). One handler covers all three.
+- **The reason sets the question.** `call.reason` is `approval` for a call that has not run, `result` for a tool that left its result open (answer with `{ output }`), `outcome` for a `durable` tool cut off with its effect unknown (`{ output }` says it landed, `allow` runs it again, `deny` refuses it), and `question` for a question put to a person (`{ output }` matching `call.question.schema` answers it, `deny` declines it). One handler covers all four.
 - **It never blocks the turn.** The harness does not wait on the handler: the call waits on its record, as it would for any answer, and a turn may park meanwhile. A handler that throws is logged; the call stays held.
 - **The signal.** It aborts when the call is settled any way: a decision passed to `execute()`, a deadline, a steer applied at the `held` point, a cancelled or interrupted turn, an agent that stopped waiting, or `harness.close()`. On storage with `swap`, another harness may settle the call and finish its turn: while any call is watched, the harness reads their records again every two seconds, and settles as `answer` each one that is gone, answered, or held now for another question: another harness settled it, and this one cannot tell how, so a turn the other harness cancelled reads as answered too. Each emits `{name}:tool_call_settled` on the stream the call was announced on, except `close()`, which only aborts. An answer the handler itself returns settles the call the same way.
 - **After a restart.** A handler lives in the process that saw the call held. A turn parked on a held call in a process that died has no handler waiting on it; a host lists such calls with `pending()` on start and answers them with `execute()`.
 
-`HeldCall`, `HeldCallSettled`, `HeldCallHandler` and `HeldCallContext` are exported from `@noetic-tools/core` and `@noetic-tools/types`. `readHeldCallEvent(event)` reads a stream event as `{ type: 'held', call: HeldCall }` or `{ type: 'settled', settled: HeldCallSettled }`, validated, and `undefined` for any other event, so a host that follows the stream rather than `onHeld` never parses the data by hand.
+`HeldCall`, `HeldCallSettled`, `HeldCallHandler`, `HeldCallContext` and `HeldQuestion` are exported from `@noetic-tools/core` and `@noetic-tools/types`. `readHeldCallEvent(event)` reads a stream event as `{ type: 'held', call: HeldCall }` or `{ type: 'settled', settled: HeldCallSettled }`, validated — every reason, a question's `question` included — and `undefined` for any other event, so a host that follows the stream rather than `onHeld` never parses the data by hand.
 
 ### Item schema registry (extension-item validation)
 

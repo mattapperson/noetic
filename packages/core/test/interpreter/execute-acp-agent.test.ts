@@ -22,10 +22,17 @@ import type {
   AcpSessionNotification,
   AcpStopReason,
   AcpTurnResult,
+  HeldCall,
   Item,
   TokenUsage,
 } from '@noetic-tools/types';
-import { frameworkCast, isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
+import {
+  AcpCapabilityError,
+  AcpConnectError,
+  frameworkCast,
+  isNoeticConfigError,
+  isNoeticError,
+} from '@noetic-tools/types';
 import { z } from 'zod';
 import { runCode, step } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
@@ -58,6 +65,14 @@ interface FakeAgentOpts {
   replayOnLoad?: AcpSessionNotification[];
 }
 
+/** What the fake's sessions are opened with: their cwd and instructions. */
+function fingerprintOf(open: AcpNewSessionOptions): string {
+  return JSON.stringify([
+    open.cwd,
+    open.instructions ?? null,
+  ]);
+}
+
 function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
   const text = opts.text ?? 'done';
   const agentId = opts.agentId ?? 'claude-code';
@@ -68,8 +83,13 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
     agentId,
     async connect(connect): Promise<AcpAgentConnection> {
       opts.onConnect?.(connect.host);
-      const makeSession = (sessionId: string): AcpSession => ({
+      const makeSession = (sessionId: string, fingerprint?: string): AcpSession => ({
         sessionId,
+        ...(fingerprint === undefined
+          ? {}
+          : {
+              fingerprint,
+            }),
         modes: opts.modes,
         availableCommands: [],
         async prompt(prompt): Promise<AcpTurnResult> {
@@ -117,6 +137,7 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
         },
         authMethods: [],
         protocolVersion: 1,
+        fingerprintFor: (open: AcpNewSessionOptions): string => fingerprintOf(open),
         async authenticate() {
           // No auth in the fake.
         },
@@ -126,7 +147,7 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
             throw opts.throwOnNewSession;
           }
           sessionCounter += 1;
-          return makeSession(`session-${sessionCounter}`);
+          return makeSession(`session-${sessionCounter}`, fingerprintOf(newSession));
         },
         async loadSession(load) {
           for (const update of opts.replayOnLoad ?? []) {
@@ -1433,5 +1454,295 @@ describe('executeAcpAgent — session/load replay (#100)', () => {
     const raw = events.filter((e) => e.type.endsWith(':acp_event'));
     expect(raw).toHaveLength(2);
     expect(raw.every((e) => e.data.replay === true)).toBe(true);
+  });
+});
+
+describe('executeAcpAgent host features', () => {
+  it('passes instructions to newSession, eager or from a getter', async () => {
+    const { ctx } = harnessCtx();
+    const opened: AcpNewSessionOptions[] = [];
+    const agent = fakeAgent({
+      onNewSession: (opts) => opened.push(opts),
+    });
+    await execute(
+      step.acpAgent({
+        id: 'eager',
+        agent,
+        prompt: 'go',
+        instructions: 'rules',
+      }),
+      undefined,
+      ctx,
+    );
+    await execute(
+      step.acpAgent({
+        id: 'lazy',
+        agent,
+        prompt: 'go',
+        instructions: () => 'lazy rules',
+      }),
+      undefined,
+      ctx,
+    );
+    expect(opened.map((open) => open.instructions)).toEqual([
+      'rules',
+      'lazy rules',
+    ]);
+  });
+
+  it('drops blank instructions', async () => {
+    const { ctx } = harnessCtx();
+    const opened: AcpNewSessionOptions[] = [];
+    await execute(
+      step.acpAgent({
+        id: 'blank',
+        agent: fakeAgent({
+          onNewSession: (opts) => opened.push(opts),
+        }),
+        prompt: 'go',
+        instructions: '   ',
+      }),
+      undefined,
+      ctx,
+    );
+    expect(opened[0]).toEqual({
+      cwd: ctx.cwdState.cwd,
+    });
+  });
+
+  it("holds the agent's question for a person and relays the answer", async () => {
+    const held: HeldCall[] = [];
+    const harness = new AgentHarness({
+      name: 'ask',
+      params: {},
+      onHeld: (call) => {
+        held.push(call);
+        return {
+          output: {
+            branch: 'main',
+          },
+        };
+      },
+    });
+    const ctx = harness.createContext();
+    let host: AcpClientHost | undefined;
+    await execute(
+      step.acpAgent({
+        id: 'asks',
+        agent: fakeAgent({
+          onConnect: (connected) => {
+            host = connected;
+          },
+        }),
+        prompt: 'go',
+      }),
+      undefined,
+      ctx,
+    );
+    assert(host?.onElicitation);
+    const answer = await host.onElicitation(
+      {
+        mode: 'form',
+        sessionId: 'session-1',
+        message: 'Which branch?',
+        requestedSchema: {
+          type: 'object',
+          properties: {
+            branch: {
+              type: 'string',
+            },
+          },
+          required: [
+            'branch',
+          ],
+        },
+      },
+      {},
+    );
+    expect(answer).toEqual({
+      action: 'accept',
+      content: {
+        branch: 'main',
+      },
+    });
+    expect(held).toHaveLength(1);
+    expect(held[0]?.reason).toBe('question');
+    expect(held[0]?.name).toBe('claude-code:question');
+    expect(held[0]?.question?.message).toBe('Which branch?');
+    expect(held[0]?.question?.schema).toBeDefined();
+  });
+
+  it('a declined question answers decline', async () => {
+    const harness = new AgentHarness({
+      name: 'decline',
+      params: {},
+      onHeld: () => ({
+        action: 'deny',
+      }),
+    });
+    const ctx = harness.createContext();
+    let host: AcpClientHost | undefined;
+    await execute(
+      step.acpAgent({
+        id: 'declines',
+        agent: fakeAgent({
+          onConnect: (connected) => {
+            host = connected;
+          },
+        }),
+        prompt: 'go',
+      }),
+      undefined,
+      ctx,
+    );
+    assert(host?.onElicitation);
+    expect(
+      await host.onElicitation(
+        {
+          mode: 'form',
+          sessionId: 'session-1',
+          message: 'Proceed?',
+          requestedSchema: {
+            type: 'object',
+            properties: {},
+          },
+        },
+        {},
+      ),
+    ).toEqual({
+      action: 'decline',
+    });
+  });
+
+  it('a missing capability is a NoeticConfigError, never a protocol error', async () => {
+    const { ctx } = harnessCtx();
+    const error = await execute(
+      step.acpAgent({
+        id: 'no-cap',
+        agent: fakeAgent({
+          throwOnNewSession: new AcpCapabilityError({
+            agentId: 'claude-code',
+            capability: 'sessionCapabilities.systemPrompt',
+          }),
+        }),
+        prompt: 'go',
+        instructions: 'rules',
+      }),
+      undefined,
+      ctx,
+    ).catch((e: unknown) => e);
+    assert(isNoeticConfigError(error));
+    expect(error.code).toBe('AGENT_CAPABILITY_MISSING');
+    expect(error.message).toContain('sessionCapabilities.systemPrompt');
+  });
+
+  it('an agent that cannot be reached is step_failed, never AcpConnectError', async () => {
+    const { ctx } = harnessCtx();
+    const error = await execute(
+      step.acpAgent({
+        id: 'unreachable',
+        agent: fakeAgent({
+          onConnect: () => {
+            throw new AcpConnectError({
+              agentId: 'claude-code',
+              message: 'no binary',
+            });
+          },
+        }),
+        prompt: 'go',
+      }),
+      undefined,
+      ctx,
+    ).catch((e: unknown) => e);
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('step_failed');
+  });
+
+  it('a failed turn puts the same Noetic error on the stream', async () => {
+    const { ctx, events } = capturingCtx();
+    const error = await execute(
+      step.acpAgent({
+        id: 'fails',
+        agent: fakeAgent({
+          throwOnTurn: new AcpCapabilityError({
+            agentId: 'claude-code',
+            capability: 'promptCapabilities.image',
+          }),
+        }),
+        prompt: 'go',
+      }),
+      undefined,
+      ctx,
+    ).catch((e: unknown) => e);
+    assert(isNoeticConfigError(error));
+    const completed = events.find((e) => e.type === 'response.completed');
+    // The normalized error's message, not the protocol error's.
+    expect(completed?.data.error).toBe(error.message);
+  });
+
+  it('a reused session given different instructions is a conflict', async () => {
+    const { ctx, harness } = harnessCtx();
+    const agent = fakeAgent();
+    const opts = {
+      agent,
+      prompt: 'go',
+      session: {
+        reuse: 'instructions',
+        keepAlive: 'run' as const,
+      },
+    };
+    await execute(
+      step.acpAgent({
+        ...opts,
+        id: 'a',
+        instructions: 'one',
+      }),
+      undefined,
+      ctx,
+    );
+    const error = await execute(
+      step.acpAgent({
+        ...opts,
+        id: 'b',
+        instructions: 'two',
+      }),
+      undefined,
+      ctx,
+    ).catch((e: unknown) => e);
+    await harness.closeAcpSessions();
+    assert(isNoeticConfigError(error));
+    expect(error.code).toBe('ACP_SESSION_SETTING_CONFLICT');
+  });
+
+  it('a reused session given the same instructions is not', async () => {
+    const { ctx, harness } = harnessCtx();
+    const agent = fakeAgent();
+    const opts = {
+      agent,
+      prompt: 'go',
+      instructions: 'same',
+      session: {
+        reuse: 'same',
+        keepAlive: 'run' as const,
+      },
+    };
+    await execute(
+      step.acpAgent({
+        ...opts,
+        id: 'a',
+      }),
+      undefined,
+      ctx,
+    );
+    const output = await execute(
+      step.acpAgent({
+        ...opts,
+        id: 'b',
+      }),
+      undefined,
+      ctx,
+    );
+    await harness.closeAcpSessions();
+    expect(output).toBe('done');
   });
 });

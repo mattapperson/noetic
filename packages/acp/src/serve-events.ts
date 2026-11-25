@@ -53,6 +53,8 @@ export interface PumpTurnParams {
   present(toolName: string, callId: string, args: unknown): ServeToolCallPresentation;
   /** Whether `session/cancel` was received for this session. */
   cancelRequested(): boolean;
+  /** Sees every event of the turn as it is pumped. */
+  observe?: (event: StreamEvent) => void;
 }
 
 //#endregion
@@ -220,6 +222,7 @@ export async function pumpTurnEvents(params: PumpTurnParams): Promise<ServeTurnO
       }
       continue;
     }
+    params.observe?.(event);
     if (event.source === 'sdk') {
       await handleSdkEvent(state, event);
       continue;

@@ -24,6 +24,7 @@ import type {
   ShellExecResult,
 } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
+import type { InstructionsMeta } from '../src/connection';
 import { openAcpConnection } from '../src/connection';
 import { createAcpLoopbackPair } from '../src/transport-loopback';
 
@@ -189,8 +190,14 @@ export interface FakeAgentScript {
   configOptions?: acp.SessionConfigOption[];
   /** The `session/load` answer. Defaults to `{}`. */
   loadResponse?: acp.LoadSessionResponse;
+  /** `session/load` rejects with this instead of answering. */
+  loadRejects?: unknown;
+  /** Runs before `session/new` answers, with the id it will answer: send early updates. */
+  beforeNewSessionAnswer?: (conn: AgentSideConnection, sessionId: string) => Promise<void>;
   /** The `usage` the `session/prompt` answer reports. */
   usage?: acp.Usage;
+  /** The `_meta` the `session/prompt` answer carries. */
+  responseMeta?: Record<string, unknown>;
   /** Answer the draft `session/set_model` request (agents that predate config options). */
   acceptsSetModel?: boolean;
   /** Stop reason returned from `session/prompt`. Defaults to `end_turn`. */
@@ -262,6 +269,9 @@ export interface AcpTestRigOptions {
   signal?: AbortSignal;
   /** Additionally observe the agent's `fs/*` and `terminal/*` calls. */
   onActivity?: (activity: AcpClientActivity) => void;
+  onElicitation?: AcpClientHost['onElicitation'];
+  instructionsMeta?: InstructionsMeta;
+  sessionMeta?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -294,6 +304,7 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
       async newSession(params) {
         calls.newSession.push(params);
         sessionCounter += 1;
+        await script.beforeNewSessionAnswer?.(conn, `session-${sessionCounter}`);
         return {
           sessionId: `session-${sessionCounter}`,
           modes: script.modes,
@@ -302,6 +313,9 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
       },
       async loadSession(params) {
         calls.loadSession.push(params);
+        if (script.loadRejects !== undefined) {
+          throw script.loadRejects;
+        }
         return script.loadResponse ?? {};
       },
       async authenticate(params) {
@@ -345,6 +359,11 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
                 usage: script.usage,
               }
             : {}),
+          ...(script.responseMeta
+            ? {
+                _meta: script.responseMeta,
+              }
+            : {}),
         };
       },
       async cancel(params) {
@@ -366,6 +385,7 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
     permissions: opts.policy,
     steerPermission: opts.steer,
     onPermissionRequest: opts.handler,
+    onElicitation: opts.onElicitation,
     onSessionUpdate: (notification) => {
       updates.push(notification);
     },
@@ -379,6 +399,8 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
     transport: pair.client,
     host,
     signal: opts.signal,
+    instructionsMeta: opts.instructionsMeta,
+    sessionMeta: opts.sessionMeta,
   });
 
   return {

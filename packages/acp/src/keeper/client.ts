@@ -197,6 +197,10 @@ export class KeeperLink {
   private readonly encoder = new TextEncoder();
   private closed = false;
   private stopping?: Promise<void>;
+  /** Where the agent's stderr goes. Default: this process's stderr. */
+  onStderr: (chunk: string) => void = (chunk) => {
+    process.stderr.write(chunk);
+  };
 
   constructor(
     private readonly socket: net.Socket,
@@ -298,6 +302,7 @@ export class KeeperLink {
       writable,
       reattach: this.handle,
       close: () => this.stop(),
+      detach: () => this.release(),
     };
   }
 
@@ -309,6 +314,25 @@ export class KeeperLink {
 
   /** Let go of the keeper without stopping it, as a host that goes away does. */
   detach(): void {
+    this.socket.destroy();
+  }
+
+  /**
+   * Let go of an agent this host did not adopt: the keeper keeps it running
+   * whatever exit policy this host's hello set, then the connection drops.
+   */
+  async release(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      this.socket.write(
+        `${JSON.stringify({
+          keeper: 'release',
+        })}\n`,
+        () => resolve(),
+      );
+    });
     this.socket.destroy();
   }
 
@@ -356,7 +380,7 @@ export class KeeperLink {
       return;
     }
     if (message.keeper === 'stderr') {
-      process.stderr.write(message.data);
+      this.onStderr(message.data);
       return;
     }
     const waiter = this.waiters.get(message.id);
@@ -478,6 +502,15 @@ export async function startKeeper(
   return link;
 }
 
+/** Whether a failed connect means no keeper is there: its socket is missing or refuses. */
+export function keeperIsGone(cause: unknown): boolean {
+  if (typeof cause !== 'object' || cause === null) {
+    return false;
+  }
+  const code = Reflect.get(cause, 'code');
+  return code === 'ENOENT' || code === 'ECONNREFUSED';
+}
+
 /**
  * Connect to the keeper `handle` names. Rejects with AcpConnectError when it
  * is gone or no longer runs its agent.
@@ -495,6 +528,9 @@ export async function attachKeeper(
       agentId,
       message: `ACP agent '${agentId}' is no longer running: its keeper cannot be reached.`,
       cause,
+      // No socket, or nobody listening on it: the keeper is gone. Any other
+      // failure (permissions, a full table) says nothing about the agent.
+      gone: keeperIsGone(cause),
     });
   }
   const link = new KeeperLink(socket, handle, agentId);
@@ -504,6 +540,7 @@ export async function attachKeeper(
     throw new AcpConnectError({
       agentId,
       message: `ACP agent '${agentId}' is no longer running.`,
+      gone: true,
     });
   }
   return link;

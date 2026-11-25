@@ -258,6 +258,7 @@ export function hydrateAcpAgentNode(
     id: node.id,
     agent,
     prompt: node.prompt,
+    instructions: node.instructions,
     cwd: bounded.cwd,
     mode: node.mode,
     model: node.model,

@@ -93,6 +93,8 @@ interface AgentRecord {
   loads: string[];
   cwds: string[];
   modes: string[];
+  /** The instructions each new session was opened with. */
+  instructions: Array<string | undefined>;
 }
 
 /** An agent that records what each connect and turn was handed. */
@@ -133,11 +135,13 @@ function recordingAgent(): AgentRecord {
           },
           authMethods: [],
           protocolVersion: 1,
+          fingerprintFor: (): string => 'fake',
           async authenticate() {
             // No auth in the fake.
           },
           async newSession(opts) {
             record.cwds.push(opts.cwd);
+            record.instructions.push(opts.instructions);
             return session;
           },
           async loadSession(load) {
@@ -156,6 +160,7 @@ function recordingAgent(): AgentRecord {
     loads: [],
     cwds: [],
     modes: [],
+    instructions: [],
   };
   return record;
 }
@@ -631,6 +636,7 @@ describe('boundedAcpSettings', () => {
       readTextFile: false,
       writeTextFile: false,
       terminal: false,
+      elicitation: true,
     });
     expect(settings.session).toEqual({
       reuse: `${bounds.sessionScope}/main`,
@@ -844,6 +850,19 @@ describe('parseAndRunWorkflow — ACP agent grants', () => {
     ]);
   });
 
+  it("gives the session the node's instructions", async () => {
+    const { record } = await run(
+      docOf(
+        agentNode({
+          instructions: 'Never push to main.',
+        }),
+      ),
+    );
+    expect(record.instructions).toEqual([
+      'Never push to main.',
+    ]);
+  });
+
   it('opens the agent with only the granted capabilities when the node names none', async () => {
     const { output, record } = await run(docOf(agentNode()));
     expect(output).toBe('agent done');
@@ -852,11 +871,36 @@ describe('parseAndRunWorkflow — ACP agent grants', () => {
         readTextFile: true,
         writeTextFile: false,
         terminal: false,
+        elicitation: true,
       },
     ]);
     expect(record.permissions).toEqual([
       undefined,
     ]);
+  });
+
+  it('withdraws questions when the host grants none, and a node may withdraw them itself', async () => {
+    const withdrawn = await run(docOf(agentNode()), {
+      acp: {
+        fake: {
+          clientCapabilities: {
+            readTextFile: true,
+            elicitation: false,
+          },
+        },
+      },
+    });
+    expect(withdrawn.record.capabilities[0]?.elicitation).toBe(false);
+    const declined = await run(
+      docOf(
+        agentNode({
+          clientCapabilities: {
+            elicitation: false,
+          },
+        }),
+      ),
+    );
+    expect(declined.record.capabilities[0]?.elicitation).toBe(false);
   });
 
   it('refuses session.load unless granted, and loads the session when it is', async () => {

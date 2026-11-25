@@ -57,6 +57,11 @@ export type AcpTransport = ByteStream & {
    * package that made it.
    */
   readonly reattach?: AcpReattachHandle;
+  /**
+   * Let go of the agent without stopping it, as a host that goes away does,
+   * so a later host can still reattach. Present only with {@link reattach}.
+   */
+  detach?(): Promise<void>;
 };
 
 /**
@@ -264,6 +269,30 @@ export type AcpPermissionSteerer = (
 
 //#endregion
 
+//#region Questions
+
+/**
+ * Answers an agent's `elicitation/create` request. The runtime binds it to the
+ * harness's held-question seam (spec 27 § Questions the agent asks); the
+ * protocol client only asks and relays the answer. A throw answers `cancel`.
+ * @public
+ */
+export type AcpBoundElicitationHandler = (
+  request: acp.CreateElicitationRequest,
+  info: AcpElicitationInfo,
+) => Promise<acp.CreateElicitationResponse>;
+
+/** @public What identifies an agent's question beyond its params. */
+export interface AcpElicitationInfo {
+  /**
+   * The agent's JSON-RPC id for the request. A keeper asks a reattached host
+   * again with the same id, so it ties the question to its earlier asking.
+   */
+  readonly requestId?: string | number;
+}
+
+//#endregion
+
 //#region Client host
 
 /**
@@ -295,6 +324,12 @@ export interface AcpClientCapabilityConfig {
    * not the `fs/*` methods it invokes on the client directly.
    */
   allowAnyPath?: boolean;
+  /**
+   * Advertise form elicitation (`elicitation: { form: {} }`), so the agent may
+   * ask a person questions; each is held for a person (spec 27 § Questions the
+   * agent asks). Default `true`; `false` withdraws it.
+   */
+  elicitation?: boolean;
 }
 
 /**
@@ -377,6 +412,8 @@ export interface AcpClientHost {
    */
   approvePermission?: AcpPermissionSteerer;
   onPermissionRequest?: AcpBoundPermissionHandler;
+  /** Answers `elicitation/create`. Per-turn; none answers `cancel`. */
+  onElicitation?: AcpBoundElicitationHandler;
   /**
    * Receive every `session/update` notification for the active session. Also
    * per-turn — it routes to the running step's event bridge, so a reused
@@ -581,6 +618,13 @@ export interface AcpNewSessionOptions {
   cwd: string;
   /** MCP servers the agent should connect to, gated by its `mcpCapabilities`. */
   mcpServers?: ReadonlyArray<acp.McpServer>;
+  /**
+   * Trusted instructions added to the agent's own system prompt: the protocol
+   * `systemPrompt` (append) when the agent advertises
+   * `sessionCapabilities.systemPrompt`, else the adapter's extension; with
+   * neither, the request is refused with {@link AcpCapabilityError}.
+   */
+  instructions?: string;
 }
 
 /** @public Options for resuming a previously created session via `session/load`. */
@@ -595,6 +639,12 @@ export interface AcpLoadSessionOptions extends AcpNewSessionOptions {
  */
 export interface AcpSession {
   readonly sessionId: string;
+  /**
+   * What the session was opened with — instructions and `_meta` as sent, cwd,
+   * MCP servers, client capabilities — as canonical JSON. Absent on a
+   * reattached session, which no request opened here.
+   */
+  readonly fingerprint?: string;
   /** Mode state when the agent supports session modes. */
   readonly modes?: acp.SessionModeState;
   /**
@@ -646,6 +696,12 @@ export interface AcpAgentConnection {
   /** Create a session (`session/new`). */
   newSession(opts: AcpNewSessionOptions): Promise<AcpSession>;
   /**
+   * The {@link AcpSession.fingerprint} a session opened with `opts` on this
+   * connection would have: compare it with a stored one before adopting a
+   * session.
+   */
+  fingerprintFor(opts: AcpNewSessionOptions): string;
+  /**
    * Resume a session (`session/load`). Throws {@link AcpCapabilityError} when
    * the agent did not advertise `loadSession`.
    */
@@ -664,6 +720,12 @@ export interface AcpAgentConnection {
   attachSession?(sessionId: string): Promise<AcpSession>;
   /** Close the connection and release the transport. */
   close(): Promise<void>;
+  /**
+   * Release this host's side of the connection and leave the agent running for
+   * a later host: what a host does when it must not adopt a reattached
+   * session. Present only when the agent can outlive this host.
+   */
+  detach?(): Promise<void>;
 }
 
 /** @public Options for {@link AcpSession.resumeTurn}. */
@@ -696,6 +758,11 @@ export interface AcpLiveSession {
   mcpServers?: ReadonlyArray<acp.McpServer>;
   /** Noetic tools served to the agent at creation — also fixed for its lifetime. */
   tools?: ReadonlyArray<AcpTool>;
+  /**
+   * What the session was opened with ({@link AcpSession.fingerprint}); for a
+   * reattached session, the one stored when it was opened.
+   */
+  fingerprint?: string;
 }
 
 /** @public Options handed to {@link AcpAgent.connect}. */
@@ -919,6 +986,12 @@ export interface AcpCapabilityGrant {
   readonly readTextFile?: boolean;
   readonly writeTextFile?: boolean;
   readonly terminal?: boolean;
+  /**
+   * Whether the agent may ask a person questions (held for a person, spec 27
+   * § Questions the agent asks). Granted by default; `false` for a host with
+   * nobody to answer.
+   */
+  readonly elicitation?: boolean;
 }
 
 /**
@@ -978,16 +1051,24 @@ export function isAcpCapabilityError(e: unknown): e is AcpCapabilityError {
 export class AcpConnectError extends Error {
   readonly agentId: string;
   readonly connectCause?: unknown;
+  /**
+   * The agent, or the session asked for, is confirmed gone: nothing an earlier
+   * host started is still running there. Only then does a resumed step start
+   * its work over; any other connect failure leaves that unknown.
+   */
+  readonly gone: boolean;
 
   constructor(opts: {
     agentId: string;
     message: string;
     cause?: unknown;
+    gone?: boolean;
   }) {
     super(opts.message);
     this.name = 'AcpConnectError';
     this.agentId = opts.agentId;
     this.connectCause = opts.cause;
+    this.gone = opts.gone === true;
   }
 }
 
@@ -1010,6 +1091,8 @@ export type {
   AuthMethod as AcpAuthMethod,
   AvailableCommand as AcpAvailableCommand,
   ContentBlock as AcpContentBlock,
+  CreateElicitationRequest as AcpCreateElicitationRequest,
+  CreateElicitationResponse as AcpCreateElicitationResponse,
   McpServer as AcpMcpServer,
   PermissionOption as AcpPermissionOption,
   PlanEntry as AcpPlanEntry,
@@ -1019,6 +1102,7 @@ export type {
   SessionMode as AcpSessionMode,
   SessionModeState as AcpSessionModeState,
   SessionNotification as AcpSessionNotification,
+  SessionUpdate as AcpSessionUpdate,
   ToolCallContent as AcpToolCallContent,
   ToolCallStatus as AcpToolCallStatus,
   ToolKind as AcpToolKind,

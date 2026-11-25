@@ -34,6 +34,55 @@ describe('readHeldCallEvent', () => {
     });
   });
 
+  it('reads a held question with its question, and its settlement', () => {
+    const question: HeldCall = {
+      ...HELD,
+      name: 'claude-code:question',
+      reason: 'question',
+      question: {
+        message: 'Which branch?',
+        schema: {
+          type: 'object',
+          properties: {
+            branch: {
+              type: 'string',
+            },
+          },
+        },
+      },
+    };
+    expect(
+      readHeldCallEvent(
+        framework('ops:tool_call_held', {
+          ...question,
+        }),
+      ),
+    ).toEqual({
+      type: 'held',
+      call: question,
+    });
+    expect(
+      readHeldCallEvent(
+        framework('ops:tool_call_settled', {
+          callId: question.callId,
+          name: question.name,
+          argsHash: question.argsHash,
+          reason: 'question',
+          by: 'answer',
+        }),
+      ),
+    ).toEqual({
+      type: 'settled',
+      settled: {
+        callId: question.callId,
+        name: question.name,
+        argsHash: question.argsHash,
+        reason: 'question',
+        by: 'answer',
+      },
+    });
+  });
+
   it('keeps the optional fields a hold carries', () => {
     const read = readHeldCallEvent(
       framework('ops:tool_call_held', {

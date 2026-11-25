@@ -121,7 +121,8 @@ function gateHooks(harness: WiredHarness): GateHooks {
       );
     },
     // A long operation asked a question (MCP Tasks `input_required`). It is held for
-    // a person like a tool's open result: the answer goes back to the operation.
+    // a person as a question: the answer goes back to the operation; declined, the
+    // operation is left without one.
     async answerInput(request) {
       const question = request.status.request;
       if (!request.ctx || !question) {
@@ -139,8 +140,16 @@ function gateHooks(harness: WiredHarness): GateHooks {
           name: request.toolName,
           args,
           argsHash: heldArgsHash(request.toolName, args),
-          reason: 'result',
+          reason: 'question',
           request: question,
+          question: {
+            message: question.message,
+            ...(question.schema
+              ? {
+                  schema: question.schema,
+                }
+              : {}),
+          },
         },
       });
       return answer.resolution?.hasOutput

@@ -110,15 +110,35 @@ export interface HeldCall {
   /**
    * `approval`: the tool has not run. `result`: it ran and left its result open.
    * `outcome`: a `durable` tool was running when the host died, and nobody knows
-   * whether its effect landed.
+   * whether its effect landed. `question`: a person is asked for input
+   * ({@link question}); `{ output }` answers it, `deny` declines it.
    */
-  readonly reason: 'approval' | 'result' | 'outcome';
+  readonly reason: 'approval' | 'result' | 'outcome' | 'question';
   /** Epoch ms after which the hold runs out. */
   readonly dueAt?: number;
   /** What happens then: `deny` (the default) or `keep`. */
   readonly onDue?: 'deny' | 'keep';
   /** What a tool passed to `hold()`, for whoever answers. */
   readonly request?: unknown;
+  /** The question, on a call held with `reason: 'question'`. */
+  readonly question?: HeldQuestion;
+}
+
+/**
+ * @public A question put to a person (spec 08 § Held tool calls): a long task's
+ * `input_required`, or a coding agent's `elicitation/create`.
+ */
+export interface HeldQuestion {
+  /** What the person is asked. */
+  readonly message: string;
+  /**
+   * A JSON Schema object the answer must match: `type: 'object'` with flat
+   * `properties` (`string`, `number`, `integer`, `boolean`, optionally `enum`)
+   * and `required`. Absent: any JSON value answers.
+   */
+  readonly schema?: Readonly<Record<string, unknown>>;
+  /** A page the person is sent to instead of a form. */
+  readonly url?: string;
 }
 
 /**

@@ -65,6 +65,7 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
         agentCapabilities: {},
         authMethods: [],
         protocolVersion: 1,
+        fingerprintFor: (): string => 'fake',
         async authenticate() {
           // No auth in the fake.
         },

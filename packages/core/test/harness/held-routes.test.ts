@@ -170,7 +170,10 @@ describe('a question a long task asks', () => {
 
     const held = await heldCall(harness, scope);
     expect(held).toMatchObject({
-      reason: 'result',
+      reason: 'question',
+      question: {
+        message: 'Trust this developer?',
+      },
       request: {
         id: 'q1',
         message: 'Trust this developer?',

@@ -22,6 +22,7 @@ import { resolvePermission, selectPermissionOption } from './permissions';
 import { buildCommandLine, TerminalRegistry } from './terminals';
 import type { BridgedPermissionCheck } from './tool-permissions';
 import { allowOnceOption } from './tool-permissions';
+import { untagElicitation } from './update-filter';
 
 //#region Capability advertisement
 
@@ -34,6 +35,15 @@ export function clientCapabilitiesFor(host: AcpClientHost): acp.ClientCapabiliti
       writeTextFile: config?.writeTextFile !== false,
     },
     terminal: config?.terminal !== false,
+    // An agent's questions are held for a person (spec 27 § Questions the agent
+    // asks); URL questions are not advertised, since nothing here opens a page.
+    ...(config?.elicitation === false
+      ? {}
+      : {
+          elicitation: {
+            form: {},
+          },
+        }),
   };
 }
 
@@ -165,6 +175,38 @@ export class NoeticAcpClient implements acp.Client {
     return {
       outcome: selected,
     };
+  }
+
+  /**
+   * Ask the current step's handler. With none, or when it throws, the answer
+   * is `cancel`: the agent stops asking rather than waiting forever.
+   */
+  async createElicitation(
+    params: acp.CreateElicitationRequest,
+  ): Promise<acp.CreateElicitationResponse> {
+    const { request, requestId } = untagElicitation(params);
+    const handler = this.host.onElicitation;
+    // A withdrawn capability is refused here too: an agent that asks anyway
+    // must not reach a person nobody set up to answer.
+    if (!handler || this.host.capabilities?.elicitation === false) {
+      return {
+        action: 'cancel',
+      };
+    }
+    try {
+      return await handler(request, {
+        requestId,
+      });
+    } catch {
+      return {
+        action: 'cancel',
+      };
+    }
+  }
+
+  /** A URL-mode elicitation finished; nothing waits on it here. */
+  async completeElicitation(_params: acp.CompleteElicitationNotification): Promise<void> {
+    return;
   }
 
   async sessionUpdate(params: acp.SessionNotification): Promise<void> {

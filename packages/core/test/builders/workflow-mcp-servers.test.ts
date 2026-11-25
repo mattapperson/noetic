@@ -102,6 +102,7 @@ function recordingAgent(): {
         },
         authMethods: [],
         protocolVersion: 1,
+        fingerprintFor: (): string => 'fake',
         async authenticate() {
           // No auth in the fake.
         },

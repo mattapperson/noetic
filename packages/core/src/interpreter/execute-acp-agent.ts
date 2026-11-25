@@ -17,6 +17,7 @@ import type {
   AcpContentBlock,
   AcpKeepAlive,
   AcpLiveSession,
+  AcpNewSessionOptions,
   AcpPermissionOutcome,
   AcpPermissionSteerer,
   AcpReattachHandle,
@@ -37,6 +38,8 @@ import {
   createMessage,
   extractAssistantText,
   frameworkCast,
+  isAcpCapabilityError,
+  isAcpConnectError,
   NoeticConfigError,
   NoeticErrorImpl,
   SteeringAction,
@@ -48,6 +51,8 @@ import { isRpcError, RpcFailure } from '../util/error-message';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
 import { renderLayerContext } from './acp-layers';
+import type { QuestionAsker } from './acp-questions';
+import { questionAsker } from './acp-questions';
 import { ACP_RESUME_NOTICE, acpSessionRecords } from './acp-resume';
 import { AcpToolRunner, mergeBridgedItems, resolveAcpTools } from './acp-tools';
 import { appendUserInput, MAX_STEERING_RETRIES, resolveLazy } from './execute-action';
@@ -253,6 +258,8 @@ function buildApprover(ctx: Context<ContextData>): AcpPermissionSteerer | undefi
 interface HostBindingOptions<TContext, I, O> {
   step: StepAcpAgent<TContext, I, O>;
   ctx: Context<ContextData>;
+  /** The step's questions to a person, one asker for the whole step. */
+  questions: QuestionAsker;
   /** `agentId` of the adapter taking the turn, surfaced to permission handlers. */
   agentId: string;
   /** Sink for the agent's `fs/*` and `terminal/*` calls. */
@@ -292,6 +299,9 @@ function bindHostToStep<TContext, I, O>(
           stepId: opts.step.id,
         })
     : undefined;
+  // An agent's question is a question for a person: held like any other (spec 27
+  // § Questions the agent asks), answered by whoever answers held calls.
+  host.onElicitation = opts.questions.ask;
   host.onSessionUpdate = opts.onUpdate;
   host.onClientActivity = opts.onActivity;
   // A step that gives no tools gets none, even on a session another step
@@ -349,6 +359,7 @@ function normalizedCapabilities(config: AcpClientCapabilityConfig | undefined): 
     additionalDirectories: [
       ...(config?.additionalDirectories ?? []),
     ].sort(),
+    elicitation: config?.elicitation !== false,
   });
 }
 
@@ -362,6 +373,7 @@ function assertSessionScopedSettingsMatch<TContext, I, O>(
   live: AcpLiveSession,
   cwd: string,
   tools: AcpToolRunner | undefined,
+  settings: SessionSettings,
 ): void {
   const conflict = (setting: string, hint: string): NoeticConfigError =>
     new NoeticConfigError({
@@ -374,6 +386,18 @@ function assertSessionScopedSettingsMatch<TContext, I, O>(
     throw conflict(
       'cwd',
       'A session is created in one working directory. Give every step sharing a `session.reuse` key the same `cwd`, or use a separate session.',
+    );
+  }
+  // Instructions, the adapter's `_meta`, cwd and capabilities as the connection
+  // would send them, against what it sent when the session opened.
+  const opened = live.fingerprint;
+  if (
+    opened !== undefined &&
+    opened !== live.connection.fingerprintFor(sessionRequest(cwd, settings))
+  ) {
+    throw conflict(
+      'instructions or agent settings',
+      'A session takes its instructions and its agent settings when it is created. Give every step sharing a `session.reuse` key the same `instructions` and agent, or use a separate session.',
     );
   }
   // The agent reads its tool list once, so a step may serve any part of it —
@@ -423,6 +447,47 @@ function assertCapabilitiesCompatible<TContext, I, O>(
     message: `step.acpAgent(${JSON.stringify(step.id)}) reuses session '${step.session?.reuse}' but requests different clientCapabilities than the connection was opened with.`,
     hint: 'ACP negotiates client capabilities once per connection. Give every step sharing a `session.reuse` key the same `clientCapabilities`, or use a separate session.',
   });
+}
+
+/** What the step opens its session with, beside its cwd. */
+interface SessionSettings {
+  instructions?: string;
+}
+
+async function resolveSessionSettings<TContext, I, O>(
+  step: StepAcpAgent<TContext, I, O>,
+  ctx: Context<TContext>,
+): Promise<SessionSettings> {
+  const instructions = await resolveLazy(step.instructions, ctx);
+  if (instructions === undefined || instructions.trim().length === 0) {
+    return {};
+  }
+  return {
+    instructions,
+  };
+}
+
+/** The session request for `cwd` and `settings`, as `fingerprintFor` takes it. */
+function sessionRequest(cwd: string, settings: SessionSettings): AcpNewSessionOptions {
+  return {
+    cwd,
+    ...settings,
+  };
+}
+
+/** JSON-RPC "resource not found", which an agent answers a load of a session it no longer has with. */
+const RESOURCE_NOT_FOUND = -32002;
+
+/**
+ * Whether a failed `session/load` says the agent no longer has the session —
+ * the one failure a resumed step starts over from. Anything else may mean the
+ * old turn is still there, so the step fails rather than repeat its work.
+ */
+function sessionIsGone(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  return Reflect.get(error, 'code') === RESOURCE_NOT_FOUND;
 }
 
 /** Keeping a connection is always explicit; the default closes it with the step. */
@@ -477,17 +542,19 @@ async function sessionOn(
     loadId?: string;
     /** The session an earlier attempt of this step opened. */
     resumeId?: string;
+    settings: SessionSettings;
   },
 ): Promise<{
   session: AcpSession;
   resumed: boolean;
 }> {
-  const { cwd, loadId, resumeId } = opts;
+  const { cwd, loadId, resumeId, settings } = opts;
   if (loadId) {
     return {
       session: await connection.loadSession({
         sessionId: loadId,
         cwd,
+        ...settings,
       }),
       resumed: false,
     };
@@ -497,8 +564,14 @@ async function sessionOn(
       .loadSession({
         sessionId: resumeId,
         cwd,
+        ...settings,
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        if (sessionIsGone(error)) {
+          return undefined;
+        }
+        throw error;
+      });
     if (session) {
       return {
         session,
@@ -509,6 +582,7 @@ async function sessionOn(
   return {
     session: await connection.newSession({
       cwd,
+      ...settings,
     }),
     resumed: false,
   };
@@ -527,6 +601,9 @@ async function openSession<TContext, I, O>(opts: {
   resumeId?: string;
   /** How to reach the agent that earlier attempt left running, when it can outlive its host. */
   reattach?: AcpReattachHandle;
+  /** The fingerprint that earlier attempt's session was opened with. */
+  fingerprint?: string;
+  settings: SessionSettings;
 }): Promise<SessionResolution> {
   let resumed = false;
   let reattached = false;
@@ -551,6 +628,9 @@ async function openSession<TContext, I, O>(opts: {
     const kept = await reattachTo(opts.agent, connectOptions, {
       reattach: opts.reattach,
       sessionId: opts.resumeId,
+      fingerprint: opts.fingerprint,
+      request: sessionRequest(opts.cwd, opts.settings),
+      stepId: opts.step.id,
     });
     if (kept) {
       resumed = true;
@@ -563,6 +643,8 @@ async function openSession<TContext, I, O>(opts: {
         keepAlive,
         cwd: opts.cwd,
         tools: opts.tools?.tools,
+        // Checked equal to this step's when it reattached.
+        fingerprint: opts.fingerprint,
       };
     }
     const connection = holdingConnections(
@@ -580,6 +662,7 @@ async function openSession<TContext, I, O>(opts: {
         cwd: opts.cwd,
         loadId: opts.step.session?.load,
         resumeId: opts.resumeId,
+        settings: opts.settings,
       });
       resumed = opened.resumed;
       const { session } = opened;
@@ -591,6 +674,7 @@ async function openSession<TContext, I, O>(opts: {
         keepAlive,
         cwd: opts.cwd,
         tools: opts.tools?.tools,
+        fingerprint: session.fingerprint,
       };
     } catch (e) {
       await connection.close().catch(() => undefined);
@@ -599,7 +683,7 @@ async function openSession<TContext, I, O>(opts: {
   });
 
   if (!fresh) {
-    assertSessionScopedSettingsMatch(opts.step, live, opts.cwd, opts.tools);
+    assertSessionScopedSettingsMatch(opts.step, live, opts.cwd, opts.tools, opts.settings);
     if (live.agentId !== opts.agent.agentId) {
       throw new NoeticConfigError({
         code: 'ACP_SESSION_AGENT_CONFLICT',
@@ -635,12 +719,14 @@ function whenHostExitsOf(ctx: Context<ContextData>): AcpWhenHostExits {
 async function reattachTo(
   agent: AcpAgent,
   connectOptions: AcpConnectOptions,
-  {
-    reattach,
-    sessionId,
-  }: {
+  opts: {
     reattach: AcpReattachHandle | undefined;
     sessionId: string | undefined;
+    /** What the session was opened with, as stored; absent on an older record. */
+    fingerprint: string | undefined;
+    /** What this step would open it with. */
+    request: AcpNewSessionOptions;
+    stepId: string;
   },
 ): Promise<
   | {
@@ -649,27 +735,80 @@ async function reattachTo(
     }
   | undefined
 > {
-  if (!reattach || sessionId === undefined) {
+  if (!opts.reattach || opts.sessionId === undefined) {
     return undefined;
   }
+  // Only "the agent is gone" starts the step over; any other failure fails it.
   const connection = await agent
     .connect({
       ...connectOptions,
-      reattach,
+      reattach: opts.reattach,
     })
-    .catch(() => undefined);
+    .catch(goneOrThrow);
   if (!connection) {
     return undefined;
   }
-  const session = await connection.attachSession?.(sessionId).catch(() => undefined);
-  if (!session?.resumeTurn) {
-    await connection.close().catch(() => undefined);
+  try {
+    const session = await connection.attachSession?.(opts.sessionId).catch(goneOrThrow);
+    if (!session?.resumeTurn) {
+      await connection.close().catch(() => undefined);
+      return undefined;
+    }
+    assertSameSettings(opts, connection);
+    return {
+      connection,
+      session,
+    };
+  } catch (error) {
+    // The old turn may still be working: let go of it, never stop it, so a
+    // host that resumes with the settings it started with can still take it.
+    await letGo(connection);
+    throw error;
+  }
+}
+
+/** Release this host's side of a reattached connection, leaving the agent running. */
+async function letGo(connection: AcpAgentConnection): Promise<void> {
+  const release = connection.detach ?? connection.close;
+  await release.call(connection).catch(() => undefined);
+}
+
+/**
+ * Undefined when the agent or its session is confirmed gone, the error itself
+ * otherwise: a connect failure that says nothing about the agent must not
+ * start its work over.
+ */
+function goneOrThrow(error: unknown): undefined {
+  if (isAcpConnectError(error) && error.gone) {
     return undefined;
   }
-  return {
-    connection,
-    session,
-  };
+  throw error;
+}
+
+/**
+ * A reattached session runs with what it was opened with. A step that would
+ * open it differently must not adopt it: the old turn may already have acted on
+ * the old instructions.
+ */
+function assertSameSettings(
+  opts: {
+    fingerprint: string | undefined;
+    request: AcpNewSessionOptions;
+    stepId: string;
+  },
+  connection: AcpAgentConnection,
+): void {
+  if (
+    opts.fingerprint === undefined ||
+    opts.fingerprint === connection.fingerprintFor(opts.request)
+  ) {
+    return;
+  }
+  throw new NoeticConfigError({
+    code: 'ACP_SESSION_SETTING_CONFLICT',
+    message: `step.acpAgent(${JSON.stringify(opts.stepId)}) resumes a session that was opened with different instructions or agent settings than the step now gives.`,
+    hint: 'A resumed step must resolve the same instructions, cwd and agent settings as the run that started it.',
+  });
 }
 
 /**
@@ -760,16 +899,28 @@ async function applySessionSelection<TContext, I, O>(
   }
 }
 
-/** Turn a failed turn into the step's typed error, after closing the bracket. */
-function turnFailure(
+/**
+ * Whatever went wrong, as a Noetic error (spec 27 § Failures are Noetic errors):
+ * a host never sees a protocol error. A missing capability is the workflow's
+ * configuration; everything else the agent did, or failed to do, is the step
+ * failing, with the agent's own message.
+ */
+function stepFailure(
   step: {
     id: string;
   },
   cause: unknown,
   baseCtx: Context<ContextData>,
-): NoeticErrorImpl {
-  if (cause instanceof NoeticErrorImpl) {
+): NoeticErrorImpl | NoeticConfigError {
+  if (cause instanceof NoeticErrorImpl || cause instanceof NoeticConfigError) {
     return cause;
+  }
+  if (isAcpCapabilityError(cause)) {
+    return new NoeticConfigError({
+      code: 'AGENT_CAPABILITY_MISSING',
+      message: `step.acpAgent(${JSON.stringify(step.id)}): ${cause.message}`,
+      hint: `The agent does not support '${cause.capability}'. Leave that setting off this step, or use an agent that supports it.`,
+    });
   }
   if (baseCtx.aborted) {
     return new NoeticErrorImpl({
@@ -786,25 +937,6 @@ function turnFailure(
     cause: cause instanceof Error && !isRpcError(cause) ? cause : new RpcFailure(cause),
     retriesExhausted: false,
   });
-}
-
-/**
- * A failure while opening the session or applying its mode/model. Typed
- * errors (capability, connect, config) pass through; a JSON-RPC rejection from
- * the agent — or anything thrown that is not an Error — becomes the step's
- * `step_failed` error with a readable message.
- */
-function setupFailure(
-  step: {
-    id: string;
-  },
-  cause: unknown,
-  baseCtx: Context<ContextData>,
-): unknown {
-  if (cause instanceof Error && !isRpcError(cause)) {
-    return cause;
-  }
-  return turnFailure(step, cause, baseCtx);
 }
 
 //#region Turn
@@ -887,15 +1019,18 @@ async function runTurn<TContext, I, O>(params: {
     // Close the turn on the event surface before rethrowing. A consumer driving
     // a UI off `getFullStream()` saw `response.created` and would otherwise
     // wait forever for a completion that never comes — the stream just stops.
-    bridge.abort(e);
+    // The stream carries the same Noetic error `execute()` throws.
+    const failure = stepFailure(step, turnError.error ?? e, baseCtx);
+    bridge.abort(failure);
     await discardIfFresh(resolution, baseCtx);
-    throw turnFailure(step, turnError.error ?? e, baseCtx);
+    throw failure;
   }
   await settle(tools);
   if (turnError.error !== undefined) {
-    bridge.abort(turnError.error);
+    const failure = stepFailure(step, turnError.error, baseCtx);
+    bridge.abort(failure);
     await discardIfFresh(resolution, baseCtx);
-    throw turnFailure(step, turnError.error, baseCtx);
+    throw failure;
   }
   if (tools) {
     const merged = mergeBridgedItems(result.items, tools.takeFinished());
@@ -944,10 +1079,40 @@ export async function executeAcpAgent<TContext, I, O>(
   layers?: ContextLayer[],
 ): Promise<O> {
   const baseCtx = frameworkCast<Context<ContextData>>(ctx);
-
   assertReuseIsKeptAlive(step);
-
   const agent = await resolveAgent(step, ctx);
+  const questions = questionAsker({
+    ctx: baseCtx,
+    agentId: agent.agentId,
+    stepId: step.id,
+  });
+  // A question's answer is kept until the step ends, so a host that died after
+  // taking it and before the agent got it is not asked again (spec 27
+  // § Questions the agent asks). A step cut off with its host never gets here.
+  try {
+    return await runAcpStep({
+      step,
+      input,
+      ctx,
+      layers,
+      agent,
+      questions,
+    });
+  } finally {
+    await questions.release().catch(() => undefined);
+  }
+}
+
+async function runAcpStep<TContext, I, O>(params: {
+  step: StepAcpAgent<TContext, I, O>;
+  input: I;
+  ctx: Context<TContext>;
+  layers: ContextLayer[] | undefined;
+  agent: AcpAgent;
+  questions: QuestionAsker;
+}): Promise<O> {
+  const { step, input, ctx, layers, agent, questions } = params;
+  const baseCtx = frameworkCast<Context<ContextData>>(ctx);
   const resolvedPrompt = await resolveLazy(step.prompt, ctx);
   const blocks = await resolveLazy(step.content, ctx);
   const promptText =
@@ -965,6 +1130,7 @@ export async function executeAcpAgent<TContext, I, O>(
   }
 
   const cwd = (await resolveLazy(step.cwd, ctx)) ?? baseCtx.cwdState.cwd;
+  const settings = await resolveSessionSettings(step, ctx);
   const tools = await resolveServedTools(step, ctx, layers, agent);
 
   // Capture the conversation so far BEFORE appending this turn's prompt, so a
@@ -986,6 +1152,7 @@ export async function executeAcpAgent<TContext, I, O>(
   const sameAgent = recorded?.agentId === agent.agentId;
   const resumeId = sameAgent ? recorded?.sessionId : undefined;
   const reattach = sameAgent ? recorded?.reattach : undefined;
+  const fingerprint = sameAgent ? recorded?.fingerprint : undefined;
   // `session/load` replays the session's conversation as updates. They are the
   // agent's history, not this turn's work: they reach raw-event consumers
   // marked `replay: true`, and never the text, reasoning or item streams.
@@ -999,6 +1166,7 @@ export async function executeAcpAgent<TContext, I, O>(
   const bindingFor = (events: AcpEventBridge): HostBindingOptions<TContext, I, O> => ({
     step,
     ctx: baseCtx,
+    questions,
     agentId: agent.agentId,
     layers,
     onUpdate: (notification) => {
@@ -1040,9 +1208,11 @@ export async function executeAcpAgent<TContext, I, O>(
     tools,
     resumeId,
     reattach,
+    fingerprint,
+    settings,
   })
     .catch((cause: unknown) => {
-      throw setupFailure(step, cause, baseCtx);
+      throw stepFailure(step, cause, baseCtx);
     })
     .finally(() => {
       reloading = false;
@@ -1050,17 +1220,20 @@ export async function executeAcpAgent<TContext, I, O>(
   if (resolution.resumed) {
     tools?.sessionReloaded();
   }
-  if (resolution.fresh && !resolution.resumed) {
+  // A reloaded session was opened again with this step's settings: its record
+  // takes the new fingerprint. A reattached one keeps the one it has.
+  if (resolution.fresh && !resolution.reattached) {
     await sessions?.write({
       sessionId: resolution.live.session.sessionId,
       agentId: agent.agentId,
       // How a resumed run reaches this agent if it outlives this host.
       reattach: resolution.live.connection.reattach,
+      fingerprint: resolution.live.session.fingerprint,
     });
   }
 
   await applySessionSelection(step, ctx, resolution, baseCtx).catch((cause: unknown) => {
-    throw setupFailure(step, cause, baseCtx);
+    throw stepFailure(step, cause, baseCtx);
   });
   turnError.cancel = () => resolution.live.session.cancel();
 

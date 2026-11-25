@@ -212,8 +212,9 @@ const harness = new AgentHarness({
   // Answer what needs no one here; hold the rest for a person.
   approveToolCall: ({ toolName }) => (alwaysSafe(toolName) ? { action: 'allow' } : { action: 'hold' }),
   onHeld: async (call, { signal }) => {
-    // call.reason: 'approval' (not run yet), 'result' (a tool's hold()), or
-    // 'outcome' (a durable tool cut off, effect unknown: allow runs it again).
+    // call.reason: 'approval' (not run yet), 'result' (a tool's hold()),
+    // 'outcome' (a durable tool cut off, effect unknown: allow runs it again), or
+    // 'question' (call.question asks a person for input: { output } answers, deny declines).
     const answer = await showCard(call, signal); // close the card when signal aborts
     if (answer === undefined) {
       return undefined; // leave it held; answer later with execute()
@@ -226,6 +227,7 @@ const harness = new AgentHarness({
 - `signal.reason` says how the call was settled: `answer` (a decision, from anywhere; also a call another harness over the same storage settled and finished the turn on, however it ended, seen within two seconds), `due` (its deadline), `skipped` (a steer), or `cancelled` (the turn was aborted or interrupted, the agent gave up, or the harness closed). An answer returned after that is dropped, and nothing throws.
 - The harness never waits on the handler: the call waits on its record as it would for any answer. A handler that throws is logged, and the call stays held.
 - A handler lives in its process. After a restart, list what is still held with `pending()` and answer it with `execute()`.
+- A **question** (`reason: 'question'`) is a person being asked for input — a long task's `input_required`, or a coding agent's question. `call.question` has the `message`, and the form's JSON `schema` or a `url`. Answer with `{ output }`, which must fit the schema (otherwise it is refused and the question stays open), or `{ action: 'deny' }` to decline.
 
 A message that arrives while a call is held is a [steer](/docs/framework/runtime#steering-a-running-turn) like any other. Sent with `deliveryMode: 'between-rounds'` or `'next-item'`, it skips the held calls and the turn goes on with it. Set `steerWhileHeld: 'defer'` on the harness to keep the call's question open instead: the steer waits behind the held calls and lands once they are answered. A layer's `onSteer` still has the last word at the `held` steer point. A default (`next-turn`) message waits for the turn to end and does not disturb it.
 

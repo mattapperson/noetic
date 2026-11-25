@@ -284,6 +284,8 @@ const AcpClientCapabilityConfigSchema = z.object({
   readTextFile: z.boolean().optional(),
   writeTextFile: z.boolean().optional(),
   terminal: z.boolean().optional(),
+  /** Whether the agent may ask a person questions (spec 27 § Questions the agent asks). */
+  elicitation: z.boolean().optional(),
 });
 
 const SecretValueSchema: z.ZodType<WorkflowSecretValue> = z
@@ -611,6 +613,11 @@ export interface AcpAgentWorkflowNode extends WorkflowNodeBase {
   /** Registry key for the ACP agent adapter (e.g. `claude-code`). */
   agent: string;
   prompt: string;
+  /**
+   * Trusted instructions for the session the node opens, added to the agent's
+   * own system prompt, as a `callModel` node's `instructions`.
+   */
+  instructions?: string;
   /** Absolute working directory for the session. Defaults to the runtime cwd. */
   cwd?: string;
   /** Session mode to switch to before prompting. */
@@ -1185,6 +1192,7 @@ const AcpAgentNodeSchema = z.object({
   ...SHARED_FIELDS,
   agent: z.string().min(1),
   prompt: z.string().min(1),
+  instructions: z.string().min(1).optional(),
   cwd: z.string().min(1).optional(),
   mode: z.string().min(1).optional(),
   model: z.string().min(1).optional(),

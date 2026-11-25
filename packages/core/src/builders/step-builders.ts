@@ -137,6 +137,8 @@ export interface StepAcpAgentOpts<TContext, O, I = unknown>
   permissions?: AcpPermissionPolicy;
   /** Async resolver consulted when the policy and steering both abstain. */
   onPermissionRequest?: AcpPermissionHandler;
+  /** Trusted instructions added to the agent's own system prompt, as `callModel`'s `instructions`. */
+  instructions?: Lazy<string | undefined, TContext>;
   /** Which client capabilities to advertise to the agent. */
   clientCapabilities?: AcpClientCapabilityConfig;
   /** Optional Standard Schema; when set the assistant text is JSON-parsed and validated. */

@@ -125,6 +125,9 @@ class Keeper {
         this.keepLog = false;
         void this.stop();
       },
+      release: () => {
+        this.whenHostExits = 'keep';
+      },
     };
   }
 

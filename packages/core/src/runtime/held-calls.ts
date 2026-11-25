@@ -25,6 +25,7 @@ import { z } from 'zod';
 import { emitFrameworkEvent, getBroadcaster } from './broadcaster-utils';
 import { ContextImpl, rootIdOf } from './context-impl';
 import { hashStepInput } from './durable/step-ledger';
+import { questionAnswerProblem } from './held-question';
 import { createInMemoryStorage } from './in-memory-storage';
 
 //#region Types
@@ -55,6 +56,7 @@ const HeldRecordSchema = z.object({
     'approval',
     'result',
     'outcome',
+    'question',
   ]),
   dueAt: z.number().optional(),
   onDue: z
@@ -65,6 +67,14 @@ const HeldRecordSchema = z.object({
     .optional(),
   /** Passed back by a tool's `hold()`, for whoever answers. */
   request: z.unknown().optional(),
+  /** The question, on a call held with `reason: 'question'`. */
+  question: z
+    .object({
+      message: z.string(),
+      schema: z.record(z.string(), z.unknown()).optional(),
+      url: z.string().optional(),
+    })
+    .optional(),
   resolution: ResolutionSchema.optional(),
 });
 
@@ -162,6 +172,33 @@ function refused(callId: string, reason: string): NoeticErrorImpl {
   });
 }
 
+/** Why `resolution` is the wrong kind of answer for `record`, or undefined. */
+function wrongAnswerKind(
+  record: HeldRecord,
+  resolution: NonNullable<HeldRecord['resolution']>,
+): string | undefined {
+  // An unknown outcome takes either answer: "it landed, here is the result", or
+  // a decision on whether to run it again.
+  if (record.reason === 'outcome') {
+    return undefined;
+  }
+  if (record.reason === 'question') {
+    if (resolution.hasOutput === true) {
+      const problem = questionAnswerProblem(record.question, resolution.output);
+      return problem ? `the answer does not fit the question: ${problem}` : undefined;
+    }
+    return resolution.action === 'deny'
+      ? undefined
+      : 'a question takes an answer (output) or deny, not an approval';
+  }
+  if ((record.reason === 'result') === (resolution.hasOutput === true)) {
+    return undefined;
+  }
+  return record.reason === 'result'
+    ? 'the call waits for a result, not an approval'
+    : 'the call waits for an approval, not a result';
+}
+
 function sameResolution(a: HeldRecord['resolution'], b: HeldRecord['resolution']): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -243,6 +280,11 @@ export function toHeldCall(record: HeldRecord): HeldCall {
       ? {}
       : {
           request: record.request,
+        }),
+    ...(record.question === undefined
+      ? {}
+      : {
+          question: record.question,
         }),
   };
 }
@@ -524,18 +566,9 @@ export class HeldCalls {
       throw refused(callId, 'the answer is for a call with different arguments');
     }
     const resolution = toResolutionRecord(answer.resolution);
-    // An unknown outcome takes either answer: "it landed, here is the result", or
-    // a decision on whether to run it again.
-    const wrongKind =
-      record.reason !== 'outcome' &&
-      (record.reason === 'result') !== (resolution.hasOutput === true);
+    const wrongKind = wrongAnswerKind(record, resolution);
     if (wrongKind) {
-      throw refused(
-        callId,
-        record.reason === 'result'
-          ? 'the call waits for a result, not an approval'
-          : 'the call waits for an approval, not a result',
-      );
+      throw refused(callId, wrongKind);
     }
     if (record.resolution) {
       if (sameResolution(record.resolution, resolution)) {
@@ -753,6 +786,14 @@ export async function holdAndWait(opts: {
   harness: HoldHost;
   ctx: Context;
   record: HeldRecord;
+  /** False when something outside the run waits on the answer: the turn stays live. Default true. */
+  park?: boolean;
+  /**
+   * Keep an answered record instead of dropping it, until the caller closes it:
+   * for an asker that may be asked the same question again after its answer
+   * was taken but before it reached whoever asked.
+   */
+  keepAnswer?: boolean;
 }): Promise<HeldAnswer> {
   const holds = heldCallsOf(opts.harness);
   const executionId = heldScopeOf(opts.ctx);
@@ -764,6 +805,11 @@ export async function holdAndWait(opts: {
   for (;;) {
     const current = await holds.load(executionId, callId);
     const settled = current?.resolution !== undefined;
+    if (settled && opts.keepAnswer) {
+      return {
+        resolution: current?.resolution,
+      };
+    }
     if (!current || settled || isOverdue(current, holds.now())) {
       if (mayWriteHolds(opts.ctx)) {
         await holds.close(executionId, callId);
@@ -778,6 +824,7 @@ export async function holdAndWait(opts: {
       callIds: [
         callId,
       ],
+      park: opts.park,
     });
   }
 }

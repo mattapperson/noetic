@@ -35,6 +35,7 @@ import {
   evaluateServePolicy,
   ServePermissionBroker,
 } from './serve-permissions';
+import { servedQuestionAnswerer } from './serve-questions';
 import type {
   AcpServeHarness,
   AcpServeHarnessSource,
@@ -414,6 +415,13 @@ class ServeAgent implements acp.Agent {
     // execute(), and the session broadcaster discards events whenever a
     // previously-consumed stream has no live consumer.
     const events = attachEvents(session.harness, session.sessionId);
+    // A question the run holds for a person goes to the editor, or is declined.
+    const answerQuestions = servedQuestionAnswerer({
+      conn: this.conn,
+      harness: session.harness,
+      sessionId: session.sessionId,
+      capabilities: this.clientCapabilities,
+    });
     const messageId = crypto.randomUUID();
     try {
       await session.harness.execute(input, {
@@ -438,6 +446,7 @@ class ServeAgent implements acp.Agent {
           }),
         present: this.presenter.present,
         cancelRequested: () => session.cancelRequested,
+        observe: answerQuestions,
       });
       if (outcome.kind === 'error') {
         throw RequestError.internalError({
