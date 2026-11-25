@@ -374,3 +374,111 @@ describe('AcpEventBridge', () => {
     expect(events).toHaveLength(0);
   });
 });
+
+describe('AcpEventBridge — current updates and replay', () => {
+  it('surfaces usage_update raw and on the full stream, never as billed usage (#96)', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.forward({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'usage_update',
+        used: 22001,
+        size: 258400,
+      },
+    });
+
+    const raw = events.find((e) => e.type.endsWith(':acp_event'));
+    assert(raw);
+    expect(raw.data.update).toEqual({
+      sessionUpdate: 'usage_update',
+      used: 22001,
+      size: 258400,
+    });
+    expect(types(events)).toContain('acp.usage_update');
+    expect(types(events)).not.toContain('response.output_text.delta');
+  });
+
+  it("puts the prompt answer's reported usage on response.completed", () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.finalize(
+      emptyResult({
+        reportedUsage: {
+          inputTokens: 3,
+          outputTokens: 4,
+          totalTokens: 7,
+        },
+      }),
+    );
+
+    const completed = events.find((e) => e.type === 'response.completed');
+    assert(completed);
+    expect(completed.data.reportedUsage).toEqual({
+      inputTokens: 3,
+      outputTokens: 4,
+      totalTokens: 7,
+    });
+  });
+
+  it('keeps a JSON-RPC error readable when the turn aborts (#96)', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.begin();
+    bridge.abort({
+      code: -32000,
+      message: 'Authentication required',
+    });
+
+    const completed = events.find((e) => e.type === 'response.completed');
+    assert(completed);
+    expect(completed.data.error).toBe('Authentication required (-32000)');
+  });
+
+  it('marks replayed history as replay and never translates it (#100)', () => {
+    const { bridge, events } = bridgeCtx(STEP);
+
+    bridge.forwardReplay(textChunk('what I said yesterday'));
+    bridge.forwardReplay({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'old-call',
+        title: 'Read config',
+      },
+    });
+
+    expect(events).toHaveLength(2);
+    for (const event of events) {
+      expect(event.type.endsWith(':acp_event')).toBe(true);
+      expect(event.data).toMatchObject({
+        stepId: 'review',
+        agentId: 'claude-code',
+        sessionId: 's1',
+        replay: true,
+      });
+    }
+    // The turn itself is still opened by fresh output, not by replay.
+    bridge.begin();
+    bridge.forward(textChunk('new answer'));
+    const deltas = events.filter((e) => e.type === 'response.output_text.delta');
+    expect(deltas.map((e) => e.data.delta)).toEqual([
+      'new answer',
+    ]);
+    const fresh = events.filter((e) => e.type.endsWith(':acp_event') && e.data.replay !== true);
+    expect(fresh).toHaveLength(1);
+  });
+
+  it('honours step.emit for replayed events', () => {
+    const { bridge, events } = bridgeCtx({
+      id: 'quiet',
+      emit: false,
+    });
+
+    bridge.forwardReplay(textChunk('old'));
+
+    expect(events).toHaveLength(0);
+  });
+});

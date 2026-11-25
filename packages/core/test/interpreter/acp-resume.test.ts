@@ -15,6 +15,7 @@ import type {
   HeldCall,
   Tool,
 } from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
 import { step } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
@@ -235,11 +236,18 @@ async function cutOff(storage: StorageAdapter, tools: Tool[], log: AgentLog): Pr
   return ctx.id;
 }
 
+interface RecordedEvent {
+  type: string;
+  data: Record<string, unknown>;
+}
+
 async function resume(opts: {
   storage: StorageAdapter;
   executionId: string;
   acpAgent: AcpAgent;
   tools: Tool[];
+  /** Records every event the resumed step emits. */
+  events?: RecordedEvent[];
 }): Promise<{
   harness: AgentHarness;
   running: Promise<unknown>;
@@ -247,6 +255,16 @@ async function resume(opts: {
   const harness = harnessOn(opts.storage);
   const ctx = await harness.restore(opts.executionId);
   assert(ctx);
+  const events = opts.events;
+  if (events) {
+    frameworkCast<{
+      _broadcaster: unknown;
+    }>(ctx)._broadcaster = {
+      emit(event: RecordedEvent) {
+        events.push(event);
+      },
+    };
+  }
   return {
     harness,
     running: harness.run(coder(opts.acpAgent, opts.tools), undefined, ctx),
@@ -287,9 +305,11 @@ describe('an ACP step resumed after its host died', () => {
     // A new process. The agent has its session back, knows the two writes are
     // done, and writes a.ts once more on purpose before running the tests.
     const after = agentLog();
+    const events: RecordedEvent[] = [];
     const { running } = await resume({
       storage,
       executionId,
+      events,
       acpAgent: agent({
         log: after,
         calls: [
@@ -313,6 +333,14 @@ describe('an ACP step resumed after its host died', () => {
 
     expect(after.newSessions).toBe(0);
     expect(after.loaded).toHaveLength(1);
+    // What the agent replayed while it loaded is marked replay, never new output.
+    const replayed = events.filter((e) => e.type.endsWith(':acp_event') && e.data.replay === true);
+    expect(replayed).toHaveLength(1);
+    expect(JSON.stringify(replayed[0]?.data.update)).toContain('what I said before the crash');
+    const deltas = events
+      .filter((e) => e.type === 'response.output_text.delta')
+      .map((e) => String(e.data.delta));
+    expect(deltas.join('')).not.toContain('what I said before the crash');
     // It is told it was cut off, and given the task again.
     expect(after.prompts).toHaveLength(1);
     expect(after.prompts[0]).toContain(ACP_RESUME_NOTICE);

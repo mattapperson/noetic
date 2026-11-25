@@ -7,6 +7,8 @@
  * round-trips, `fs/*` and `terminal/*` callbacks — without spawning a process.
  */
 
+import type * as acp from '@agentclientprotocol/sdk';
+import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk';
 import type {
   AcpMachine,
   AcpMachineFactory,
@@ -15,8 +17,6 @@ import type {
   SpawnCommand,
 } from '@noetic-tools/types';
 import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
-import { AgentSideConnection, ndJsonStream } from '@zed-industries/agent-client-protocol';
 
 /** @public The two ends of a loopback connection. */
 export interface AcpLoopbackPair {

@@ -51,8 +51,11 @@ interface FakeAgentOpts {
   onSetMode?: (modeId: string) => void;
   onCancel?: () => void;
   throwOnTurn?: Error;
-  throwOnNewSession?: Error;
-  throwOnSetMode?: Error;
+  /** Thrown as given: an Error, or a JSON-RPC error object as a peer rejects with. */
+  throwOnNewSession?: unknown;
+  throwOnSetMode?: unknown;
+  /** Notifications `session/load` replays before it answers. */
+  replayOnLoad?: AcpSessionNotification[];
 }
 
 function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
@@ -99,7 +102,7 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
         },
         async setMode(modeId) {
           opts.onSetMode?.(modeId);
-          if (opts.throwOnSetMode) {
+          if (opts.throwOnSetMode !== undefined) {
             throw opts.throwOnSetMode;
           }
         },
@@ -119,13 +122,16 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
         },
         async newSession(newSession) {
           opts.onNewSession?.(newSession);
-          if (opts.throwOnNewSession) {
+          if (opts.throwOnNewSession !== undefined) {
             throw opts.throwOnNewSession;
           }
           sessionCounter += 1;
           return makeSession(`session-${sessionCounter}`);
         },
         async loadSession(load) {
+          for (const update of opts.replayOnLoad ?? []) {
+            connect.host.onSessionUpdate(update);
+          }
           return makeSession(load.sessionId);
         },
         async close() {
@@ -144,6 +150,33 @@ function harnessCtx() {
   return {
     harness,
     ctx: harness.createContext(),
+  };
+}
+
+interface CapturedEvent {
+  source: string;
+  type: string;
+  data: Record<string, unknown>;
+}
+
+/** A harness context whose broadcaster records every event, as `getFullStream` would see them. */
+function capturingCtx() {
+  const { harness, ctx } = harnessCtx();
+  const events: CapturedEvent[] = [];
+  const withBroadcaster = frameworkCast<
+    typeof ctx & {
+      _broadcaster: unknown;
+    }
+  >(ctx);
+  withBroadcaster._broadcaster = {
+    emit(event: CapturedEvent) {
+      events.push(event);
+    },
+  };
+  return {
+    harness,
+    ctx,
+    events,
   };
 }
 
@@ -1196,5 +1229,209 @@ describe('step.acpAgent builder validation', () => {
       assert(isNoeticConfigError(e));
       expect(e.code).toBe('MISSING_PROMPT');
     }
+  });
+});
+
+describe('executeAcpAgent — readable agent errors (#96)', () => {
+  it('fails the step with the message of a JSON-RPC error object from session/new', async () => {
+    const { ctx } = harnessCtx();
+    const acpStep = step.acpAgent({
+      id: 'unauthenticated',
+      agent: fakeAgent({
+        throwOnNewSession: {
+          code: -32000,
+          message: 'Authentication required',
+        },
+      }),
+      prompt: 'go',
+    });
+
+    const error = await execute(acpStep, undefined, ctx).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('step_failed');
+    expect(String(error)).not.toContain('[object Object]');
+    assert(error.noeticError.kind === 'step_failed');
+    expect(error.noeticError.cause.message).toBe('Authentication required (-32000)');
+    // The rejection's code stays readable to a caller that branches on it.
+    expect(Reflect.get(error.noeticError.cause, 'code')).toBe(-32000);
+  });
+
+  it("keeps an Error-shaped JSON-RPC rejection's data detail when mode selection fails", async () => {
+    const { ctx } = harnessCtx();
+    const rejection = Object.assign(new Error('Internal error'), {
+      code: -32603,
+      data: {
+        message: 'mode read-only is not available',
+      },
+    });
+    const acpStep = step.acpAgent({
+      id: 'bad-mode-rpc',
+      agent: fakeAgent({
+        modes: {
+          currentModeId: 'auto',
+          availableModes: [
+            {
+              id: 'auto',
+              name: 'Auto',
+            },
+          ],
+        },
+        throwOnSetMode: rejection,
+      }),
+      prompt: 'go',
+      mode: 'read-only',
+    });
+
+    const error = await execute(acpStep, undefined, ctx).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    assert(isNoeticError(error));
+    assert(error.noeticError.kind === 'step_failed');
+    expect(error.noeticError.cause.message).toBe(
+      'Internal error: mode read-only is not available (-32603)',
+    );
+  });
+});
+
+describe('executeAcpAgent — aborted during setup', () => {
+  it("fails with kind 'cancelled' when the run is aborted while the session opens", async () => {
+    const { ctx } = harnessCtx();
+    let closes = 0;
+    const acpStep = step.acpAgent({
+      id: 'aborted-setup',
+      agent: fakeAgent({
+        onNewSession: () => {
+          ctx.abort('user stopped the run');
+        },
+        // The agent answers the aborted request with its own rejection.
+        throwOnNewSession: {
+          code: -32800,
+          message: 'Request cancelled',
+        },
+        onClose: () => {
+          closes++;
+        },
+      }),
+      prompt: 'go',
+    });
+
+    const error = await execute(acpStep, undefined, ctx).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('cancelled');
+    expect(closes).toBe(1);
+  });
+});
+
+describe('executeAcpAgent — session/load replay (#100)', () => {
+  const replayed: AcpSessionNotification[] = [
+    {
+      sessionId: 'session-from-yesterday',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: {
+          type: 'text',
+          text: 'what I answered yesterday',
+        },
+      },
+    },
+    {
+      sessionId: 'session-from-yesterday',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'old-call',
+        title: 'Read config',
+        status: 'completed',
+      },
+    },
+  ];
+
+  it('streams loaded history only as raw acp_events marked replay, never as new output', async () => {
+    const { ctx, events } = capturingCtx();
+    const acpStep = step.acpAgent({
+      id: 'follow-up',
+      agent: fakeAgent({
+        text: 'new answer',
+        replayOnLoad: replayed,
+        updates: [
+          {
+            sessionId: 'session-from-yesterday',
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: {
+                type: 'text',
+                text: 'new answer',
+              },
+            },
+          },
+        ],
+      }),
+      prompt: 'continue',
+      session: {
+        load: 'session-from-yesterday',
+      },
+    });
+
+    expect(await execute(acpStep, undefined, ctx)).toBe('new answer');
+
+    const raw = events.filter((e) => e.type.endsWith(':acp_event'));
+    const replays = raw.filter((e) => e.data.replay === true);
+    expect(replays.map((e) => e.data.update)).toEqual(replayed.map((n) => n.update));
+    for (const event of replays) {
+      expect(event.data).toMatchObject({
+        stepId: 'follow-up',
+        agentId: 'claude-code',
+        sessionId: 'session-from-yesterday',
+      });
+    }
+    expect(raw.filter((e) => e.data.replay !== true)).toHaveLength(1);
+    // Only the new turn reaches the text and item streams.
+    const deltas = events.filter((e) => e.type === 'response.output_text.delta');
+    expect(deltas.map((e) => e.data.delta)).toEqual([
+      'new answer',
+    ]);
+    const calls = events.filter(
+      (e) => e.type === 'response.output_item.added' && JSON.stringify(e.data).includes('old-call'),
+    );
+    expect(calls).toHaveLength(0);
+    expect(messageTexts(ctx)).not.toContain('what I answered yesterday');
+  });
+
+  it('keeps replay marked even when the follow-up then fails selecting its mode', async () => {
+    const { ctx, events } = capturingCtx();
+    const acpStep = step.acpAgent({
+      id: 'follow-up-mode',
+      agent: fakeAgent({
+        replayOnLoad: replayed,
+        throwOnSetMode: new Error(
+          "ACP agent 'codex' did not advertise the 'session/set_mode' capability",
+        ),
+      }),
+      prompt: 'continue',
+      mode: 'read-only',
+      session: {
+        load: 'session-from-yesterday',
+      },
+    });
+
+    const error = await execute(acpStep, undefined, ctx).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeDefined();
+    expect(events.filter((e) => e.type === 'response.output_text.delta')).toHaveLength(0);
+    const raw = events.filter((e) => e.type.endsWith(':acp_event'));
+    expect(raw).toHaveLength(2);
+    expect(raw.every((e) => e.data.replay === true)).toBe(true);
   });
 });

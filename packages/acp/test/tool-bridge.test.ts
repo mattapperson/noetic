@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type * as acp from '@agentclientprotocol/sdk';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { ContextData } from '@noetic-tools/context';
 import { AgentHarness, execute, step, tool, toolWithGenerator } from '@noetic-tools/core';
@@ -21,7 +22,6 @@ import type {
   ToolApprover,
 } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
 import { z } from 'zod';
 import { PRESET_ENV } from '../src/agents';
 import { defineAcpAgent } from '../src/define';

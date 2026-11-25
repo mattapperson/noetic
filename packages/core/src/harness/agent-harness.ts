@@ -616,6 +616,7 @@ export class AgentHarness<
       onHeld: opts.onHeld,
       steerWhileHeld: opts.steerWhileHeld,
       now: opts.now,
+      killAgentsOnExit: opts.killAgentsOnExit,
     };
     this.outputStorage = this.config.storage ?? createInMemoryStorage();
     const adapters = resolveEnvironmentAdapters(environment);

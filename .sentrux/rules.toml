@@ -443,6 +443,20 @@ from = "packages/acp/src/**"
 to = "packages/core/src/**"
 reason = "@noetic-tools/acp depends only on @noetic-tools/types; it must never import core (acyclic, keeps the protocol layer core-free)"
 
+# The keeper (spec 27 § A local agent outlives its host) has a pure part, the
+# ACP relay and its method names, which the runtime-neutral connection driver
+# uses; and Node-only parts — the keeper process and the host-side client that
+# spawns it and speaks over a local socket — reached only from ./stdio.
+[[boundaries]]
+from = "packages/acp/src/connection.ts"
+to = "packages/acp/src/keeper/client.ts"
+reason = "the @noetic-tools/acp main entry is runtime-neutral; the keeper client imports node:child_process, node:net and node:fs and is reached only through the ./stdio entry"
+
+[[boundaries]]
+from = "packages/acp/src/connection.ts"
+to = "packages/acp/src/keeper/process.ts"
+reason = "the keeper process is a Node program of its own; the runtime-neutral connection driver may use only the pure relay (keeper/relay.ts)"
+
 [[layers]]
 name = "chat-sdk"
 paths = ["packages/chat-sdk/src/**"]

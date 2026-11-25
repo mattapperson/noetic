@@ -5,6 +5,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import type * as acp from '@agentclientprotocol/sdk';
+import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import type { AcpClientHost, AcpTransport } from '@noetic-tools/types';
 import {
   AcpCapabilityError,
@@ -12,8 +14,6 @@ import {
   frameworkCast,
   isAcpCapabilityError,
 } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
-import { PROTOCOL_VERSION } from '@zed-industries/agent-client-protocol';
 import { assertPromptContentSupported, openAcpConnection } from '../src/connection';
 import { createAcpTestRig, textChunk } from './_helpers';
 

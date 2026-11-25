@@ -485,6 +485,21 @@ describe('runnerOptions', () => {
     expect(checked.env.NOETIC_PI_COMMAND).toBe(process.env.NOETIC_PI_COMMAND ?? 'pi');
   });
 
+  it('carries --detached-timeout, with or without grants', () => {
+    expect(
+      runnerOptions({
+        detachedTimeoutMs: 5e3,
+      }).detachedTimeoutMs,
+    ).toBe(5e3);
+    expect(
+      runnerOptions({
+        agent: 'codex',
+        detachedTimeoutMs: 0,
+      }).detachedTimeoutMs,
+    ).toBe(0);
+    expect(runnerOptions({}).detachedTimeoutMs).toBeUndefined();
+  });
+
   it('refuses an unknown agent and an empty --spawn', () => {
     expect(() =>
       runnerOptions({

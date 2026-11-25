@@ -18,8 +18,8 @@
  */
 
 import { Readable, Writable } from 'node:stream';
+import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk';
 import { frameworkCast } from '@noetic-tools/types';
-import { AgentSideConnection, ndJsonStream } from '@zed-industries/agent-client-protocol';
 import type { AcpServedAgent } from './serve';
 import { toAcpAgent } from './serve';
 import type { AcpServeHarnessSource, AcpServeOptions } from './serve-types';

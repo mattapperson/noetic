@@ -6,10 +6,10 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
+import type * as acp from '@agentclientprotocol/sdk';
 import { AgentHarness, execute, step, tool } from '@noetic-tools/core';
 import type { AcpAgent, AcpMachine, AcpMachineFactory, SpawnCommand } from '@noetic-tools/types';
 import { isNoeticConfigError } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
 import { z } from 'zod';
 import { gemini } from '../src/agents';
 import { defineAcpAgent } from '../src/define';
@@ -207,14 +207,37 @@ describe('AcpMachine', () => {
 });
 
 describe('localMachine', () => {
-  it('reaches the bridge where it listens', async () => {
-    const machine = await localMachine()({});
+  it('without a keeper, reaches the bridge where it listens', async () => {
+    const machine = await localMachine('local', {
+      keeper: false,
+    })({});
     const bridge = {
       serverName: 'noetic',
       url: 'http://127.0.0.1:9/mcp/x',
       headers: [],
     };
     expect(await machine.reach(bridge)).toBe(bridge);
+    await machine.close();
+  });
+
+  it("with its keeper, reaches the bridge on the keeper's own port, same path and headers", async () => {
+    const machine = await localMachine()({});
+    const bridge = {
+      serverName: 'noetic',
+      url: 'http://127.0.0.1:9/mcp/x',
+      headers: [
+        {
+          name: 'Authorization',
+          value: 'Bearer t',
+        },
+      ],
+    };
+    const reached = await machine.reach(bridge);
+    const url = new URL(reached.url);
+    expect(url.hostname).toBe('127.0.0.1');
+    expect(url.port).not.toBe('9');
+    expect(url.pathname).toBe('/mcp/x');
+    expect(reached.headers).toEqual(bridge.headers);
     await machine.close();
   });
 

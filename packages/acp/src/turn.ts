@@ -3,7 +3,7 @@
  * {@link AcpTurnResult}: Noetic conversation items, the assistant text, the
  * agent's plan, its slash commands, and its final mode.
  *
- * All eight of ACP's update variants are handled; see `user_message_chunk`
+ * Transcript updates are folded here; every update also reaches the host. See `user_message_chunk`
  * below for the one whose payload is deliberately not turned into an item.
  */
 
@@ -32,10 +32,10 @@ interface TrackedToolCall {
   toolCallId: string;
   title: string;
   kind?: string;
-  rawInput?: Record<string, unknown>;
+  rawInput?: unknown;
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
   content: AcpToolCallContent[];
-  rawOutput?: Record<string, unknown>;
+  rawOutput?: unknown;
 }
 
 //#endregion
@@ -57,7 +57,7 @@ function present<T>(value: T | null | undefined): value is T {
  */
 export function renderToolCallContent(
   content: ReadonlyArray<AcpToolCallContent>,
-  rawOutput?: Record<string, unknown>,
+  rawOutput?: unknown,
 ): string {
   const parts: string[] = [];
   for (const entry of content) {
@@ -117,7 +117,12 @@ export class AcpTurnAccumulator {
   }
 
   /** Build the turn result. */
-  result(opts: { stopReason: AcpStopReason; usage?: TokenUsage; cost?: number }): AcpTurnResult {
+  result(opts: {
+    stopReason: AcpStopReason;
+    usage?: TokenUsage;
+    cost?: number;
+    reportedUsage?: AcpTurnResult['reportedUsage'];
+  }): AcpTurnResult {
     const items: Item[] = [];
     for (const entry of this.order) {
       if ('text' in entry) {
@@ -155,6 +160,7 @@ export class AcpTurnAccumulator {
       text: this.finalText(),
       usage: opts.usage,
       cost: opts.cost,
+      reportedUsage: opts.reportedUsage,
       plan: this.plan,
       availableCommands: this.availableCommands,
       currentModeId: this.currentModeId,
@@ -216,13 +222,32 @@ export class AcpTurnAccumulator {
       ];
       return;
     }
+    if (update.sessionUpdate === 'plan_update') {
+      // The draft plan protocol: an item plan replaces the snapshot; a file or
+      // markdown plan has no entries to fold, and stays on the event stream.
+      if (update.plan.type === 'items') {
+        this.plan = [
+          ...update.plan.entries,
+        ];
+      }
+      return;
+    }
+    if (update.sessionUpdate === 'plan_removed') {
+      this.plan = [];
+      return;
+    }
     if (update.sessionUpdate === 'available_commands_update') {
       this.availableCommands = [
         ...update.availableCommands,
       ];
       return;
     }
-    this.currentModeId = update.currentModeId;
+    if (update.sessionUpdate === 'current_mode_update') {
+      this.currentModeId = update.currentModeId;
+    }
+    // Every other update (`usage_update`, `config_option_update`,
+    // `session_info_update`, …) carries no transcript content; it still reaches
+    // the host through `onSessionUpdate`.
   }
 
   private trackToolCall(

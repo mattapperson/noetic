@@ -21,6 +21,8 @@ export function runnerOptions(values: {
   spawn?: string[];
   env?: string[];
   cwd?: string;
+  /** How long a kept agent may run with no host attached; see {@link AcpRunnerOptions.detachedTimeoutMs}. */
+  detachedTimeoutMs?: number;
 }): AcpRunnerOptions {
   const grants = [
     ...(values.agent === undefined
@@ -33,11 +35,13 @@ export function runnerOptions(values: {
   if (grants.length === 0) {
     return {
       cwd: values.cwd,
+      detachedTimeoutMs: values.detachedTimeoutMs,
     };
   }
   const extra = values.env ?? [];
   return {
     cwd: values.cwd,
+    detachedTimeoutMs: values.detachedTimeoutMs,
     allow: grants.map((grant) => ({
       ...grant,
       env: [

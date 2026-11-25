@@ -44,8 +44,9 @@ core ─→ types          (resolves agents via contract + registry)
   `AcpSession`, `AcpTransport`, `AcpClientHost`, the permission types, and
   `StepAcpAgent`. It lives here — next to `ContextLayer` — so both `core` and
   `acp` depend on it without forming a cycle. Protocol types are re-exported
-  verbatim from `@zed-industries/agent-client-protocol` rather than mirrored, so
-  the wire surface cannot drift from the specification.
+  verbatim from the official `@agentclientprotocol/sdk` (pinned to its 1.x
+  line, whose `ClientSideConnection` the client is built on) rather than
+  mirrored, so the wire surface cannot drift from the specification.
 - **`@noetic-tools/acp`** — the protocol client: capability negotiation, the
   session/turn drivers, the client-side `fs/*` + `terminal/*` + permission
   handlers, the permission resolver, the agent presets, and the transports. Its
@@ -72,24 +73,58 @@ interface AcpAgentConnection {
   authenticate(methodId: string): Promise<void>;
   newSession(opts: AcpNewSessionOptions): Promise<AcpSession>;
   loadSession(opts: AcpLoadSessionOptions): Promise<AcpSession>;
+  /** Set when the agent can outlive this host; see § A local agent outlives its host. */
+  readonly reattach?: AcpReattachHandle;
+  /** On a reattached connection: the live session, with no session/new or session/load. */
+  attachSession?(sessionId: string): Promise<AcpSession>;
   close(): Promise<void>;
 }
 
 interface AcpSession {
   readonly sessionId: string;
   readonly modes?: AcpSessionModeState;
+  readonly configOptions?: ReadonlyArray<AcpSessionConfigOption>;
   readonly availableCommands: ReadonlyArray<AcpAvailableCommand>;
   prompt(opts: AcpPromptOptions): Promise<AcpTurnResult>;
   cancel(): Promise<void>;
   setMode(modeId: string): Promise<void>;
   setModel(modelId: string): Promise<void>;
+  /** On a reattached session: collect the turn the previous host left running. */
+  resumeTurn?(opts: AcpResumeTurnOptions): Promise<AcpTurnResult | undefined>;
 }
 ```
+
+`AcpConnectOptions` carries `reattach` (reach that agent instead of starting
+one) and `whenHostExits` (`'keep'`, the default, or `'stop'`); an
+`AcpMachine` may offer `attach(handle)`, and an `AcpTransport` its `reattach`
+handle.
+
+A session's `modes` and `configOptions` come from the answer that opened it —
+`session/new`, or `session/load` for a loaded session — and stay current:
+`current_mode_update` moves `modes.currentModeId`, `config_option_update`
+replaces `configOptions`. A loaded session that advertised modes therefore
+takes a follow-up `setMode`, and one that advertised none still refuses it.
+`setModel` selects the value of the agent's `model` config option (a `select`
+with category `model`, else one with id `model`) through
+`session/set_config_option`. An agent that advertises no such option is sent
+the draft `session/set_model` request it may predate config options with; one
+that answers "method not found" refuses it with `AcpCapabilityError`.
 
 A capability the agent did not advertise is refused **before anything reaches
 the wire**, with `AcpCapabilityError` — loading a session, switching mode or
 model, sending image/audio/embedded content, or naming an HTTP/SSE MCP server.
 A connection that cannot be established raises `AcpConnectError`.
+
+An agent's own JSON-RPC rejection — of `session/new`, `session/load`, a mode or
+model selection, or the prompt — fails the step with `step_failed` whose cause
+reads the rejection in full: its message, its `data` detail (`data.message`,
+`data.details`, or the serialized data) and its code, as in
+`Internal error: Authentication required (-32603)`. A protocol error object is
+never reduced to `[object Object]` or a bare "Internal error". The cause keeps
+the rejection's `code` and `data`, with the original rejection as its own
+`cause`, so a caller can still branch on a code such as auth-required. An
+abort (a `DOMException`) is not a protocol error, and a step aborted while its
+session opens fails with `cancelled`.
 
 ## Transport
 
@@ -140,7 +175,7 @@ An agent is reached one of two ways:
 
 | Machine or transport | Use |
 |---|---|
-| `localMachine()` (`@noetic-tools/acp/stdio`) | This machine. `reach` returns the bridge's loopback address; `launch` and `spawn` start child processes. The default for every preset, loaded through a lazy `import()`. |
+| `localMachine(agentId?, { keeper?, detachedTimeoutMs? })` (`@noetic-tools/acp/stdio`) | This machine. `launch` starts the agent through its keeper (§ A local agent outlives its host), `reach` serves the bridge on the keeper's own loopback port, `attach` reaches a kept agent again; `spawn` starts a child process. `keeper: false` (or no keeper script on disk, as in a single-file bundle) starts the agent as a child process and `reach` returns the bridge's own address. The default for every preset, loaded through a lazy `import()`. |
 | `webSocketMachine({ url, token, ca? })` (`@noetic-tools/acp/remote`) | A remote runner over WebSocket. Every upgrade carries the runner's bearer token; `ws://` is refused except to a loopback host, so a hop off the machine is TLS. |
 | `commandMachine({ command, args })` (`@noetic-tools/acp/remote`) | A remote runner started by a local command and spoken to over its stdio: `ssh host npx -y @noetic-tools/acp serve --stdio`, `docker exec -i ctr noetic-acp serve --stdio`. The command's own channel carries everything. |
 | `runnerMachine(openLink)` (`@noetic-tools/acp/remote`) | A remote runner over any `FrameLink`. |
@@ -148,15 +183,118 @@ An agent is reached one of two ways:
 | `stdioAcpTransport` (`@noetic-tools/acp/stdio`) | An attached child process. |
 | custom transport | Anything yielding a duplex byte stream to an agent already running. |
 
+**A local agent's process tree.** Agents are usually started through a wrapper
+— `npx`, or a Node launcher that runs a native binary as its child — so the
+process Noetic spawns is rarely the agent itself. The keeper, and
+`stdioAcpTransport` and a `localMachine` without one, start every process as the leader of its own process group
+(POSIX) and, when the transport closes or its signal aborts, stop the whole
+group: end its stdin, `SIGTERM`, a two-second grace period, then `SIGKILL`; on
+Windows, `taskkill /T /F` on its tree, even when the immediate child already
+exited, so its descendants still stop. A leader that exited but is not yet
+reaped makes its group refuse signals (EPERM on macOS); shutdown then waits for
+it to be reaped rather than failing. A child that is not a group leader is
+signalled itself. `localMachine().close()` stops everything it started in
+parallel. Every wait is bounded, so an
+uncooperative child cannot hang the host, and our ends of the pipes are
+released last, so a grandchild that inherited them cannot keep the host alive.
+`close()` is idempotent — every call shares one shutdown. A missing binary, or
+a signal already aborted, rejects when the transport is opened, with
+`AcpConnectError`, not later at `close()`. A descendant that leaves the group
+(`setsid`) is outside this and must manage its own lifetime. A host that spawns
+the agent itself — a sandbox-wrapped command, a transport that rewrites lines —
+gets the same shutdown from `stopProcessTree(child, { graceMs? })`
+(`@noetic-tools/acp/stdio`), given a child spawned with `detached: true`.
+
+### A local agent outlives its host
+
+A coding agent's turn can run for a long time, and the host process that
+started it can die in the middle — a crash, Ctrl-C, a deploy. By default the
+agent keeps working, and a resumed run takes it over where it is, with
+everything it did meanwhile.
+
+**The keeper.** `localMachine()` starts each agent through a keeper: a small
+Node process (`@noetic-tools/acp`'s `keeper/main`), detached into its own
+session and process group so the host's Ctrl-C or crash does not reach it. The
+keeper owns the agent's stdio and serves the host over a private local socket —
+a Unix socket in a directory only its user can open (`<tmpdir>/noetic-acp-<uid>`),
+or a named pipe on Windows — which every connection must open with the keeper's
+token. It also owns the loopback port the agent reaches the tool bridge on
+(spec 38), so the bridge address and token the agent was configured with stay
+valid when a later host serves the bridge. The agent's stderr reaches the
+attached host's stderr, and the keeper's log while none is attached.
+
+**What the keeper relays.** Between the agent and the attached host it is an
+ACP relay: it rewrites every host request id to its own, so an answer meant
+for a host that went away is never delivered to the next one; answers
+`initialize` from its cache after the first; and keeps, per session, the modes
+and config options the agent advertised, every update of the turn in flight,
+updates sent while no host held the session, the requests the agent is still
+waiting on, and a turn result no host was there to take.
+
+**When the host goes away** without closing the connection, the keeper
+detaches and, under `whenHostExits: 'keep'` (the default), lets the agent work
+on: its updates are kept, its permission, `fs/*` and `terminal/*` requests wait,
+and the bridge port holds the agent's tool calls until a host serves the bridge
+again (a call that was mid-way in the dead host fails with `502`). A kept agent
+with no host is stopped after `detachedTimeoutMs` only when one is set; by
+default (`0`) there is no limit, and it runs until a host reattaches and closes
+it, or it exits. Under `'stop'` the keeper stops the agent's whole tree as soon as the
+host's connection drops, whatever ended the host. Closing the connection
+(`close()`, a step's `keepAlive: 'step'` ending, `harness.closeAcpSessions()`)
+always stops it. The agent exiting stops the keeper.
+
+**Reattaching.** A connection that can be reattached carries
+`AcpAgentConnection.reattach`: JSON naming the keeper (socket address and
+token) and the bridge's path and token. `agent.connect({ reattach })` reaches
+the same agent through its keeper, serves the bridge again under the same path
+and token at the same address, and returns a connection whose
+`attachSession(sessionId)` gives the live session with the modes and config
+options the agent last advertised — no `session/new` or `session/load`. Its
+`resumeTurn()` hands the session to this host: every update of the turn in
+flight arrives again, from the first, as this turn's output (not as replay),
+then each request the agent is still waiting on is asked again and answered by
+this host's handlers, and then the turn's result — at once if the agent
+finished while no host was attached, or when it does. With no turn running it
+resolves `undefined`. A keeper that is gone, or an agent with no such session,
+rejects with `AcpConnectError`.
+
+**A durable run** stores the handle with the step's session record
+(§ Resuming a step), so a resumed step reattaches before it tries anything
+else.
+
+**`killAgentsOnExit`** on the harness asks every agent it starts for
+`whenHostExits: 'stop'`: a kept agent stops when its host's connection drops,
+and an agent started directly (a `transport`, or a `localMachine` without a
+keeper) has its process group killed when the host process exits normally — a
+host killed by a signal cannot run that, and such an agent sees its stdin close
+instead.
+
+**Presets.** `claudeCode()` and `codex()` launch the maintained bridges,
+`npx -y @agentclientprotocol/claude-agent-acp` and
+`npx -y @agentclientprotocol/codex-acp` (`PRESET_COMMANDS`); the retired
+`@zed-industries/claude-code-acp` and `@zed-industries/codex-acp` are never
+started. A preset's `args` are appended after the bridge's own, its `env` is
+layered onto the process environment (`CODEX_PATH` picks the Codex backend the
+bridge runs), and the session's `cwd` is the process's working directory. A
+`transport` override replaces the launch entirely and still receives the
+preset's environment and the connection's signal. A preset never changes the
+model a step or its environment selects.
+
 ### The remote runner
 
 `noetic-acp serve` (the `@noetic-tools/acp` bin, Node) runs on the agent's
 machine and serves one host per channel — a WebSocket, or its own stdio with
-`--stdio`. When the channel closes, everything it started stops. Over that one
+`--stdio`. When the channel closes, the MCP servers it started stop; the agent
+is kept (§ A runner keeps its agents). Over that one
 channel, as JSON frames (`HostFrame` / `RunnerFrame`):
 
+- `keep` (first, from a host that keeps agents) says agents launched over this
+  channel run through a keeper, and what `whenHostExits` asks;
 - `start` runs a process (the agent, or an MCP server beside it) and carries
-  its stdin, stdout and exit;
+  its stdin, stdout and exit; a kept agent's `started` carries its reattach
+  handle;
+- `attach` carries the stream of an agent an earlier channel launched, from
+  that handle;
 - `reach` opens a port on the runner's loopback interface; each HTTP request
   the agent sends there travels to the host, which answers it from its own
   bridge only — a request for any other path is `404`, and the host forwards
@@ -167,6 +305,29 @@ So the agent needs no route back to the host, and the one channel is the only
 network hop. This one design covers ssh (`commandMachine` over `ssh`),
 containers (`docker exec -i`) and WebSocket, in place of an ssh reverse
 forward or a container host-gateway address.
+
+#### A runner keeps its agents
+
+A runner keeps the agents a host launches through it exactly as a local
+machine does (§ A local agent outlives its host): after a `keep` frame, it
+launches each agent through a keeper on the runner's own machine, and serves
+the bridge to it on the keeper's port, which forwards to the channel's port
+while a channel is open. When the channel drops — the host died, the network
+went, an ssh session ended — the runner lets the keeper go without stopping it,
+so the agent keeps working under the keeper's `whenHostExits`, and holds what
+it sends. A `--stdio` runner exits with its channel; the keeper, in its own
+session, does not.
+
+A later host reconnects with `machine.attach(handle)`: over a new channel —
+to the same WebSocket runner, or through a new `--stdio` runner on the same
+machine and user — an `attach` frame makes the runner connect to that keeper
+and carry the agent's stream, and the host's `reach` points the keeper's port at
+the new channel. From there it is the local reattach: `attachSession`, then
+`resumeTurn`. The runner connects only to a keeper socket in its own user's
+keeper directory, and the keeper still demands its token. A runner that keeps
+no agents never answers `attach`; the host gives up after ten seconds with
+`AcpConnectError`. `--detached-timeout <ms>` (`AcpRunnerOptions.detachedTimeoutMs`)
+bounds how long a kept agent may run with no host; the default is no limit.
 
 The runner listens on `127.0.0.1` by default; any other address needs
 `--tls-cert` and `--tls-key`. Its token comes from `NOETIC_ACP_RUNNER_TOKEN`
@@ -417,7 +578,9 @@ session: { reuse: 'assistant', keepAlive: 'harness' }
 ```
 
 `session.load` resumes an existing ACP session id via `session/load` instead of
-creating a new one.
+creating a new one. The agent replays the loaded conversation as
+`session/update` notifications before it answers; see § Output → harness events
+for how that replay is told apart from the new turn.
 
 ### Resuming a step
 
@@ -426,14 +589,21 @@ durable run (`23a-step-level-resume`) the step keeps two things so a resume does
 not start the agent's work over.
 
 **The agent's session.** When the step opens a session it stores the session id
-with the run's pending entries, under `execution:<root id>:pending:<step path>/acp-session`,
+— and, when the agent can outlive its host, its reattach handle — with the run's
+pending entries, under `execution:<root id>:pending:<step path>/acp-session`,
 and removes it when the step finishes. A resumed step that finds one, written by
 the same agent id:
 
+0. with a reattach handle, reaches the agent that kept working (§ A local agent
+   outlives its host) and attaches to the live session. Its first turn collects
+   the turn the dead host left running — every update of it as this step's
+   output, the requests the agent still waits on answered by this host, then its
+   result — instead of prompting. Only when no turn was running does it prompt,
+   behind `ACP_RESUME_NOTICE`. When the agent is gone it goes on as below.
 1. connects, and when the agent advertises `loadSession` calls `session/load`
    with the stored id. The `session/update` notifications the agent replays
-   while it loads are its history, not this turn's work, and are not forwarded
-   as events.
+   while it loads are its history, not this turn's work: they reach only
+   raw-event consumers, marked `replay: true` (§ Output → harness events).
 2. sends the step's prompt behind a notice that the previous turn was cut off
    and that finished work is not to be redone (`ACP_RESUME_NOTICE`). The
    conversation history is not prepended: the session has it.
@@ -485,11 +655,44 @@ step's. The `AcpEventBridge` translates each variant into the same
 | `agent_message_chunk` | `response.output_item.added` (message, once) + `response.output_text.delta` |
 | `agent_thought_chunk` | `response.reasoning.delta` |
 | `tool_call` | `response.output_item.added` (function_call) + `response.function_call_arguments.delta`/`.done` + `response.output_item.done` |
-| `user_message_chunk`, `tool_call_update`, `plan`, `available_commands_update`, `current_mode_update` | `acp.<sessionUpdate>` (full stream only) |
+| every other variant — `user_message_chunk`, `tool_call_update`, `plan`, `available_commands_update`, `current_mode_update`, `config_option_update`, `session_info_update`, `usage_update`, … | `acp.<sessionUpdate>` (full stream only) |
 
 As a result `getTextStream()`, `getReasoningStream()`, `getItemStream()`, and
 `getFullStream()` all surface ACP output. Every notification is *also* emitted
-raw as an `acp_event` framework event for protocol-native consumers.
+raw as an `acp_event` framework event (`{ stepId, agentId, sessionId, update }`)
+for protocol-native consumers.
+
+The client accepts every `session/update` variant of the current protocol, so
+normal traffic from current bridges never draws a `-32602 Invalid params`
+answer. A variant newer than the protocol library is taken off the stream
+before the library sees it and handed to the host as it is, so it reaches the
+`acp_event` stream and `acp.<sessionUpdate>` rather than being rejected.
+Variants with no transcript content still reach the host and the event
+surface; the turn accumulator ignores them, except the draft plan updates: a
+`plan_update` with `items` replaces the plan snapshot and `plan_removed` clears
+it.
+
+**Usage.** Two different numbers, kept apart:
+
+- `usage_update` (`{ used, size }`, e.g. from codex-acp) is the session's
+  context-window occupancy, not billed tokens. It reaches consumers raw (the
+  `acp_event` and `acp.usage_update`) and never becomes `TokenUsage`, cost, or
+  `ctx.tokens`.
+- The `usage` a `session/prompt` answer reports is kept verbatim on
+  `AcpTurnResult.reportedUsage` and on the turn's `response.completed` event as
+  `reportedUsage`. It is not folded into `AcpTurnResult.usage` either, because
+  an agent may report session totals rather than the turn's delta;
+  `AcpTurnResult.usage` stays the billed delta an adapter supplies.
+
+**Replay is not output.** While `session/load` runs — for an explicit
+`session.load` or for the resume of an earlier attempt's session — every update
+the agent sends is its loaded history. Each reaches the current step's raw
+`acp_event` stream with `replay: true` and the same step, agent and session
+attribution; none is translated into text, reasoning, item or function-call
+events, and none enters the turn's items. Normal forwarding resumes before mode
+and model selection and the prompt, so even a follow-up that then fails
+selecting its mode shows none of the old answer as new output. Raw-event
+consumers that want the history filter on `replay`.
 
 **A turn always closes its bracket.** The bridge opens every turn with
 `response.created` and closes it with `response.completed` — carrying the stop
@@ -657,8 +860,8 @@ type-only re-exports that erase at compile time. Enforced by
 The npm dependency tree is a separate question, and the honest answer is
 different: `@noetic-tools/types` declares the protocol package as a real
 `dependency` so its `.d.ts` re-exports resolve for consumers, which means
-installing core installs it (and a second zod major alongside the workspace's).
-Runtime import graph clean; install graph not.
+installing core installs it (it takes zod as a peer, so the workspace's zod
+serves it). Runtime import graph clean; install graph not.
 
 ## Future Considerations
 
@@ -666,12 +869,14 @@ Runtime import graph clean; install graph not.
   2026-09) offers an `{ "type": "acp", "name", "serverId" }` MCP server whose
   messages travel as `mcp/message` requests on the ACP connection itself
   (`mcpCapabilities.acp`), which would need no `reach` at all. It needs MCP
-  2026-07-28, the ACP library moved to `@agentclientprotocol/sdk` (its
-  `unstable` entry implements it; `@zed-industries/agent-client-protocol`
-  0.4.5 rejects an `acp` server), and an agent that advertises it — none of
+  2026-07-28, the client on the SDK's `unstable` entry (which implements it;
+  the stable 1.x entry rejects an `acp` server), and an agent that advertises
+  it — none of
   Claude Code, Codex (`acp: false`), Gemini CLI, opencode or pi-acp does yet.
 - Protocol features still in draft upstream (`session/resume`, `session/list`,
-  `elicitation/*`, session config options, usage reporting) arrive with a
-  version bump of `@zed-industries/agent-client-protocol`.
+  `elicitation/*`) arrive with a version bump of `@agentclientprotocol/sdk`.
+  Its 2.x line drops `ClientSideConnection` for a builder API
+  (`client({ name }).connectWith(...)`), so moving to it is a rewrite of the
+  connection driver, not a version bump.
 - Feeding ACP `plan` updates into the plan context layer, so a sub-agent's plan
   becomes part of the host agent's visible state.

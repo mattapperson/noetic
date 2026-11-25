@@ -54,6 +54,28 @@ export const HostFrameSchema = z.discriminatedUnion('t', [
     t: z.literal('kill'),
     id: Id,
   }),
+  /**
+   * Run the agents this channel launches through a keeper on the runner's
+   * machine, so they outlive the channel; `whenHostExits` says what happens
+   * to them when it drops. Sent once, first, by hosts that keep agents.
+   */
+  z.object({
+    t: z.literal('keep'),
+    id: Id,
+    whenHostExits: z.enum([
+      'keep',
+      'stop',
+    ]),
+  }),
+  /**
+   * Carry the stream of an agent an earlier channel launched, from the
+   * reattach handle its `started` frame gave; answered with `started`.
+   */
+  z.object({
+    t: z.literal('attach'),
+    id: Id,
+    handle: z.record(z.string(), z.unknown()),
+  }),
   z.object({
     t: z.literal('response'),
     id: Id,
@@ -81,6 +103,8 @@ export const RunnerFrameSchema = z.discriminatedUnion('t', [
   z.object({
     t: z.literal('started'),
     id: Id,
+    /** For a kept agent: how a later channel reaches it again. */
+    reattach: z.record(z.string(), z.unknown()).optional(),
   }),
   z.object({
     t: z.literal('stdout'),

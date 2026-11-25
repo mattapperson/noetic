@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import type * as acp from '@zed-industries/agent-client-protocol';
+import type * as acp from '@agentclientprotocol/sdk';
 import { sliceLines } from '../src/client';
 import { TerminalRegistry } from '../src/terminals';
 import type { AcpTestRigOptions } from './_helpers';

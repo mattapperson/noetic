@@ -76,6 +76,7 @@ const harness = new AgentHarness({
 | `connections` | `ConnectionEntries` | `undefined` | The live things the agent works with — browsers, devices, apps, chat workspaces, sources — keyed by name, or as a list of named entries (`[mcp({ name, … })]`). Providers connect on the first `execute()`/`run()` or `start()`. See [Connections](/docs/framework/connections). |
 | `triggers` | `ConnectionTrigger[]` | `undefined` | Connection events that start or join a turn. See [Triggers](/docs/framework/connections#triggers). |
 | `verification` | `Verifier` | `undefined` | The verifier `step.verify` uses — `verifier()` from `@noetic-tools/verify`. See [Verification](/docs/framework/verification). |
+| `killAgentsOnExit` | `boolean` | `false` | Stop every ACP agent this harness starts when its host goes away without closing it (a crash, Ctrl-C). By default a local agent keeps working and a resumed run reattaches to it. See [ACP agents](/docs/framework/acp-agents#when-your-host-process-dies). |
 | `emitItemsOnReplay` | `boolean` | `false` | When a resumed run replays a finished step, also stream the items that step emitted (`emitItems`) again as `item_appended`, so a client that reconnects mid-run sees the progress it missed. Without it, replay puts them back on the log quietly. See [Emitting Items Early](/docs/framework/steps#emitting-items-early). |
 
 ### Environment

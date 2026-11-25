@@ -81,6 +81,13 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   steerWhileHeld?: HeldSteerPolicy;
   /** The clock deadlines, leases and wake times are read from. Default `Date.now`. */
   now?: () => number;
+  /**
+   * Stop every ACP agent this harness started when its process goes away
+   * without closing them — a crash, Ctrl-C, a killed process. By default
+   * (`false`) a local agent keeps working and holds what it sends until a
+   * resumed run reattaches to it (spec 27 § A local agent outlives its host).
+   */
+  killAgentsOnExit?: boolean;
 }
 
 //#region Delivery Mode

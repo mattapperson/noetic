@@ -62,6 +62,31 @@ customAcpAgent({                    // any other ACP-speaking binary
 
 Every preset accepts `command`, `args`, and `env` overrides, a `machine` to run the agent somewhere other than this machine (see [Where the agent runs](#where-the-agent-runs)), and a `transport` to attach to an agent someone else started.
 
+`claudeCode()` and `codex()` run the maintained `@agentclientprotocol` bridges; the retired `@zed-industries/claude-code-acp` and `@zed-industries/codex-acp` packages are never started. `args` are appended after the bridge's own, `env` is layered onto your environment (for Codex, `CODEX_PATH` picks the backend binary the bridge runs), and the session's `cwd` is the process's working directory. A preset never changes the model you or your environment selected.
+
+### When your host process dies
+
+A local agent does not die with your host. Each one runs through a small *keeper* process that holds its stdio, so if your host crashes, is killed, or gets Ctrl-C mid-turn, the agent keeps working. Its updates, the requests it is waiting on (a permission prompt, a file read), and its tool calls are held until a host reattaches.
+
+On a [durable](/docs/framework/durability) run, resuming the run reattaches. The resumed step reaches the same agent, gets its live session back (modes and config options included), and collects the turn that was running. Every update of that turn streams again as the step's output, from the first, and requests the agent is still waiting on are answered by the new host's policy and handlers. The step's result is that turn's result. It only prompts again (behind a short "you were cut off" notice) if no turn was running. If the agent is gone, the step falls back to `session/load` or a new session, as before.
+
+```ts
+import { AgentHarness } from '@noetic-tools/core';
+
+// Stop every agent when this process goes away instead of keeping it.
+const harness = new AgentHarness({ name: 'coder', params: {}, killAgentsOnExit: true });
+```
+
+With `killAgentsOnExit: true`, a kept agent stops as soon as its host's connection drops, whatever ended the host. A kept agent runs until a host reattaches and closes it, or it exits; set `localMachine(agentId, { detachedTimeoutMs })` to stop one no host has reattached to after a while. `localMachine(agentId, { keeper: false })` starts the agent as a plain child process that ends with your host. Closing a session, or a step whose session closes with it, always stops the agent.
+
+This is checked against the real Claude Code and Codex bridges by an opt-in test in the repository (`ACP_LIVE_AGENT=1 bun test test/live-reattach.test.ts` in `packages/acp`). The test kills the first host, reattaches a new one, and has the agent call a noetic tool on it. The agent's MCP client reconnects to the bridge the new host serves.
+
+To reach a kept agent yourself, outside a durable run, store `connection.reattach` and pass it back as `agent.connect({ host, reattach })`. Then call `connection.attachSession(sessionId)` and `session.resumeTurn()`.
+
+### Stopping the agent's processes
+
+Bridges usually start through a wrapper — `npx`, or a Node launcher that runs a native binary as its child — so the process noetic spawns is rarely the agent itself. A local agent therefore runs as the leader of its own process group, and closing the connection (or aborting the step) stops the whole group: stdin is closed, then `SIGTERM`, a two-second grace period, then `SIGKILL`; on Windows, `taskkill /T /F` on its tree. No agent process or inherited pipe outlives the connection to keep your host running. A missing binary fails when the connection opens, with `AcpConnectError`. If you spawn the agent yourself in a custom `transport`, spawn it with `detached: true` and call `stopProcessTree(child)` from `@noetic-tools/acp/stdio` in its `close()` for the same shutdown.
+
 ## Filesystem confinement
 
 ACP puts boundary enforcement on the **client**: the agent asks for a path, and the client decides whether it may have it. Nothing in the protocol constrains what it asks for.
@@ -212,11 +237,13 @@ step.acpAgent({
   agent: claudeCode(),
   prompt: 'Design the migration',
   mode: 'plan',                     // session/set_mode before the turn
-  model: 'claude-opus-4-8',         // session/set_model before the turn
+  model: 'claude-opus-4-8',         // the `model` config option, before the turn
 });
 ```
 
-Each is checked against what the agent advertised. Asking for a mode from an agent that reports none throws `AcpCapabilityError` rather than failing opaquely mid-turn.
+Each is checked against what the agent advertised — on `session/new`, or on `session/load` for a loaded session, so a follow-up step can pick a mode for a session it loaded. Asking for a mode from an agent that reports none throws `AcpCapabilityError` rather than failing opaquely mid-turn. A model is set through the agent's `model` config option; an agent without one is sent the older `session/set_model` request, and one that knows neither throws `AcpCapabilityError`. `session.configOptions` lists the options the agent advertises (model, reasoning effort, …) and follows `config_option_update`.
+
+When the agent itself rejects a request — `Authentication required` on `session/new`, an unknown mode — the step fails with `step_failed` and the agent's message, its error detail and code, never `[object Object]`. The error's `cause` still has the agent's `code` and `data`.
 
 ## Giving the agent your tools
 
@@ -361,7 +388,7 @@ Two more things to know about sharing a session:
 - **Each step gets its own policy.** The permission policy, steering hook, handler, and event stream are rebound before every turn, so the pattern above really works: `fix`'s broader permissions do apply, even though `investigate` opened the connection.
 - **The agent and `clientCapabilities` are fixed per connection.** ACP negotiates capabilities once, and a connection speaks to one agent. A step joining an existing session with a different agent or different `clientCapabilities` throws `ACP_SESSION_AGENT_CONFLICT` / `ACP_SESSION_CAPABILITY_CONFLICT` rather than silently getting something other than it asked for.
 
-`session.load` resumes an existing ACP session id instead of creating a new one, for agents that advertise `loadSession`.
+`session.load` resumes an existing ACP session id instead of creating a new one, for agents that advertise `loadSession`. The agent replays the loaded conversation while it loads; that replay is never streamed as the new turn's output (see [Streaming](#streaming)).
 
 ### When the host dies mid-step
 
@@ -404,9 +431,15 @@ for await (const chunk of harness.getTextStream()) {
 | `agent_message_chunk` | `getTextStream()`, `getFullStream()` |
 | `agent_thought_chunk` | `getReasoningStream()` |
 | `tool_call` | `getItemStream()` as a function call |
-| `plan`, `available_commands_update`, `current_mode_update`, `tool_call_update` | `getFullStream()` as `acp.<update>` |
+| every other update — `plan`, `available_commands_update`, `current_mode_update`, `tool_call_update`, `config_option_update`, `session_info_update`, `usage_update`, … | `getFullStream()` as `acp.<update>` |
 
-Every notification is *also* emitted raw as an `acp_event` framework event. A turn always closes its bracket: `response.created` on the way in, `response.completed` on the way out — with the stop reason on success, an `error` reason when the turn throws. An agent that returns a result without streaming has its output synthesized rather than silently swallowed. `emit: false` on the step suppresses all of it.
+Every notification is *also* emitted raw as an `acp_event` framework event, `{ stepId, agentId, sessionId, update }`. An update type newer than noetic's protocol library still arrives this way instead of being rejected.
+
+**Usage.** A `usage_update` (Codex sends `{ used, size }`) is how full the agent's context window is, not tokens you were billed for, so it stays on the event stream and never becomes token usage or cost. The usage an agent reports with its answer is kept as `reportedUsage` on the turn result and on `response.completed`.
+
+**Loaded history.** When a step loads a session — `session.load`, or a resume after the host died — the agent replays the old conversation first. Those updates reach only the raw `acp_event` stream, marked `replay: true`; they never appear as new text, reasoning, or tool calls. Filter on `replay` if you want to show the history.
+
+A turn always closes its bracket: `response.created` on the way in, `response.completed` on the way out — with the stop reason on success, an `error` reason when the turn throws. An agent that returns a result without streaming has its output synthesized rather than silently swallowed. `emit: false` on the step suppresses all of it.
 
 ## Structured output
 
@@ -636,6 +669,8 @@ NOETIC_ACP_RUNNER_TOKEN=… npx @noetic-tools/acp serve --host 0.0.0.0 --port 70
 # Or serve one host over stdio, for ssh and docker exec:
 npx @noetic-tools/acp serve --stdio
 ```
+
+A runner keeps its agents too. When your host dies, or its connection to the runner drops (an ssh session ends, the network goes), the agent keeps working on the runner's machine, and a resumed run reconnects to it over a new connection — to the same WebSocket runner, or through a new `--stdio` runner — and takes the turn over exactly as it does locally. `--detached-timeout <ms>` bounds how long a kept agent may wait for a host (no limit by default); `killAgentsOnExit` stops it with the host instead.
 
 Over its one channel the runner starts the agent with the preset's launch settings, starts MCP servers beside it, and serves your tools to it on its own loopback port, forwarding each request back to the tool bridge on your machine. The agent needs no route back to you, and every WebSocket upgrade must carry the runner's token. `--cwd` sets the working directory for a start that names none. The step's `cwd` must exist on the runner's machine.
 

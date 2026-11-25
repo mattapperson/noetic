@@ -13,14 +13,17 @@ import type {
   AcpClientActivity,
   AcpClientCapabilityConfig,
   AcpClientHost,
+  AcpConnectOptions,
   AcpContentBlock,
   AcpKeepAlive,
   AcpLiveSession,
   AcpPermissionOutcome,
   AcpPermissionSteerer,
+  AcpReattachHandle,
   AcpSession,
   AcpSessionPolicy,
   AcpTurnResult,
+  AcpWhenHostExits,
   Context,
   ContextData,
   ContextLayer,
@@ -41,6 +44,7 @@ import {
 import { assertAgentTakesTools } from '../builders/acp-agent-checks';
 import { runtimeOf } from '../connections/model-tools';
 import type { AcpSessionStore } from '../runtime/acp-session-store';
+import { isRpcError, RpcFailure } from '../util/error-message';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
 import { renderLayerContext } from './acp-layers';
@@ -452,6 +456,12 @@ interface SessionResolution {
   fresh: boolean;
   /** True when this step reloaded the session an earlier attempt of it opened. */
   resumed: boolean;
+  /**
+   * True when it reattached to that session, still live in an agent that
+   * outlived the earlier host: the first turn collects the turn that host left
+   * running instead of prompting.
+   */
+  reattached: boolean;
 }
 
 /**
@@ -515,8 +525,11 @@ async function openSession<TContext, I, O>(opts: {
   tools?: AcpToolRunner;
   /** The session an earlier attempt of this step opened, to reload when the agent can. */
   resumeId?: string;
+  /** How to reach the agent that earlier attempt left running, when it can outlive its host. */
+  reattach?: AcpReattachHandle;
 }): Promise<SessionResolution> {
   let resumed = false;
+  let reattached = false;
   const store = sessionStore(opts.baseCtx);
   const keepAlive = keepAliveOf(opts.step.session);
   const reuseKey = opts.step.session?.reuse;
@@ -530,11 +543,30 @@ async function openSession<TContext, I, O>(opts: {
   const key = store.keyFor(parts);
 
   const { live, fresh } = await store.acquire(key, parts, async () => {
-    const connection = holdingConnections(
-      await opts.agent.connect({
+    const connectOptions = {
+      host: opts.host,
+      signal: abortSignalOf(opts.baseCtx),
+      whenHostExits: whenHostExitsOf(opts.baseCtx),
+    };
+    const kept = await reattachTo(opts.agent, connectOptions, {
+      reattach: opts.reattach,
+      sessionId: opts.resumeId,
+    });
+    if (kept) {
+      resumed = true;
+      reattached = true;
+      return {
+        connection: holdingConnections(kept.connection, opts.baseCtx, keepAlive),
+        session: kept.session,
         host: opts.host,
-        signal: abortSignalOf(opts.baseCtx),
-      }),
+        agentId: opts.agent.agentId,
+        keepAlive,
+        cwd: opts.cwd,
+        tools: opts.tools?.tools,
+      };
+    }
+    const connection = holdingConnections(
+      await opts.agent.connect(connectOptions),
       opts.baseCtx,
       keepAlive,
     );
@@ -586,6 +618,57 @@ async function openSession<TContext, I, O>(opts: {
     keepAlive,
     fresh,
     resumed,
+    reattached,
+  };
+}
+
+/** The harness's choice for agents its process leaves behind. */
+function whenHostExitsOf(ctx: Context<ContextData>): AcpWhenHostExits {
+  return ctx.harness.config.killAgentsOnExit === true ? 'stop' : 'keep';
+}
+
+/**
+ * The live session an earlier attempt of the step left in an agent that
+ * outlived its host, or undefined when there is none to reach — the agent is
+ * gone, or no longer has the session — so the step reloads or starts over.
+ */
+async function reattachTo(
+  agent: AcpAgent,
+  connectOptions: AcpConnectOptions,
+  {
+    reattach,
+    sessionId,
+  }: {
+    reattach: AcpReattachHandle | undefined;
+    sessionId: string | undefined;
+  },
+): Promise<
+  | {
+      connection: AcpAgentConnection;
+      session: AcpSession;
+    }
+  | undefined
+> {
+  if (!reattach || sessionId === undefined) {
+    return undefined;
+  }
+  const connection = await agent
+    .connect({
+      ...connectOptions,
+      reattach,
+    })
+    .catch(() => undefined);
+  if (!connection) {
+    return undefined;
+  }
+  const session = await connection.attachSession?.(sessionId).catch(() => undefined);
+  if (!session?.resumeTurn) {
+    await connection.close().catch(() => undefined);
+    return undefined;
+  }
+  return {
+    connection,
+    session,
   };
 }
 
@@ -697,20 +780,31 @@ function turnFailure(
   return new NoeticErrorImpl({
     kind: 'step_failed',
     stepId: step.id,
-    cause: cause instanceof Error ? cause : new Error(describeCause(cause)),
+    // A JSON-RPC rejection keeps its detail (`data`) in the message, so a
+    // failure reads "Internal error: Authentication required (-32603)", never
+    // "[object Object]" or a bare "Internal error".
+    cause: cause instanceof Error && !isRpcError(cause) ? cause : new RpcFailure(cause),
     retriesExhausted: false,
   });
 }
 
-/** A readable message for a thrown non-Error, such as a JSON-RPC error object. */
-function describeCause(cause: unknown): string {
-  if (typeof cause !== 'object' || cause === null) {
-    return String(cause);
+/**
+ * A failure while opening the session or applying its mode/model. Typed
+ * errors (capability, connect, config) pass through; a JSON-RPC rejection from
+ * the agent — or anything thrown that is not an Error — becomes the step's
+ * `step_failed` error with a readable message.
+ */
+function setupFailure(
+  step: {
+    id: string;
+  },
+  cause: unknown,
+  baseCtx: Context<ContextData>,
+): unknown {
+  if (cause instanceof Error && !isRpcError(cause)) {
+    return cause;
   }
-  const message = Reflect.get(cause, 'message');
-  const data = Reflect.get(cause, 'data');
-  const head = typeof message === 'string' ? message : JSON.stringify(cause);
-  return data === undefined ? head : `${head}: ${JSON.stringify(data)}`;
+  return turnFailure(step, cause, baseCtx);
 }
 
 //#region Turn
@@ -759,6 +853,11 @@ async function runTurn<TContext, I, O>(params: {
   tools: AcpToolRunner | undefined;
   turnError: TurnError;
   content: AcpContentBlock[];
+  /**
+   * Collect the turn an earlier host left running on a reattached session
+   * before prompting; prompt only when no turn was running.
+   */
+  collect?: boolean;
 }): Promise<AcpTurnResult> {
   const { step, baseCtx, resolution, bridge, tools, turnError } = params;
   if (tools) {
@@ -767,12 +866,22 @@ async function runTurn<TContext, I, O>(params: {
   bridge.begin();
   let result: AcpTurnResult;
   try {
-    result = await resolution.live.session.prompt({
-      content: params.content,
-      // Per-turn signal, so a session reused across turns is cancelled by the
-      // context running the CURRENT turn rather than the one that opened it.
-      signal: abortSignalOf(baseCtx),
-    });
+    // Per-turn signal, so a session reused across turns is cancelled by the
+    // context running the CURRENT turn rather than the one that opened it.
+    const signal = abortSignalOf(baseCtx);
+    const session = resolution.live.session;
+    const collected =
+      params.collect && session.resumeTurn
+        ? await session.resumeTurn({
+            signal,
+          })
+        : undefined;
+    result =
+      collected ??
+      (await session.prompt({
+        content: params.content,
+        signal,
+      }));
   } catch (e) {
     await settle(tools);
     // Close the turn on the event surface before rethrowing. A consumer driving
@@ -874,9 +983,12 @@ export async function executeAcpAgent<TContext, I, O>(
   // An earlier attempt of this step may have left its session behind.
   const sessions = step.session?.load ? undefined : acpSessionRecords(baseCtx);
   const recorded = await sessions?.load();
-  const resumeId = recorded?.agentId === agent.agentId ? recorded.sessionId : undefined;
+  const sameAgent = recorded?.agentId === agent.agentId;
+  const resumeId = sameAgent ? recorded?.sessionId : undefined;
+  const reattach = sameAgent ? recorded?.reattach : undefined;
   // `session/load` replays the session's conversation as updates. They are the
-  // agent's history, not this turn's work, so they are not forwarded.
+  // agent's history, not this turn's work: they reach raw-event consumers
+  // marked `replay: true`, and never the text, reasoning or item streams.
   let reloading = false;
 
   let bridge = new AcpEventBridge(step, agent.agentId, baseCtx);
@@ -891,6 +1003,7 @@ export async function executeAcpAgent<TContext, I, O>(
     layers,
     onUpdate: (notification) => {
       if (reloading) {
+        events.forwardReplay(notification);
         return;
       }
       tools?.observe(notification.update);
@@ -914,7 +1027,9 @@ export async function executeAcpAgent<TContext, I, O>(
     cwd,
   });
 
-  reloading = resumeId !== undefined;
+  // Both an explicit `session.load` and the resume of an earlier attempt's
+  // session load it; a reused live session is not reloaded and replays nothing.
+  reloading = resumeId !== undefined || step.session?.load !== undefined;
   const resolution = await openSession({
     step,
     agent,
@@ -924,9 +1039,14 @@ export async function executeAcpAgent<TContext, I, O>(
     binding: bindingFor(bridge),
     tools,
     resumeId,
-  }).finally(() => {
-    reloading = false;
-  });
+    reattach,
+  })
+    .catch((cause: unknown) => {
+      throw setupFailure(step, cause, baseCtx);
+    })
+    .finally(() => {
+      reloading = false;
+    });
   if (resolution.resumed) {
     tools?.sessionReloaded();
   }
@@ -934,10 +1054,14 @@ export async function executeAcpAgent<TContext, I, O>(
     await sessions?.write({
       sessionId: resolution.live.session.sessionId,
       agentId: agent.agentId,
+      // How a resumed run reaches this agent if it outlives this host.
+      reattach: resolution.live.connection.reattach,
     });
   }
 
-  await applySessionSelection(step, ctx, resolution, baseCtx);
+  await applySessionSelection(step, ctx, resolution, baseCtx).catch((cause: unknown) => {
+    throw setupFailure(step, cause, baseCtx);
+  });
   turnError.cancel = () => resolution.live.session.cancel();
 
   // History seeds only a freshly opened session; a reused one already owns
@@ -970,6 +1094,7 @@ export async function executeAcpAgent<TContext, I, O>(
       bridge,
       tools,
       turnError,
+      collect: retries === 0 && resolution.reattached,
       content: buildContent({
         text: [
           context,

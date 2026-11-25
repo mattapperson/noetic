@@ -145,6 +145,8 @@ export interface ContextHarness extends HarnessPlatform {
     readonly emitItemsOnReplay?: boolean;
     /** The clock deadlines are read from. Default `Date.now`. */
     readonly now?: () => number;
+    /** Stop ACP agents when the host goes away without closing them. */
+    readonly killAgentsOnExit?: boolean;
     /** Step hooks the interpreter runs around each step it executes (spec 08 § Step hooks). */
     readonly hooks?: AgentHooks;
   };

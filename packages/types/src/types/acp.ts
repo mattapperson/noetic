@@ -12,14 +12,14 @@
  * forming a cycle. Core calls only the methods declared here — the ACP library's
  * `ClientSideConnection` never enters core's dependency graph.
  *
- * Protocol types are re-used verbatim from `@zed-industries/agent-client-protocol`
+ * Protocol types are re-used verbatim from `@agentclientprotocol/sdk`
  * (spec version 1) rather than mirrored, so the wire surface cannot drift from
  * the specification.
  *
  * @see https://agentclientprotocol.com/
  */
 
-import type * as acp from '@zed-industries/agent-client-protocol';
+import type * as acp from '@agentclientprotocol/sdk';
 import type { TokenUsage } from './common';
 import type { Context } from './context';
 import type { FsAdapter } from './fs-adapter';
@@ -50,7 +50,31 @@ export const ACP_AGENT_STEP_KIND = 'acp-agent';
  * and {@link ShellAdapter} is one-shot. ACP needs a long-lived duplex pipe.
  * @public
  */
-export type AcpTransport = ByteStream;
+export type AcpTransport = ByteStream & {
+  /**
+   * Set when the agent behind this stream outlives the host and can be
+   * reattached (a local agent run by its keeper). JSON, opaque outside the
+   * package that made it.
+   */
+  readonly reattach?: AcpReattachHandle;
+};
+
+/**
+ * How to reach an agent that outlived its host: JSON a durable run stores with
+ * the step and hands back to {@link AcpConnectOptions.reattach} on resume.
+ * Opaque to everything but the package that made it.
+ * @public
+ */
+export type AcpReattachHandle = Readonly<Record<string, unknown>>;
+
+/**
+ * What happens to an agent when its host goes away without closing it — a
+ * crash, Ctrl-C, a killed process. `'keep'` (the default) keeps the agent
+ * working and holds everything it sends until a host reattaches; `'stop'`
+ * stops its whole process tree as soon as the host is gone.
+ * @public
+ */
+export type AcpWhenHostExits = 'keep' | 'stop';
 
 /** @public Options a transport factory receives when a step opens a connection. */
 export interface AcpTransportOptions {
@@ -60,6 +84,8 @@ export interface AcpTransportOptions {
   env?: Record<string, string | undefined>;
   /** Aborting this signal closes the transport. */
   signal?: AbortSignal;
+  /** See {@link AcpWhenHostExits}. */
+  whenHostExits?: AcpWhenHostExits;
 }
 
 /**
@@ -106,12 +132,23 @@ export interface AcpMachine {
    * local server does, not the agent's.
    */
   spawn: Spawn;
+  /**
+   * The stream to an agent this machine launched for an earlier host, which
+   * outlived it ({@link AcpTransport.reattach}). Rejects with
+   * {@link AcpConnectError} when that agent is gone. Absent on a machine whose
+   * agents never outlive their host.
+   */
+  attach?(handle: AcpReattachHandle): Promise<AcpTransport>;
   /** Release the machine and everything started on it. */
   close(): Promise<void>;
 }
 
 /** @public Opens an {@link AcpMachine} for one connection. */
-export type AcpMachineFactory = (opts: { signal?: AbortSignal }) => Promise<AcpMachine>;
+export type AcpMachineFactory = (opts: {
+  signal?: AbortSignal;
+  /** See {@link AcpWhenHostExits}. */
+  whenHostExits?: AcpWhenHostExits;
+}) => Promise<AcpMachine>;
 
 //#endregion
 
@@ -516,8 +553,16 @@ export interface AcpTurnResult {
   items: Item[];
   /** The agent's final message: its text after the last tool call of the turn. */
   text: string;
+  /** Billed token delta supplied by an adapter, never context-window occupancy. */
   usage?: TokenUsage;
   cost?: number;
+  /**
+   * The `usage` the agent's `session/prompt` answer reported, verbatim. Kept
+   * apart from `usage` because an agent may report session totals rather than
+   * this turn's delta. Context-window occupancy (`usage_update`) is not here:
+   * it reaches the host as a raw `acp_event`.
+   */
+  reportedUsage?: acp.Usage;
   /** Plan entries reported via `plan` updates, latest snapshot wins. */
   plan?: ReadonlyArray<acp.PlanEntry>;
   /** Slash commands the agent advertised during the turn. */
@@ -552,15 +597,35 @@ export interface AcpSession {
   readonly sessionId: string;
   /** Mode state when the agent supports session modes. */
   readonly modes?: acp.SessionModeState;
+  /**
+   * Config options the agent advertises (model, reasoning effort, …), from
+   * `session/new` or `session/load`, refreshed by `config_option_update`.
+   */
+  readonly configOptions?: ReadonlyArray<acp.SessionConfigOption>;
   /** Slash commands currently offered, refreshed by `available_commands_update`. */
   readonly availableCommands: ReadonlyArray<acp.AvailableCommand>;
   /** Run one prompt turn to completion. */
   prompt(opts: AcpPromptOptions): Promise<AcpTurnResult>;
   /** Send `session/cancel` for an in-flight turn. */
   cancel(): Promise<void>;
-  /** Switch mode. Throws when the agent advertised no modes. */
+  /**
+   * Switch mode. Throws when the agent advertised no modes — on `session/new`
+   * or on `session/load`.
+   */
   setMode(modeId: string): Promise<void>;
-  /** Switch model. Throws when the agent advertised no models. */
+  /**
+   * On a reattached session ({@link AcpAgentConnection.attachSession}): collect
+   * the turn that was running when the previous host went away. Every update
+   * of that turn — those the previous host saw and those sent while no host
+   * was attached — arrives again as this turn's output, and any request the
+   * agent is still waiting on is asked again. Resolves with the turn's result,
+   * or `undefined` when no turn was running, so the caller prompts instead.
+   */
+  resumeTurn?(opts: AcpResumeTurnOptions): Promise<AcpTurnResult | undefined>;
+  /**
+   * Select a model through the `model` config option
+   * (`session/set_config_option`). Throws when the agent advertised none.
+   */
   setModel(modelId: string): Promise<void>;
 }
 
@@ -585,8 +650,26 @@ export interface AcpAgentConnection {
    * the agent did not advertise `loadSession`.
    */
   loadSession(opts: AcpLoadSessionOptions): Promise<AcpSession>;
+  /**
+   * Set when the agent can outlive this host and be reattached: store it, and
+   * pass it as {@link AcpConnectOptions.reattach} to reach the same agent.
+   */
+  readonly reattach?: AcpReattachHandle;
+  /**
+   * The live session `sessionId` on a reattached connection, with the modes
+   * and config options the agent last advertised — no `session/new` or
+   * `session/load`. Rejects with {@link AcpConnectError} when the agent has no
+   * such session. Present only on a reattached connection.
+   */
+  attachSession?(sessionId: string): Promise<AcpSession>;
   /** Close the connection and release the transport. */
   close(): Promise<void>;
+}
+
+/** @public Options for {@link AcpSession.resumeTurn}. */
+export interface AcpResumeTurnOptions {
+  /** Aborting it cancels the turn, as for {@link AcpSession.prompt}. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -626,6 +709,14 @@ export interface AcpConnectOptions {
    * agent receives them in `session/new` as usual.
    */
   mcpServers?: ReadonlyArray<acp.McpServer>;
+  /**
+   * Reach the agent an earlier host started, from its
+   * {@link AcpAgentConnection.reattach}, instead of starting one. Rejects with
+   * {@link AcpConnectError} when that agent is gone.
+   */
+  reattach?: AcpReattachHandle;
+  /** See {@link AcpWhenHostExits}. Default `'keep'`. */
+  whenHostExits?: AcpWhenHostExits;
 }
 
 /**
@@ -750,6 +841,8 @@ export interface AcpSessionInfo {
   currentModeId?: string;
   /** Modes the agent offers, for a mode switcher. */
   availableModes: ReadonlyArray<acp.SessionMode>;
+  /** Config options the agent currently advertises (model, effort, …). */
+  configOptions?: ReadonlyArray<acp.SessionConfigOption>;
   /** Slash commands the agent currently advertises. */
   availableCommands: ReadonlyArray<acp.AvailableCommand>;
 }
@@ -922,12 +1015,15 @@ export type {
   PlanEntry as AcpPlanEntry,
   PromptCapabilities as AcpPromptCapabilities,
   RequestPermissionRequest as AcpRequestPermissionRequest,
+  SessionConfigOption as AcpSessionConfigOption,
   SessionMode as AcpSessionMode,
   SessionModeState as AcpSessionModeState,
   SessionNotification as AcpSessionNotification,
   ToolCallContent as AcpToolCallContent,
   ToolCallStatus as AcpToolCallStatus,
   ToolKind as AcpToolKind,
-} from '@zed-industries/agent-client-protocol';
+  Usage as AcpUsage,
+  UsageUpdate as AcpUsageUpdate,
+} from '@agentclientprotocol/sdk';
 
 //#endregion

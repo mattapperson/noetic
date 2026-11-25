@@ -5,10 +5,10 @@
  */
 
 import { Readable, Writable } from 'node:stream';
+import type * as acp from '@agentclientprotocol/sdk';
+import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { frameworkCast } from '@noetic-tools/types';
-import type * as acp from '@zed-industries/agent-client-protocol';
-import { AgentSideConnection, ndJsonStream } from '@zed-industries/agent-client-protocol';
 
 async function callEcho(server: acp.McpServer): Promise<string> {
   if (!('type' in server) || server.type !== 'http') {

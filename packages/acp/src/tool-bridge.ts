@@ -54,7 +54,15 @@ export interface ToolBridge {
   readonly server: AcpMcpServer;
   readonly env: Record<string, string>;
   readonly permits?: BridgedPermissionCheck;
+  /** What a later host needs to serve this bridge to the same agent. */
+  readonly credentials: ToolBridgeCredentials;
   close(): Promise<void>;
+}
+
+/** The path and token a bridge serves under. */
+export interface ToolBridgeCredentials {
+  readonly path: string;
+  readonly token: string;
 }
 
 //#endregion
@@ -76,9 +84,11 @@ export async function startToolBridge(opts: {
   env?: Record<string, string | undefined>;
   /** Carries the bridge to the agent's machine; this machine's loopback by default. */
   reach?: (bridge: ToolBridgeAddress) => Promise<ToolBridgeAddress>;
+  /** Serve under the path and token an earlier host gave a reattached agent. */
+  reuse?: ToolBridgeCredentials;
 }): Promise<ToolBridge> {
   const { serveToolsOverHttp } = await import('./mcp/node');
-  const http = await serveToolsOverHttp(opts.getHost);
+  const http = await serveToolsOverHttp(opts.getHost, opts.reuse);
   const local: ToolBridgeAddress = {
     serverName: opts.serverName,
     url: http.url,
@@ -116,6 +126,10 @@ export async function startToolBridge(opts: {
     },
     env,
     permits: opts.wiring.permits,
+    credentials: {
+      path: new URL(http.url).pathname,
+      token: http.token,
+    },
     close: () => http.close(),
   };
 }

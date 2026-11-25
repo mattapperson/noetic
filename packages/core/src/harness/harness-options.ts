@@ -258,6 +258,13 @@ export interface AgentHarnessOpts<
    */
   emitItemsOnReplay?: boolean;
   /**
+   * Stop every ACP agent this harness started when its process goes away
+   * without closing them — a crash, Ctrl-C, a killed process. By default
+   * (`false`) a local agent keeps working and holds what it sends until a
+   * resumed run reattaches to it (spec 27 § A local agent outlives its host).
+   */
+  killAgentsOnExit?: boolean;
+  /**
    * The version of the flow this harness runs: any string the host changes when the
    * flow changes, such as a release tag or a hash (spec 23 § Versions). Every step a
    * run records carries it, so the trail shows which version handled each step. A
