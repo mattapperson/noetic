@@ -16,7 +16,8 @@ const manifest = z.object({
     .optional(),
 });
 const job = z.object({
-  needs: z.string().optional(),
+  needs: z.array(z.string()).optional(),
+  if: z.string().optional(),
   permissions: z.object({
     'id-token': z.string(),
   }),
@@ -80,19 +81,56 @@ test('every public workspace has exactly one release job', () => {
   expect(dirs.sort()).toEqual(packages.map((pkg) => pkg.dir).sort());
 });
 
+/** The release jobs of the workspace packages `id` depends on. */
+function dependencyJobs(id: string): string[] {
+  const pkg = packages.find((entry) => entry.dir === `packages/${id}`)!;
+  return Object.keys(pkg.dependencies).flatMap((name) => {
+    const dependency = packages.find((entry) => entry.name === name);
+    return dependency
+      ? [
+          dependency.dir.replace('packages/', ''),
+        ]
+      : [];
+  });
+}
+
 test('releases form one chain with dependencies before their consumers', () => {
   const released = new Set<string>();
   let previous: string | undefined;
   for (const [id, value] of jobs) {
-    expect(value.needs).toBe(previous);
-    const pkg = packages.find((entry) => entry.dir === `packages/${id}`)!;
-    for (const name of Object.keys(pkg.dependencies)) {
-      if (packages.some((entry) => entry.name === name)) {
-        expect(released.has(name)).toBe(true);
-      }
+    // The job before it comes first in `needs`: one job writes to the branch at a time.
+    expect(value.needs?.[0]).toBe(previous);
+    for (const dependency of dependencyJobs(id)) {
+      expect(released.has(dependency)).toBe(true);
     }
-    released.add(pkg.name);
+    released.add(id);
     previous = id;
+  }
+});
+
+test('a job runs when its own dependencies were released, whatever the job before it did', () => {
+  for (const [id, value] of jobs) {
+    const dependencies = dependencyJobs(id);
+    if (dependencies.length === 0) {
+      expect(value.needs).toBeUndefined();
+      expect(value.if).toBeUndefined();
+      continue;
+    }
+    // Every dependency is named in `needs`, or its result could not be read.
+    expect(
+      [
+        ...(value.needs ?? []),
+      ].sort(),
+    ).toEqual(
+      [
+        ...new Set([
+          ...(value.needs ?? []).slice(0, 1),
+          ...dependencies,
+        ]),
+      ].sort(),
+    );
+    const released = dependencies.map((job) => `needs.${job}.result == 'success'`).join(' && ');
+    expect(value.if).toBe(`\${{ !cancelled() && ${released} }}`);
   }
 });
 
