@@ -1,5 +1,16 @@
 import { expect, test } from 'bun:test';
-import { readdirSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
 
@@ -16,7 +27,8 @@ const manifest = z.object({
     .optional(),
 });
 const job = z.object({
-  needs: z.string().optional(),
+  needs: z.array(z.string()).optional(),
+  if: z.string().optional(),
   permissions: z.object({
     'id-token': z.string(),
   }),
@@ -80,19 +92,56 @@ test('every public workspace has exactly one release job', () => {
   expect(dirs.sort()).toEqual(packages.map((pkg) => pkg.dir).sort());
 });
 
+/** The release jobs of the workspace packages `id` depends on. */
+function dependencyJobs(id: string): string[] {
+  const pkg = packages.find((entry) => entry.dir === `packages/${id}`)!;
+  return Object.keys(pkg.dependencies).flatMap((name) => {
+    const dependency = packages.find((entry) => entry.name === name);
+    return dependency
+      ? [
+          dependency.dir.replace('packages/', ''),
+        ]
+      : [];
+  });
+}
+
 test('releases form one chain with dependencies before their consumers', () => {
   const released = new Set<string>();
   let previous: string | undefined;
   for (const [id, value] of jobs) {
-    expect(value.needs).toBe(previous);
-    const pkg = packages.find((entry) => entry.dir === `packages/${id}`)!;
-    for (const name of Object.keys(pkg.dependencies)) {
-      if (packages.some((entry) => entry.name === name)) {
-        expect(released.has(name)).toBe(true);
-      }
+    // The job before it comes first in `needs`: one job writes to the branch at a time.
+    expect(value.needs?.[0]).toBe(previous);
+    for (const dependency of dependencyJobs(id)) {
+      expect(released.has(dependency)).toBe(true);
     }
-    released.add(pkg.name);
+    released.add(id);
     previous = id;
+  }
+});
+
+test('a job runs when its own dependencies were released, whatever the job before it did', () => {
+  for (const [id, value] of jobs) {
+    const dependencies = dependencyJobs(id);
+    if (dependencies.length === 0) {
+      expect(value.needs).toBeUndefined();
+      expect(value.if).toBeUndefined();
+      continue;
+    }
+    // Every dependency is named in `needs`, or its result could not be read.
+    expect(
+      [
+        ...(value.needs ?? []),
+      ].sort(),
+    ).toEqual(
+      [
+        ...new Set([
+          ...(value.needs ?? []).slice(0, 1),
+          ...dependencies,
+        ]),
+      ].sort(),
+    );
+    const released = dependencies.map((job) => `needs.${job}.result == 'success'`).join(' && ');
+    expect(value.if).toBe(`\${{ !cancelled() && ${released} }}`);
   }
 });
 
@@ -131,3 +180,160 @@ test('no other workflow publishes npm packages', () => {
     expect(source).not.toMatch(/\bnpm publish\b|\bsemantic-release --extends\b/);
   }
 });
+
+//#region publish-missing.sh
+
+/** Run `command` in `cwd`, and fail the test with its output when it fails. */
+function sh(cwd: string, command: string, env: Record<string, string> = {}): string {
+  const result = spawnSync(
+    'bash',
+    [
+      '-c',
+      command,
+    ],
+    {
+      cwd,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ...env,
+      },
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error(`${command} failed:\n${result.stdout}\n${result.stderr}`);
+  }
+  return result.stdout;
+}
+
+function writeJson(file: string, value: unknown): void {
+  mkdirSync(join(file, '..'), {
+    recursive: true,
+  });
+  writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+/**
+ * A repository with `packages/base` and `packages/app` (which depends on base),
+ * `app` tagged at 1.0.0 and never published, and `npm` and `bun` stubs on `PATH`
+ * that log what they were asked to do.
+ */
+function taggedRepo(): {
+  repo: string;
+  log: string;
+  env: Record<string, string>;
+} {
+  const root = mkdtempSync(join(tmpdir(), 'publish-missing-'));
+  const repo = join(root, 'repo');
+  const bin = join(root, 'bin');
+  const log = join(root, 'log');
+  mkdirSync(bin, {
+    recursive: true,
+  });
+  writeFileSync(log, '');
+  writeFileSync(
+    join(bin, 'npm'),
+    `#!/usr/bin/env bash
+if [[ $1 == view ]]; then echo '{"error":{"code":"E404"}}'; exit 1; fi
+echo "npm $* | $(cat "$2/src.txt")" >> "${log}"
+`,
+  );
+  writeFileSync(
+    join(bin, 'bun'),
+    `#!/usr/bin/env bash
+echo "bun $*" >> "${log}"
+`,
+  );
+  chmodSync(join(bin, 'npm'), 0o755);
+  chmodSync(join(bin, 'bun'), 0o755);
+  writeJson(join(repo, 'package.json'), {
+    name: 'root',
+    private: true,
+    workspaces: [
+      'packages/*',
+    ],
+  });
+  writeFileSync(join(repo, 'bun.lock'), 'lock\n');
+  writeJson(join(repo, 'packages/base/package.json'), {
+    name: '@x/base',
+    version: '2.0.0',
+  });
+  writeJson(join(repo, 'packages/app/package.json'), {
+    name: '@x/app',
+    version: '1.0.0',
+    dependencies: {
+      '@x/base': 'workspace:*',
+    },
+  });
+  writeFileSync(join(repo, 'packages/app/src.txt'), 'as tagged');
+  sh(
+    repo,
+    'git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm init && git tag app-v1.0.0',
+  );
+  return {
+    repo,
+    log,
+    env: {
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
+    },
+  };
+}
+
+const PUBLISH_MISSING = new URL('publish-missing.sh', import.meta.url).pathname;
+
+test('publish-missing publishes the checkout when it is still the tag', () => {
+  const { repo, log, env } = taggedRepo();
+  try {
+    sh(repo, `bash ${PUBLISH_MISSING} packages/app`, env);
+    expect(readFileSync(log, 'utf8').trim()).toBe(
+      'npm publish ./packages/app --access public --provenance --workspaces=false --tag latest | as tagged',
+    );
+  } finally {
+    rmSync(join(repo, '..'), {
+      recursive: true,
+      force: true,
+    });
+  }
+});
+
+test('publish-missing rebuilds a moved-on checkout from the tag, dependencies first', () => {
+  const { repo, log, env } = taggedRepo();
+  try {
+    writeFileSync(join(repo, 'packages/app/src.txt'), 'moved on');
+    sh(repo, 'git -c user.name=t -c user.email=t@t commit -qam later');
+    sh(repo, `bash ${PUBLISH_MISSING} packages/app`, env);
+    const lines = readFileSync(log, 'utf8').trim().split('\n');
+    expect(lines.slice(0, 2)).toEqual([
+      'bun install',
+      'bun run --cwd packages/base build',
+    ]);
+    // The tag's sources, from a checkout of its own, without provenance naming this commit.
+    expect(lines[2]).toMatch(
+      /^npm publish \S+\/src\/packages\/app --access public --provenance=false --workspaces=false --tag latest \| as tagged$/,
+    );
+    expect(lines).toHaveLength(3);
+    // The temporary checkout is removed.
+    expect(sh(repo, 'git worktree list').trim().split('\n')).toHaveLength(1);
+  } finally {
+    rmSync(join(repo, '..'), {
+      recursive: true,
+      force: true,
+    });
+  }
+});
+
+test('publish-missing does nothing for a version that was never tagged', () => {
+  const { repo, log, env } = taggedRepo();
+  try {
+    sh(repo, 'git tag -d app-v1.0.0 >/dev/null');
+    sh(repo, `bash ${PUBLISH_MISSING} packages/app`, env);
+    expect(readFileSync(log, 'utf8')).toBe('');
+  } finally {
+    rmSync(join(repo, '..'), {
+      recursive: true,
+      force: true,
+    });
+  }
+});
+
+//#endregion

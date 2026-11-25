@@ -114,7 +114,68 @@ const shared = createD1Storage({ database: env.DB });                  // every 
 const perObject = createDurableObjectStorage({ sql: ctx.storage.sql }); // one Durable Object
 ```
 
-Both implement `swap`, so sessions on them run under a [turn lease](/docs/framework/durability#one-writer-per-turn).
+Both implement `swap`, so sessions on them run under a [turn lease](/docs/framework/durability#one-writer-per-turn). Both also implement `getMany`.
+
+#### One table for many tenants
+
+Pass `scope` to keep each tenant's rows apart in a shared table. A scoped storage reads, lists and swaps only its own rows.
+
+```ts validate=none
+const storage = createD1Storage({ database: env.DB, scope: userId });
+```
+
+| | Table | Primary key |
+|---|---|---|
+| no `scope` | `(key, value)` | `key` |
+| `scope` | `(scope, key, value)` | `(scope, key)` |
+
+A table has one shape: every storage on it is scoped, or none is. A storage checks the table's columns before it reads or writes, and throws when its `scope` does not match. To drop a tenant, run `DELETE FROM noetic_storage WHERE scope = ?`.
+
+#### Values larger than a row
+
+A D1 row and a Durable Object SQLite row hold about 2 MB, and a long thread's record is one value. Pass `spill` with an R2 bucket and any value over 1 MiB is written to the bucket, with a pointer in the row:
+
+```ts validate=none
+const storage = createD1Storage({
+  database: env.DB,
+  scope: userId,
+  spill: { blobs: env.BUCKET },
+});
+```
+
+| `spill` option | Type | Default | Description |
+|---|---|---|---|
+| `blobs` | `BlobStoreLike` | required | An R2 bucket binding, or anything with its `get`, `put` and `delete` |
+| `maxBytes` | `number` | `1048576` | A value whose JSON is over this many UTF-8 bytes is spilled |
+| `prefix` | `string` | `'noetic-storage'` | Leads every object key. The scope follows it |
+| `movedPrefixes` | `string[]` | none | Object key prefixes of rows moved from another layout, whose pointers are followed too |
+
+Each spilled write gets an object of its own, `<prefix>/<scope>/<key>/<uuid>`, and the write that replaces or deletes it removes the old object. `swap` still has one winner: for a spilled value it compares the object's text, then swaps on the pointer in the database. A pointer is followed only to an object under the storage's own prefix and scope, or under `movedPrefixes`, and a value shaped like a pointer cannot be stored. A failed cleanup delete is logged and leaves an orphaned object; it never fails the write. Without `spill`, a record that outgrows a row cannot be written, and under a turn lease that stops the turn with `ledger_write_failed`.
+
+`spillStorage(storage, { blobs })` adds the same behavior to any other `StorageAdapter`.
+
+#### Moving from your own table
+
+Copy the rows across once, with the Workers that write to them stopped. `value` must be JSON text:
+
+```sql
+INSERT INTO noetic_storage (scope, key, value)
+SELECT scope, key, value FROM old_table;
+```
+
+If the old table already points at objects in R2, rewrite those rows to this package's pointer in the same statement. The objects stay where they are, since a pointer holds the whole object key; pass their key prefix as `spill.movedPrefixes` so the storage follows them. For rows stored as a marker followed by the object key:
+
+```sql
+INSERT INTO noetic_storage (scope, key, value)
+SELECT scope, key,
+  CASE WHEN substr(value, 1, length(:marker)) = :marker
+    THEN json_object('noetic:spilled', substr(value, length(:marker) + 1))
+    ELSE value
+  END
+FROM old_table;
+```
+
+To keep the old table, pass its name as `table`. It needs the columns above under those names, and any other column must be nullable or have a default.
 
 ### Events from outside
 

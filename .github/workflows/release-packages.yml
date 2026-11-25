@@ -4,6 +4,11 @@ name: Release packages
 # and check out the latest commit of the branch that was pushed. `main`
 # publishes to the `latest` dist-tag; `next` publishes prereleases
 # (`x.y.z-next.N`) to the `next` dist-tag.
+#
+# The jobs form one chain so only one writes to the branch at a time: each
+# job `needs` the job before it. A job runs when the packages it depends on
+# were released, whatever happened to the job before it, so one package's
+# failed release does not stop the packages that do not depend on it.
 
 on:
   push:
@@ -78,7 +83,8 @@ jobs:
     name: Release @noetic-tools/context
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: types
+    needs: [types]
+    if: ${{ !cancelled() && needs.types.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -137,7 +143,8 @@ jobs:
     name: Release @noetic-tools/acp
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: context
+    needs: [context, types]
+    if: ${{ !cancelled() && needs.types.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -197,7 +204,8 @@ jobs:
     name: Release @noetic-tools/core
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: acp
+    needs: [acp, context, types]
+    if: ${{ !cancelled() && needs.context.result == 'success' && needs.types.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -261,7 +269,8 @@ jobs:
     name: Release @noetic-tools/openui
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: core
+    needs: [core, context, types]
+    if: ${{ !cancelled() && needs.context.result == 'success' && needs.types.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -325,7 +334,8 @@ jobs:
     name: Release @noetic-tools/mcp
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: openui
+    needs: [openui, types]
+    if: ${{ !cancelled() && needs.types.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -385,7 +395,8 @@ jobs:
     name: Release @noetic-tools/agent-plugins
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: mcp
+    needs: [mcp, types]
+    if: ${{ !cancelled() && needs.mcp.result == 'success' && needs.types.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -447,7 +458,8 @@ jobs:
     name: Release @noetic-tools/eval
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: agent-plugins
+    needs: [agent-plugins, core]
+    if: ${{ !cancelled() && needs.core.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -512,7 +524,8 @@ jobs:
     name: Release @noetic-tools/chat-sdk
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: eval
+    needs: [eval, types]
+    if: ${{ !cancelled() && needs.types.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -574,7 +587,8 @@ jobs:
     name: Release @noetic-tools/platform-node
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: chat-sdk
+    needs: [chat-sdk, core]
+    if: ${{ !cancelled() && needs.core.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -638,7 +652,8 @@ jobs:
     name: Release @noetic/platform-browser
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: platform-node
+    needs: [platform-node, core]
+    if: ${{ !cancelled() && needs.core.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -699,7 +714,8 @@ jobs:
     name: Release @noetic-tools/platform-cloudflare-worker
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: platform-browser
+    needs: [platform-browser, core]
+    if: ${{ !cancelled() && needs.core.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -760,7 +776,8 @@ jobs:
     name: Release @noetic-tools/profile-ui
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: platform-cloudflare-worker
+    needs: [platform-cloudflare-worker, types]
+    if: ${{ !cancelled() && needs.types.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -820,7 +837,8 @@ jobs:
     name: Release @noetic-tools/profile-screen
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: profile-ui
+    needs: [profile-ui, types]
+    if: ${{ !cancelled() && needs.types.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -880,7 +898,8 @@ jobs:
     name: Release @noetic-tools/profile-browser
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: profile-screen
+    needs: [profile-screen, types, profile-ui]
+    if: ${{ !cancelled() && needs.types.result == 'success' && needs.profile-ui.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -941,7 +960,8 @@ jobs:
     name: Release @noetic-tools/profile-app
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: profile-browser
+    needs: [profile-browser, types, profile-ui]
+    if: ${{ !cancelled() && needs.types.result == 'success' && needs.profile-ui.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -1002,7 +1022,8 @@ jobs:
     name: Release @noetic-tools/profile-device
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: profile-app
+    needs: [profile-app, types, profile-ui]
+    if: ${{ !cancelled() && needs.types.result == 'success' && needs.profile-ui.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -1063,7 +1084,8 @@ jobs:
     name: Release @noetic-tools/profile-chat
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: profile-device
+    needs: [profile-device, types]
+    if: ${{ !cancelled() && needs.types.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -1123,7 +1145,8 @@ jobs:
     name: Release @noetic-tools/verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: profile-chat
+    needs: [profile-chat, types]
+    if: ${{ !cancelled() && needs.types.result == 'success' }}
     permissions:
       contents: write
       issues: write
