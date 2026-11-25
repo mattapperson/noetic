@@ -285,8 +285,8 @@ interface TrailMark {
 - A live ledger entry is read as a mark. When an entry is pruned (`23a-step-level-resume` § Retention) it leaves a mark behind under `execution:<id>:trail:<seq>`, without its output or items.
 - Marks do not count toward `maxEntries`.
 - A mark is kept under the sequence number of the entry it came from, and no new entry is given a number a mark already has.
-- A thread's trail covers its turn in flight and the finished turns it remembers for message dedupe (`08-runtime`).
-- Core never deletes a mark. `clearCheckpoint` leaves them; a host prunes the `execution:<id>:trail:` prefix by age when it wants to.
+- A thread's trail covers every turn it began, in order: its record keeps each turn's execution id in `executions`.
+- Only `forget` deletes a mark (§ Forgetting), unless the host passes `keepTrail`. `clearCheckpoint`, an abandoned turn, and ledger pruning leave them.
 
 ## Restore flow
 
@@ -399,7 +399,7 @@ A `spend:<id>` value that does not read as a record — torn by a crash mid-writ
 
 Nothing else in the damaged value is trusted. The placeholders keep `PendingSpend` one shape, so host code that reads `kind`, `model`, or `ceiling` compiles unchanged; code that trusts those fields checks `unreadable` first. An unreadable dispatch has no ceiling and no generation id, so it is treated as an unbounded hold that can never be priced (§ Ceilings, § Reconciliation): `pendingSpend` lists it, `restore()` holds it and `spend_pending` flags it `{ id, unreadable: true, unbounded: true }`, it adds nothing to `heldCost` or `until.maxCost`, and reconciliation leaves it held. It leaves storage only through `writeOffSpend`, which deletes it and charges the assumed cost like any write-off. One that names no execution may be any execution's: it is listed, held, and flagged with every execution, and a write-off charges the context it was last held on.
 
-Records live under `spend:<id>`, outside the `execution:<id>:` prefix, so `clearCheckpoint`, an abandoned session turn, and every other discard leave them alone. A record leaves storage only when it is settled or written off. Evidence of spend is never discarded with the run that made it.
+Records live under `spend:<id>`, outside the `execution:<id>:` prefix, so `clearCheckpoint`, an abandoned session turn, and every other discard leave them alone. A record leaves storage only when it is settled or written off; `forget` settles a thread's or execution's records before it deletes anything (§ Forgetting). Evidence of spend is never discarded with the run that made it.
 
 **Lifecycle of one dispatch:**
 
@@ -453,7 +453,10 @@ interface SpendSettlement {
   cost: number;                // USD the provider billed, or the written-off amount
   inputTokens: number;
   outputTokens: number;
+  model?: string;              // the dispatch's model
+  path?: string;               // ledger key of the round or step that made the call
   writtenOff?: true;
+  unbounded?: true;            // written off at 0: nothing bounded the call (§ Forgetting)
 }
 ```
 
@@ -493,6 +496,77 @@ Both go to the broadcaster of the dispatch's root context, else its thread's ses
 ### What stays bounded, not priced
 
 - A call cut off before any response byte has no generation id, and is held at its ceiling.
+
+## Forgetting
+
+A host that is done with a thread or an execution tells the harness, and the harness deletes what it keeps for it. A host never builds a storage key itself: it finds what is stored with the listing calls and discards it with `forget`.
+
+```typescript
+interface AgentHarness {
+  forget(scope: { threadId: string } | { executionId: string }, options?: ForgetOptions): Promise<ForgetReport>;
+  listStoredThreads(options?: { prefix?: string }): Promise<string[]>;
+  listStoredExecutions(options?: { prefix?: string }): Promise<StoredExecution[]>;
+}
+
+interface ForgetOptions {
+  keepTrail?: boolean;  // keep the trail marks (§ The trail). Default false: keep nothing.
+  patienceMs?: number;  // how long to wait for the provider to price a pending call. Default 60 000.
+  waitMs?: number;      // how long to wait for another harness's lease on the thread to run out. Default 0.
+}
+
+interface ForgetReport {
+  threadId?: string;
+  executionIds: string[];       // every execution forgotten
+  spend: SpendSettlement[];     // every pending dispatch settled or written off, in that order
+}
+
+interface StoredExecution {
+  executionId: string;
+  parts: ExecutionPart[];       // what is stored for it
+  resumable: boolean;           // a snapshot or ledger entries are stored: `restore()` can rebuild it
+}
+
+type ExecutionPart = 'snapshot' | 'ledger' | 'trail' | 'held' | 'intent' | 'pending' | 'other';
+```
+
+### What a thread's forget deletes
+
+`forget({ threadId })` covers every execution the thread ran: the turn in flight, parked, stopped, or stuck, and every turn that finished. The thread's record lists them all in `executions`, the ids of every turn it began, oldest first, so a turn that has dropped out of the remembered `done` turns is still found. For each of those executions it deletes what an execution's forget deletes (below). Then it deletes, in order:
+
+1. Context-layer state kept at the thread's scope key (`layers/<layerId>/<threadId>/`), for every layer.
+2. The thread's display output (`output:<threadId>`), after any write still queued for it has landed.
+3. The thread's record (`session:<threadId>`): its history, usage, turn, remembered turns, and kept steers.
+4. The thread's turn lease (`turn-lease:<threadId>`).
+
+The lease goes last: the forget holds it (below) until everything else is gone, and a forget cut off part way leaves the thread listed by `listStoredThreads`, so a later sweep finishes it. The harness also stops watching a parked turn of the thread and drops the thread's session and display output from memory.
+
+### What an execution's forget deletes
+
+`forget({ executionId })` deletes everything under `execution:<id>:` — the checkpoint snapshot (through the configured `CheckpointStore`), the step ledger, held calls and their intents, pending entries, and the trail unless `keepTrail` — and context-layer state kept at the execution's scope key (`layers/<layerId>/<executionId>/`). It does not touch a thread's record: forgetting the execution of a thread's turn leaves the thread naming an execution with nothing stored, and the turn starts over on its next delivery. Forget the thread for that.
+
+Deleting goes through the `StorageAdapter`, so storage that keeps a large value elsewhere (a spilled object, `25-platform-packages` § Values larger than a row) deletes it with its key.
+
+### Spend is settled before anything is deleted
+
+A forget never discards evidence of spend unaccounted for. Before it deletes anything it settles every pending dispatch (§ Paid dispatches) that names the thread, or one of the executions it forgets:
+
+1. Each is priced through the provider's generation lookup, waiting up to `patienceMs`, as `reconcileSpend` does.
+2. Each the provider did not price is written off at its ceiling. One with no ceiling — its model publishes no price, its request set no output cap, or its record is unreadable — is written off at 0 and its settlement carries `unbounded: true`, so the host knows the bill was unknown.
+
+Each settlement is charged as any other (§ Reconciliation) and returned in `ForgetReport.spend`, with the dispatch's `model` and `path`, so a host can attribute it. An unreadable record that names no execution and no thread is left alone: it is not known to be the thread's.
+
+### A live turn is not forgotten
+
+- A thread whose turn is running in this harness, or an execution with a run in flight in this harness, is refused with `lease_lost`.
+- On storage with `swap`, a thread's forget takes the thread's lease (§ One writer per turn) before deleting, waiting up to `waitMs` for a lease another harness holds. A lease still held elsewhere after that is refused with `lease_lost`. Taking it raises the term, so a harness that stalled mid-turn and comes back loses its next write and stops.
+- On storage without `swap`, nothing fences another process. The host must make sure no other harness runs the thread.
+
+### Listing what is stored
+
+- `listStoredThreads` lists every thread with a record, a lease, or display output stored: any one of them is something a forget deletes. `prefix` narrows to thread ids that start with it.
+- `listStoredExecutions` lists every execution with anything stored under `execution:<id>:`, or a snapshot in the configured `CheckpointStore`, with the parts stored. `resumable` is what a host checks to decide whether a run can be picked up: a trail alone is history, not a checkpoint. `prefix` narrows to execution ids that start with it.
+
+Neither reads values, only keys. Both are empty without storage, except that a non-durable harness lists the threads whose display output it holds in memory.
 
 ## Subprocess adapter durability contract
 
@@ -663,7 +737,7 @@ The CLI's durable execution uses three distinct on-disk roots so tools and opera
 
 Subprocess and IPC queue storage share a root because the adapter already provides a `StorageAdapter` and wiring a second one would force callers to coordinate two storage adapters per launch. Keeping the checkpoint-snapshot root distinct makes "discard all recovery data" a single directory removal.
 
-A thread's display output (`08-runtime` § Display output) is kept in the harness's `StorageAdapter` under `output:<threadId>`, one key per thread holding every snapshot. It is outside the `execution:<id>:` and `session:<threadId>` keys: `clearCheckpoint`, an abandoned turn and ledger pruning leave it alone, `restore()` never reads it, and nothing replays from it. A host that discards a thread deletes the key itself.
+A thread's display output (`08-runtime` § Display output) is kept in the harness's `StorageAdapter` under `output:<threadId>`, one key per thread holding every snapshot. It is outside the `execution:<id>:` and `session:<threadId>` keys: `clearCheckpoint`, an abandoned turn and ledger pruning leave it alone, `restore()` never reads it, and nothing replays from it. `forget({ threadId })` deletes it (§ Forgetting).
 
 Both root defaults respect `NOETIC_HOME` (if set, the roots become `$NOETIC_HOME/subprocess` and `$NOETIC_HOME/checkpoints`), so embedders that run under sandboxed or isolated home directories can relocate them with a single env var.
 
