@@ -17,7 +17,12 @@ import type {
   AcpTurnResult,
   AcpWhenHostExits,
 } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import {
+  AcpConnectError,
+  frameworkCast,
+  isNoeticConfigError,
+  isNoeticError,
+} from '@noetic-tools/types';
 import { step } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { ACP_RESUME_NOTICE } from '../../src/interpreter/acp-resume';
@@ -67,8 +72,12 @@ function result(text: string): AcpTurnResult {
 function keptAgent(opts: {
   seen: Seen;
   collected?: string;
-  /** The agent is gone: reattaching fails. */
+  /** The agent is gone: reattaching fails with `AcpConnectError`. */
   gone?: boolean;
+  /** Reattaching fails some other way: the old turn may still be there. */
+  broken?: boolean;
+  /** What its sessions are opened with, and what it would open one with now. */
+  fingerprint?: string;
 }): AcpAgent {
   return {
     specificationVersion: 'acp-v1',
@@ -76,10 +85,21 @@ function keptAgent(opts: {
     async connect(connect): Promise<AcpAgentConnection> {
       opts.seen.connects.push(connect);
       if (connect.reattach && opts.gone) {
-        throw new Error('the keeper is gone');
+        throw new AcpConnectError({
+          agentId: 'kept',
+          message: 'the keeper is gone',
+        });
+      }
+      if (connect.reattach && opts.broken) {
+        throw new Error('the keeper refused the token');
       }
       const session = (sessionId: string, reattached: boolean): AcpSession => ({
         sessionId,
+        ...(opts.fingerprint === undefined || reattached
+          ? {}
+          : {
+              fingerprint: opts.fingerprint,
+            }),
         availableCommands: [],
         async prompt(prompt) {
           opts.seen.prompts.push(promptText(prompt));
@@ -128,6 +148,7 @@ function keptAgent(opts: {
         agentCapabilities: {},
         authMethods: [],
         protocolVersion: 1,
+        fingerprintFor: (): string => opts.fingerprint ?? 'fake',
         reattach: HANDLE,
         async authenticate() {},
         async newSession() {
@@ -194,7 +215,7 @@ afterEach(async () => {
 });
 
 /** Run the step until its agent is mid-turn, as a host that then dies leaves it. */
-async function cutOff(storage: StorageAdapter, first: Seen): Promise<string> {
+async function cutOff(storage: StorageAdapter, first: Seen, fingerprint?: string): Promise<string> {
   const harness = harnessOn(storage);
   const ctx = harness.createContext();
   const done = harness
@@ -202,6 +223,7 @@ async function cutOff(storage: StorageAdapter, first: Seen): Promise<string> {
       coder(
         keptAgent({
           seen: first,
+          fingerprint,
         }),
       ),
       undefined,
@@ -367,5 +389,66 @@ describe('killAgentsOnExit', () => {
     });
     await until(() => connects.connects.length === 1);
     expect(connects.connects[0]?.whenHostExits).toBe(expected);
+  });
+});
+
+describe('an ACP step that cannot safely reattach', () => {
+  it('fails rather than start over when reattaching fails some other way', async () => {
+    const storage = createInMemoryStorage();
+    const executionId = await cutOff(storage, seen());
+
+    const after = seen();
+    const error = await resume({
+      storage,
+      executionId,
+      agent: keptAgent({
+        seen: after,
+        broken: true,
+      }),
+      events: [],
+    }).catch((e: unknown) => e);
+
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('step_failed');
+    expect(after.newSessions).toBe(0);
+    expect(after.prompts).toEqual([]);
+  });
+
+  it('fails when the session was opened with other instructions or settings', async () => {
+    const storage = createInMemoryStorage();
+    const executionId = await cutOff(storage, seen(), 'opened-with-A');
+
+    const after = seen();
+    const error = await resume({
+      storage,
+      executionId,
+      agent: keptAgent({
+        seen: after,
+        collected: 'never collected',
+        fingerprint: 'would-open-with-B',
+      }),
+      events: [],
+    }).catch((e: unknown) => e);
+
+    assert(isNoeticConfigError(error));
+    expect(error.code).toBe('ACP_SESSION_SETTING_CONFLICT');
+    expect(after.prompts).toEqual([]);
+  });
+
+  it('collects the turn when the settings match', async () => {
+    const storage = createInMemoryStorage();
+    const executionId = await cutOff(storage, seen(), 'same');
+
+    const output = await resume({
+      storage,
+      executionId,
+      agent: keptAgent({
+        seen: seen(),
+        collected: 'done while away',
+        fingerprint: 'same',
+      }),
+      events: [],
+    });
+    expect(output).toBe('done while away');
   });
 });

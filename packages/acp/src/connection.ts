@@ -28,8 +28,6 @@ import type {
   AcpResumeTurnOptions,
   AcpSession,
   AcpSessionNotification,
-  AcpSubagentEvent,
-  AcpSystemPrompt,
   AcpTransport,
   AcpTurnResult,
 } from '@noetic-tools/types';
@@ -58,23 +56,30 @@ export interface OpenAcpConnectionOptions {
   /** The transport reaches an agent an earlier host started (through its keeper). */
   reattached?: boolean;
   /**
-   * The agent's own way to take a system prompt it does not advertise
-   * `sessionCapabilities.systemPrompt` for: the `_meta` to send instead, or
-   * undefined when it has none for that mode.
+   * The agent's own way to take instructions when it does not advertise
+   * `sessionCapabilities.systemPrompt`: the `_meta` to send instead.
    */
-  systemPromptMeta?: SystemPromptMeta;
+  instructionsMeta?: InstructionsMeta;
+  /**
+   * The agent's own session options, sent as `_meta` on every session this
+   * connection opens. Its keys win over {@link instructionsMeta}'s.
+   */
+  sessionMeta?: Readonly<Record<string, unknown>>;
 }
 
-/** @public See {@link OpenAcpConnectionOptions.systemPromptMeta}. */
-export type SystemPromptMeta = (
-  prompt: Required<AcpSystemPrompt>,
-) => Record<string, unknown> | undefined;
+/** @public See {@link OpenAcpConnectionOptions.instructionsMeta}. */
+export type InstructionsMeta = (instructions: string) => Record<string, unknown>;
 
 /** The `_meta` and `systemPrompt` a session request carries. */
 interface SessionFields {
   _meta?: Record<string, unknown>;
   systemPrompt?: acp.SystemPrompt;
 }
+
+/** Updates held for a session nobody has claimed yet, at most. */
+const EARLY_UPDATE_LIMIT = 1e3;
+/** Child sessions remembered per connection, at most; the oldest go first. */
+const CHILD_LIMIT = 1e3;
 
 /** Routes a session's notifications to whichever turn is currently running. */
 type NotificationSink = (notification: AcpSessionNotification) => void;
@@ -149,6 +154,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** JSON with object keys sorted, so two spellings of one value compare equal. */
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) => {
+    if (!isRecord(inner)) {
+      return inner;
+    }
+    return Object.fromEntries(
+      Object.entries(inner).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+    );
+  });
+}
+
 /**
  * The child session an update announces: the subagents RFD's
  * `subagent_update`, or codex-acp's earlier draft `subagent_spawned`.
@@ -204,6 +221,8 @@ class AcpSessionImpl implements AcpSession {
     private readonly death: Promise<never>,
     /** What the agent said it accepts, enforced before a turn goes on the wire. */
     private readonly promptCapabilities: acp.PromptCapabilities | undefined,
+    /** What the session was opened with; undefined on a reattached session. */
+    readonly fingerprint?: string,
   ) {}
 
   get modes(): acp.SessionModeState | undefined {
@@ -352,8 +371,6 @@ class AcpSessionImpl implements AcpSession {
       return {
         ...result,
         currentModeId: result.currentModeId ?? this.modeState?.currentModeId,
-        configOptions: this.options,
-        responseMeta: response._meta ?? undefined,
       };
     } finally {
       opts.signal?.removeEventListener('abort', onAbort);
@@ -454,8 +471,17 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
   private readonly sessions = new Map<string, AcpSessionImpl>();
   /** Each subagent's child session, to the session that announced it. */
   private readonly children = new Map<string, string>();
-  /** Set by {@link openAcpConnection}; see `OpenAcpConnectionOptions.systemPromptMeta`. */
-  systemPromptMeta?: SystemPromptMeta;
+  /** Updates for a session not yet known, oldest first. */
+  private early: AcpSessionNotification[] = [];
+  /** Set by {@link openAcpConnection}. */
+  settings: {
+    instructionsMeta?: InstructionsMeta;
+    sessionMeta?: Readonly<Record<string, unknown>>;
+    /** What `initialize` advertised. */
+    capabilities?: acp.ClientCapabilities;
+    /** Where an update of one of this connection's own sessions goes. */
+    deliver?: (notification: AcpSessionNotification) => void;
+  } = {};
 
   constructor(
     private readonly agentId: string,
@@ -512,42 +538,41 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
   }
 
   /**
-   * Hand a subagent's notification to the host's subagent handler. True when
-   * it belongs to a child session, which the step's output must never see.
+   * Route one `session/update` (spec 27 § Subagents' own sessions): an update
+   * of one of this connection's sessions is delivered; a subagent's child
+   * session's is dropped, never the step's output; one for a session not known
+   * yet is held until it is.
    */
-  divertsChild(notification: AcpSessionNotification, host: AcpClientHost): boolean {
+  route(notification: AcpSessionNotification): void {
     const owner = notification.sessionId;
-    const update = notification.update;
-    const child = announcedChild(update);
-    const known = this.sessions.has(owner) || this.children.has(owner);
-    if (child !== undefined && child !== owner && known) {
-      this.children.set(child, owner);
-      host.onSubagentUpdate?.(this.subagentEvent(child, owner, update));
-      return this.children.has(owner);
+    const child = announcedChild(notification.update);
+    if (child !== undefined && child !== owner && this.owns(owner)) {
+      this.adoptChild(child, owner);
     }
-    const parent = this.children.get(owner);
-    if (parent === undefined) {
-      return false;
+    if (this.children.has(owner)) {
+      return;
     }
-    host.onSubagentUpdate?.(this.subagentEvent(owner, parent, update));
-    return true;
+    if (this.sessions.has(owner)) {
+      this.settings.deliver?.(notification);
+      return;
+    }
+    this.early.push(notification);
+    if (this.early.length > EARLY_UPDATE_LIMIT) {
+      this.early.shift();
+    }
   }
 
-  private subagentEvent(
-    sessionId: string,
-    parentSessionId: string,
-    update: AcpSessionNotification['update'],
-  ): AcpSubagentEvent {
-    return {
-      sessionId,
-      parentSessionId,
-      update,
-      cancel: async () => {
-        await this.agent.cancel({
-          sessionId,
-        });
-      },
-    };
+  private owns(sessionId: string): boolean {
+    return this.sessions.has(sessionId) || this.children.has(sessionId);
+  }
+
+  private adoptChild(child: string, parent: string): void {
+    this.children.set(child, parent);
+    const oldest = this.children.keys().next().value;
+    if (this.children.size > CHILD_LIMIT && oldest !== undefined) {
+      this.children.delete(oldest);
+    }
+    this.early = this.early.filter((held) => held.sessionId !== child);
   }
 
   /** The sink the client hands every `session/update` notification. */
@@ -564,6 +589,15 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
       }),
       this.watch.death,
     ]);
+  }
+
+  fingerprintFor(opts: AcpNewSessionOptions): string {
+    return canonicalJson({
+      cwd: opts.cwd,
+      fields: this.sessionFields(opts),
+      mcpServers: (opts.mcpServers ?? []).map((server) => server.name),
+      capabilities: this.settings.capabilities ?? {},
+    });
   }
 
   async newSession(opts: AcpNewSessionOptions): Promise<AcpSession> {
@@ -585,6 +619,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         [],
         this.watch.death,
         this.agentCapabilities.promptCapabilities,
+        this.fingerprintFor(opts),
       ),
     );
   }
@@ -609,6 +644,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         [],
         this.watch.death,
         this.agentCapabilities.promptCapabilities,
+        this.fingerprintFor(opts),
       ),
     );
     const response = await Promise.race([
@@ -619,7 +655,11 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
         ...fields,
       }),
       this.watch.death,
-    ]);
+    ]).catch((error: unknown) => {
+      // A failed load leaves nothing behind: no session, no children of it.
+      this.forget(opts.sessionId);
+      throw error;
+    });
     if (response) {
       session.applySettings(response);
     }
@@ -629,6 +669,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
   async close(): Promise<void> {
     this.sessions.clear();
     this.children.clear();
+    this.early = [];
     // Reject anything still in flight first. Once the transport is down
     // nothing can answer it, so a pending request would hang forever.
     this.watch.shutdown();
@@ -643,7 +684,22 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
 
   private track(session: AcpSessionImpl): AcpSessionImpl {
     this.sessions.set(session.sessionId, session);
+    // Updates the agent sent for it before its `session/new` answer.
+    const mine = this.early.filter((held) => held.sessionId === session.sessionId);
+    this.early = this.early.filter((held) => held.sessionId !== session.sessionId);
+    for (const held of mine) {
+      this.settings.deliver?.(held);
+    }
     return session;
+  }
+
+  private forget(sessionId: string): void {
+    this.sessions.delete(sessionId);
+    for (const [child, parent] of this.children) {
+      if (parent === sessionId) {
+        this.children.delete(child);
+      }
+    }
   }
 
   /**
@@ -666,48 +722,22 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
   }
 
   /**
-   * The step's `_meta` and system prompt for a session request. The prompt
-   * goes as the protocol's `systemPrompt` when the agent advertises the mode,
-   * else through the agent's fallback `_meta`; with neither it is refused
-   * rather than dropped. The step's `_meta` keys win over the fallback's.
+   * The `_meta` and system prompt a session request carries (spec 27
+   * § Instructions): instructions as the protocol's `systemPrompt` when the
+   * agent advertises it, else through the adapter's extension, else refused
+   * rather than dropped; the adapter's `sessionMeta` over that extension.
    */
   private sessionFields(opts: AcpNewSessionOptions): SessionFields {
-    const prompt = opts.systemPrompt;
-    let native: acp.SystemPrompt | undefined;
-    let fallback: Record<string, unknown> | undefined;
-    if (prompt) {
-      const mode = prompt.mode ?? 'append';
-      if (this.advertisesSystemPrompt(mode)) {
-        native = {
-          mode,
-          content: [
-            {
-              type: 'text',
-              text: prompt.text,
-            },
-          ],
-        };
-      } else {
-        fallback = this.systemPromptMeta?.({
-          text: prompt.text,
-          mode,
-        });
-        if (!fallback) {
-          throw new AcpCapabilityError({
-            agentId: this.agentId,
-            capability:
-              mode === 'override'
-                ? 'sessionCapabilities.systemPrompt.mode.override'
-                : 'sessionCapabilities.systemPrompt',
-          });
-        }
-      }
-    }
+    const instructions = opts.instructions;
+    const native = instructions !== undefined && this.advertisesInstructions();
+    const fallback =
+      instructions !== undefined && !native ? this.instructionsFallback(instructions) : undefined;
+    const sessionMeta = this.settings.sessionMeta;
     const meta =
-      fallback || opts.meta
+      fallback || sessionMeta
         ? {
             ...fallback,
-            ...opts.meta,
+            ...sessionMeta,
           }
         : undefined;
     return {
@@ -716,20 +746,35 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
             _meta: meta,
           }
         : {}),
-      ...(native
+      ...(native && instructions !== undefined
         ? {
-            systemPrompt: native,
+            systemPrompt: {
+              mode: 'append',
+              content: [
+                {
+                  type: 'text',
+                  text: instructions,
+                },
+              ],
+            },
           }
         : {}),
     };
   }
 
-  private advertisesSystemPrompt(mode: 'append' | 'override'): boolean {
-    const capability = this.agentCapabilities.sessionCapabilities?.systemPrompt;
-    if (!capability) {
-      return false;
+  private advertisesInstructions(): boolean {
+    return Boolean(this.agentCapabilities.sessionCapabilities?.systemPrompt);
+  }
+
+  private instructionsFallback(instructions: string): Record<string, unknown> {
+    const make = this.settings.instructionsMeta;
+    if (!make) {
+      throw new AcpCapabilityError({
+        agentId: this.agentId,
+        capability: 'sessionCapabilities.systemPrompt',
+      });
     }
-    return mode === 'append' || Boolean(capability.mode?.override);
+    return make(instructions);
   }
 
   /** Reject HTTP/SSE MCP transports the agent never advertised support for. */
@@ -793,13 +838,11 @@ export async function openAcpConnection(
   // so without this a dead agent leaves every request hanging forever.
   const watch = watchTransport(opts.agentId, opts.transport, opts.signal);
   const notify = (notification: AcpSessionNotification): void => {
-    // A subagent's own updates go to the host's subagent handler, never to
-    // the step's output or turn.
-    if (connection?.divertsChild(notification, host)) {
+    // Only this connection's own sessions produce the step's output.
+    if (!connection) {
       return;
     }
-    sink?.(notification);
-    host.onSessionUpdate(notification);
+    connection.route(notification);
   };
   const agent = new ClientSideConnection(
     () => client,
@@ -838,8 +881,16 @@ export async function openAcpConnection(
     opts.reattach,
     opts.reattached === true,
   );
-  connection.systemPromptMeta = opts.systemPromptMeta;
   sink = connection.sink;
+  connection.settings = {
+    instructionsMeta: opts.instructionsMeta,
+    sessionMeta: opts.sessionMeta,
+    capabilities: clientCapabilitiesFor(host),
+    deliver: (notification) => {
+      sink?.(notification);
+      host.onSessionUpdate(notification);
+    },
+  };
   return connection;
 }
 

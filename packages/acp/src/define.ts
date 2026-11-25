@@ -24,7 +24,7 @@ import type {
 } from '@noetic-tools/types';
 import { AcpConnectError } from '@noetic-tools/types';
 import { z } from 'zod';
-import type { SystemPromptMeta } from './connection';
+import type { InstructionsMeta } from './connection';
 import { openAcpConnection } from './connection';
 import { spawnOn } from './spawn';
 import type { AcpToolWiring, ToolBridge, ToolBridgeCredentials } from './tool-bridge';
@@ -57,11 +57,17 @@ export interface DefineAcpAgentOptions {
    */
   tools?: AcpToolWiring;
   /**
-   * How this agent takes a session system prompt when it does not advertise
+   * How this agent takes a step's `instructions` when it does not advertise
    * `sessionCapabilities.systemPrompt`: the `_meta` to send instead. Without
-   * one, such a prompt is refused with `AcpCapabilityError`.
+   * one, such instructions are refused (spec 27 § Instructions).
    */
-  systemPromptMeta?: SystemPromptMeta;
+  instructionsMeta?: InstructionsMeta;
+  /**
+   * This agent's own session options, sent as `_meta` on every session it
+   * opens (Claude Code's `{ claudeCode: { options } }`). Vendor options live
+   * here, never on a step.
+   */
+  sessionMeta?: Readonly<Record<string, unknown>>;
 }
 
 /** How one connection reaches its agent: the stream, and the bridge's way there. */
@@ -110,7 +116,8 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
           host: opts.host,
           signal,
           tools: bridge,
-          systemPromptMeta: def.systemPromptMeta,
+          instructionsMeta: def.instructionsMeta,
+          sessionMeta: def.sessionMeta,
           reattach: reattachHandle(transport.reattach, bridge),
         });
       } catch (e) {
@@ -280,7 +287,8 @@ async function reattachTo(
       host: opts.host,
       signal,
       tools: bridge,
-      systemPromptMeta: def.systemPromptMeta,
+      instructionsMeta: def.instructionsMeta,
+      sessionMeta: def.sessionMeta,
       reattach: reattachHandle(transport.reattach ?? handle, bridge),
       reattached: true,
     });

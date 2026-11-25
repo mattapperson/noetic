@@ -6,12 +6,15 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import type * as acp from '@agentclientprotocol/sdk';
 import type { AgentSideConnection } from '@agentclientprotocol/sdk';
+import { RequestError } from '@agentclientprotocol/sdk';
 import { AgentHarness, execute, step } from '@noetic-tools/core';
-import type { AcpSubagentEvent, ContextData } from '@noetic-tools/types';
-import { isNoeticConfigError } from '@noetic-tools/types';
+import type { ContextData, HeldCall, HeldCallHandler } from '@noetic-tools/types';
+import { isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { claudeCode } from '../src/agents';
+import { defineAcpAgent } from '../src/define';
 import { loopbackMachine } from '../src/transport-loopback';
 
 //#region Agent
@@ -26,6 +29,8 @@ interface AgentScript {
   capabilities?: acp.AgentCapabilities;
   /** Run during the prompt turn, before the answer. */
   turn?: (conn: AgentSideConnection, sessionId: string) => Promise<void>;
+  /** `session/new` rejects with this. */
+  rejectNewSession?: unknown;
 }
 
 function agentFor(log: AgentLog, script: AgentScript = {}) {
@@ -39,6 +44,9 @@ function agentFor(log: AgentLog, script: AgentScript = {}) {
     },
     async newSession(params) {
       log.newSession.push(params);
+      if (script.rejectNewSession !== undefined) {
+        throw script.rejectNewSession;
+      }
       return {
         sessionId: 'primary',
         configOptions: [
@@ -104,9 +112,14 @@ function emptyLog(): AgentLog {
   };
 }
 
-function agent(log: AgentLog, script?: AgentScript) {
+function agent(log: AgentLog, script?: AgentScript, sessionMeta?: Record<string, unknown>) {
   return claudeCode({
     machine: loopbackMachine(agentFor(log, script)),
+    ...(sessionMeta
+      ? {
+          sessionMeta,
+        }
+      : {}),
   });
 }
 
@@ -117,6 +130,7 @@ interface Captured {
 
 async function run(
   acpStep: ReturnType<typeof step.acpAgent<ContextData, unknown, string>>,
+  onHeld?: HeldCallHandler,
 ): Promise<{
   output: string;
   events: Captured[];
@@ -124,6 +138,11 @@ async function run(
   const harness = new AgentHarness({
     name: 'host-features',
     params: {},
+    ...(onHeld
+      ? {
+          onHeld,
+        }
+      : {}),
   });
   const ctx = harness.createContext();
   const events: Captured[] = [];
@@ -141,16 +160,13 @@ async function run(
 
 //#endregion
 
-describe('step.acpAgent host features', () => {
-  it('sends sessionMeta and the system prompt (claude fallback) on session/new', async () => {
+describe('an agent step, as a host sees it', () => {
+  it("sends instructions through claudeCode()'s extension and the adapter's sessionMeta", async () => {
     const log = emptyLog();
     await run(
       step.acpAgent<ContextData, unknown, string>({
         id: 'meta',
-        agent: agent(log),
-        prompt: 'go',
-        tools: [],
-        sessionMeta: (): Record<string, unknown> => ({
+        agent: agent(log, undefined, {
           claudeCode: {
             options: {
               settingSources: [],
@@ -158,7 +174,9 @@ describe('step.acpAgent host features', () => {
             },
           },
         }),
-        systemPrompt: 'Trusted host rules.',
+        prompt: 'go',
+        tools: [],
+        instructions: () => 'Trusted host rules.',
       }),
     );
     expect(log.newSession[0]?._meta).toEqual({
@@ -179,7 +197,7 @@ describe('step.acpAgent host features', () => {
     const log = emptyLog();
     await run(
       step.acpAgent<ContextData, unknown, string>({
-        id: 'native-prompt',
+        id: 'native',
         agent: agent(log, {
           capabilities: {
             sessionCapabilities: {
@@ -189,9 +207,7 @@ describe('step.acpAgent host features', () => {
         }),
         prompt: 'go',
         tools: [],
-        systemPrompt: {
-          text: 'Trusted host rules.',
-        },
+        instructions: 'Trusted host rules.',
       }),
     );
     expect(log.newSession[0]?.systemPrompt).toEqual({
@@ -206,14 +222,10 @@ describe('step.acpAgent host features', () => {
     expect(log.newSession[0]?._meta).toBeUndefined();
   });
 
-  it('answers elicitations through onElicitation, with the step context', async () => {
+  it("holds the agent's question for a person, like any held call", async () => {
     const log = emptyLog();
-    const asked: Array<{
-      message: string;
-      stepId: string;
-      hasCtx: boolean;
-    }> = [];
-    await run(
+    const held: HeldCall[] = [];
+    const { output, events } = await run(
       step.acpAgent<ContextData, unknown, string>({
         id: 'ask',
         agent: agent(log, {
@@ -228,8 +240,15 @@ describe('step.acpAgent host features', () => {
                   properties: {
                     choice: {
                       type: 'string',
+                      enum: [
+                        'a',
+                        'b',
+                      ],
                     },
                   },
+                  required: [
+                    'choice',
+                  ],
                 },
               }),
             );
@@ -237,31 +256,23 @@ describe('step.acpAgent host features', () => {
         }),
         prompt: 'go',
         tools: [],
-        onElicitation: async (request, ctx, info) => {
-          asked.push({
-            message: request.message,
-            stepId: info.stepId,
-            hasCtx: typeof ctx.threadId === 'string',
-          });
-          return {
-            action: 'accept',
-            content: {
-              choice: 'b',
-            },
-          };
-        },
       }),
+      (call) => {
+        held.push(call);
+        return {
+          output: {
+            choice: 'b',
+          },
+        };
+      },
     );
+    expect(output).toBe('final answer');
     expect(log.initialize[0]?.clientCapabilities?.elicitation).toEqual({
       form: {},
     });
-    expect(asked).toEqual([
-      {
-        message: 'Pick one',
-        stepId: 'ask',
-        hasCtx: true,
-      },
-    ]);
+    expect(held).toHaveLength(1);
+    expect(held[0]?.reason).toBe('question');
+    expect(held[0]?.question?.message).toBe('Pick one');
     expect(log.elicited).toEqual([
       {
         action: 'accept',
@@ -270,11 +281,13 @@ describe('step.acpAgent host features', () => {
         },
       },
     ]);
+    // The host sees a held call and its settlement: nothing agent-specific.
+    expect(events.some((e) => e.type === 'host-features:tool_call_held')).toBe(true);
+    expect(events.some((e) => e.type === 'host-features:tool_call_settled')).toBe(true);
   });
 
-  it("routes a subagent's updates to onSubagentUpdate and keeps them out of the output", async () => {
+  it("keeps a subagent's output out of the step's text and events", async () => {
     const log = emptyLog();
-    const seen: AcpSubagentEvent[] = [];
     const { output, events } = await run(
       step.acpAgent<ContextData, unknown, string>({
         id: 'sub',
@@ -302,95 +315,46 @@ describe('step.acpAgent host features', () => {
         }),
         prompt: 'go',
         tools: [],
-        onSubagentUpdate: (event) => {
-          seen.push(event);
-        },
       }),
     );
-    expect(log.initialize[0]?.clientCapabilities?.subagents).toEqual({});
     expect(output).toBe('final answer');
-    expect(
-      seen.map((e) => [
-        e.sessionId,
-        e.update.sessionUpdate,
-      ]),
-    ).toEqual([
-      [
-        'child',
-        'subagent_update',
-      ],
-      [
-        'child',
-        'agent_message_chunk',
-      ],
-    ]);
     expect(JSON.stringify(events)).not.toContain('SUBAGENT TEXT');
   });
 
-  it('puts the config options, reported usage and response _meta on response.completed', async () => {
+  it("fails with a Noetic error carrying the agent's own message", async () => {
     const log = emptyLog();
-    const { events } = await run(
+    const error = await run(
       step.acpAgent<ContextData, unknown, string>({
-        id: 'usage',
-        agent: agent(log),
+        id: 'auth',
+        agent: agent(log, {
+          rejectNewSession: RequestError.authRequired(),
+        }),
         prompt: 'go',
         tools: [],
       }),
-    );
-    const completed = events.find((e) => e.type === 'response.completed');
-    expect(completed?.data.reportedUsage).toEqual({
-      inputTokens: 7,
-      outputTokens: 2,
-      totalTokens: 9,
-    });
-    expect(completed?.data.responseMeta).toEqual({
-      quota: {
-        token_count: {
-          inputTokens: 7,
-          outputTokens: 2,
-        },
-      },
-    });
-    expect(JSON.stringify(completed?.data.configOptions)).toContain('"currentValue":"opus"');
+    ).catch((e: unknown) => e);
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('step_failed');
+    expect(String(error.message)).toContain('Authentication required');
   });
 
-  it('a step reusing a session with a different system prompt fails as a conflict', async () => {
-    const log = emptyLog();
-    const harness = new AgentHarness({
-      name: 'reuse',
-      params: {},
-    });
-    const ctx = harness.createContext();
-    const shared = agent(log);
-    const first = step.acpAgent<ContextData, unknown, string>({
-      id: 'first',
-      agent: shared,
-      prompt: 'go',
-      tools: [],
-      systemPrompt: 'A',
-      session: {
-        reuse: 'k',
-        keepAlive: 'run',
-      },
-    });
-    const second = step.acpAgent<ContextData, unknown, string>({
-      id: 'second',
-      agent: shared,
-      prompt: 'go',
-      tools: [],
-      systemPrompt: 'B',
-      session: {
-        reuse: 'k',
-        keepAlive: 'run',
-      },
-    });
-    await execute(first, undefined, ctx);
-    const error = await execute(second, undefined, ctx).catch((e: unknown) => e);
-    await harness.closeAcpSessions();
-    if (!isNoeticConfigError(error)) {
-      throw new Error(`expected a config error, got ${String(error)}`);
-    }
-    expect(error.code).toBe('ACP_SESSION_SETTING_CONFLICT');
-    expect(error.message).toContain('systemPrompt');
+  it('an agent that cannot take instructions fails with AGENT_CAPABILITY_MISSING', async () => {
+    const error = await run(
+      step.acpAgent<ContextData, unknown, string>({
+        id: 'no-instructions',
+        agent: defineAcpAgent({
+          agentId: 'plain',
+          command: {
+            command: 'plain',
+          },
+          machine: loopbackMachine(agentFor(emptyLog())),
+        }),
+        prompt: 'go',
+        tools: [],
+        instructions: 'rules',
+      }),
+    ).catch((e: unknown) => e);
+    assert(isNoeticConfigError(error));
+    expect(error.code).toBe('AGENT_CAPABILITY_MISSING');
   });
 });

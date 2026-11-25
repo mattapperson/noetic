@@ -1249,6 +1249,7 @@ export function toolCallingAgent(
         agentCapabilities: {},
         authMethods: [],
         protocolVersion: 1,
+        fingerprintFor: (): string => 'fake',
         async authenticate() {},
         async newSession() {
           return session;

@@ -93,6 +93,8 @@ interface AgentRecord {
   loads: string[];
   cwds: string[];
   modes: string[];
+  /** The instructions each new session was opened with. */
+  instructions: Array<string | undefined>;
 }
 
 /** An agent that records what each connect and turn was handed. */
@@ -133,11 +135,13 @@ function recordingAgent(): AgentRecord {
           },
           authMethods: [],
           protocolVersion: 1,
+          fingerprintFor: (): string => 'fake',
           async authenticate() {
             // No auth in the fake.
           },
           async newSession(opts) {
             record.cwds.push(opts.cwd);
+            record.instructions.push(opts.instructions);
             return session;
           },
           async loadSession(load) {
@@ -156,6 +160,7 @@ function recordingAgent(): AgentRecord {
     loads: [],
     cwds: [],
     modes: [],
+    instructions: [],
   };
   return record;
 }
@@ -841,6 +846,19 @@ describe('parseAndRunWorkflow — ACP agent grants', () => {
     expect(record.cwds).toEqual([
       CWD,
       CWD,
+    ]);
+  });
+
+  it("gives the session the node's instructions", async () => {
+    const { record } = await run(
+      docOf(
+        agentNode({
+          instructions: 'Never push to main.',
+        }),
+      ),
+    );
+    expect(record.instructions).toEqual([
+      'Never push to main.',
     ]);
   });
 

@@ -1,15 +1,15 @@
 /**
- * The host features a coding host needs without rewriting ACP lines itself
- * (spec 27 § Session settings, § Elicitation, § Subagents, § What the session
- * runs with). Every assertion travels the real JSON-RPC wire between a Noetic
+ * What a session is opened with, what the agent may ask, and whose updates
+ * count (spec 27 § Instructions, § Questions the agent asks, § Subagents' own
+ * sessions). Every assertion travels the real JSON-RPC wire between a Noetic
  * client and an `AgentSideConnection`.
  */
 
 import { describe, expect, test } from 'bun:test';
 import type * as acp from '@agentclientprotocol/sdk';
-import type { AcpSubagentEvent } from '@noetic-tools/types';
+import { RequestError } from '@agentclientprotocol/sdk';
 import { frameworkCast, isAcpCapabilityError } from '@noetic-tools/types';
-import { announcedChild } from '../src/connection';
+import { announcedChild, canonicalJson } from '../src/connection';
 import { createAcpTestRig, textChunk } from './_helpers';
 
 const PROMPT: acp.ContentBlock[] = [
@@ -19,93 +19,31 @@ const PROMPT: acp.ContentBlock[] = [
   },
 ];
 
-const APPEND_CAPABLE: acp.AgentCapabilities = {
+const CAN_TAKE_INSTRUCTIONS: acp.AgentCapabilities = {
   sessionCapabilities: {
     systemPrompt: {},
   },
 };
 
-const claudeFallback = (prompt: {
-  text: string;
-  mode: 'append' | 'override';
-}): Record<string, unknown> | undefined =>
-  prompt.mode === 'append'
-    ? {
-        systemPrompt: {
-          append: prompt.text,
-        },
-      }
-    : undefined;
-
-//#region Session settings
-
-describe('session _meta', () => {
-  test('is sent verbatim on session/new', async () => {
-    const rig = await createAcpTestRig();
-    const meta = {
-      claudeCode: {
-        options: {
-          strictMcpConfig: true,
-          tools: [],
-          extraArgs: {
-            'thinking-display': 'summarized',
-          },
-        },
-      },
-    };
-    await rig.connection.newSession({
-      cwd: '/workspace',
-      meta,
-    });
-    expect(rig.calls.newSession[0]?._meta).toEqual(meta);
-    await rig.close();
-  });
-
-  test('is sent on session/load too', async () => {
-    const rig = await createAcpTestRig({
-      script: {
-        capabilities: {
-          loadSession: true,
-        },
-      },
-    });
-    await rig.connection.loadSession({
-      sessionId: 'earlier',
-      cwd: '/workspace',
-      meta: {
-        k: 1,
-      },
-    });
-    expect(rig.calls.loadSession[0]?._meta).toEqual({
-      k: 1,
-    });
-    await rig.close();
-  });
-
-  test('is left off when none is given', async () => {
-    const rig = await createAcpTestRig();
-    await rig.connection.newSession({
-      cwd: '/workspace',
-    });
-    expect(rig.calls.newSession[0]?._meta).toBeUndefined();
-    expect(rig.calls.newSession[0]?.systemPrompt).toBeUndefined();
-    await rig.close();
-  });
+const claudeFallback = (instructions: string): Record<string, unknown> => ({
+  systemPrompt: {
+    append: instructions,
+  },
 });
 
-describe('system prompt', () => {
-  test('goes as the protocol systemPrompt when the agent advertises it', async () => {
+//#region Instructions and the adapter's session options
+
+describe('instructions', () => {
+  test('go as the protocol systemPrompt, appended, when the agent advertises it', async () => {
     const rig = await createAcpTestRig({
       script: {
-        capabilities: APPEND_CAPABLE,
+        capabilities: CAN_TAKE_INSTRUCTIONS,
       },
-      systemPromptMeta: claudeFallback,
+      instructionsMeta: claudeFallback,
     });
     await rig.connection.newSession({
       cwd: '/workspace',
-      systemPrompt: {
-        text: 'Follow the house rules.',
-      },
+      instructions: 'Follow the house rules.',
     });
     const sent = rig.calls.newSession[0];
     expect(sent?.systemPrompt).toEqual({
@@ -117,27 +55,17 @@ describe('system prompt', () => {
         },
       ],
     });
-    // The native field wins: no fallback extension alongside it.
     expect(sent?._meta).toBeUndefined();
     await rig.close();
   });
 
-  test("falls back to the agent's _meta when the capability is not advertised", async () => {
+  test("go through the adapter's extension when the agent does not advertise it", async () => {
     const rig = await createAcpTestRig({
-      systemPromptMeta: claudeFallback,
+      instructionsMeta: claudeFallback,
     });
     await rig.connection.newSession({
       cwd: '/workspace',
-      systemPrompt: {
-        text: 'Follow the house rules.',
-      },
-      meta: {
-        claudeCode: {
-          options: {
-            model: 'opus',
-          },
-        },
-      },
+      instructions: 'Follow the house rules.',
     });
     const sent = rig.calls.newSession[0];
     expect(sent?.systemPrompt).toBeUndefined();
@@ -145,110 +73,200 @@ describe('system prompt', () => {
       systemPrompt: {
         append: 'Follow the house rules.',
       },
-      claudeCode: {
-        options: {
-          model: 'opus',
-        },
-      },
     });
     await rig.close();
   });
 
-  test('a step _meta key wins over the fallback', async () => {
-    const rig = await createAcpTestRig({
-      systemPromptMeta: claudeFallback,
-    });
-    await rig.connection.newSession({
-      cwd: '/workspace',
-      systemPrompt: {
-        text: 'fallback text',
-      },
-      meta: {
-        systemPrompt: {
-          append: 'step text',
-        },
-      },
-    });
-    expect(rig.calls.newSession[0]?._meta).toEqual({
-      systemPrompt: {
-        append: 'step text',
-      },
-    });
-    await rig.close();
-  });
-
-  test('is refused, not dropped, with no capability and no fallback', async () => {
+  test('are refused, not dropped, with neither', async () => {
     const rig = await createAcpTestRig();
     const error = await rig.connection
       .newSession({
         cwd: '/workspace',
-        systemPrompt: {
-          text: 'rules',
-        },
+        instructions: 'rules',
       })
       .catch((e: unknown) => e);
-    expect(isAcpCapabilityError(error)).toBe(true);
-    assertCapability(error, 'sessionCapabilities.systemPrompt');
+    if (!isAcpCapabilityError(error)) {
+      throw new Error(`expected an AcpCapabilityError, got ${String(error)}`);
+    }
+    expect(error.capability).toBe('sessionCapabilities.systemPrompt');
     expect(rig.calls.newSession).toHaveLength(0);
     await rig.close();
   });
 
-  test('override needs the override mode capability', async () => {
-    const rig = await createAcpTestRig({
-      script: {
-        capabilities: APPEND_CAPABLE,
-      },
-      systemPromptMeta: claudeFallback,
-    });
-    const error = await rig.connection
-      .newSession({
-        cwd: '/workspace',
-        systemPrompt: {
-          text: 'rules',
-          mode: 'override',
-        },
-      })
-      .catch((e: unknown) => e);
-    assertCapability(error, 'sessionCapabilities.systemPrompt.mode.override');
-    await rig.close();
-  });
-
-  test('override goes out when the agent advertises it', async () => {
+  test('go on session/load too', async () => {
     const rig = await createAcpTestRig({
       script: {
         capabilities: {
-          sessionCapabilities: {
-            systemPrompt: {
-              mode: {
-                override: {},
-              },
-            },
+          ...CAN_TAKE_INSTRUCTIONS,
+          loadSession: true,
+        },
+      },
+    });
+    await rig.connection.loadSession({
+      sessionId: 'earlier',
+      cwd: '/workspace',
+      instructions: 'rules',
+    });
+    expect(rig.calls.loadSession[0]?.systemPrompt?.mode).toBe('append');
+    await rig.close();
+  });
+});
+
+describe("the adapter's sessionMeta", () => {
+  test('goes as _meta on every session, over the instructions extension', async () => {
+    const rig = await createAcpTestRig({
+      instructionsMeta: claudeFallback,
+      sessionMeta: {
+        claudeCode: {
+          options: {
+            strictMcpConfig: true,
           },
+        },
+        systemPrompt: {
+          append: 'the adapter wins',
         },
       },
     });
     await rig.connection.newSession({
       cwd: '/workspace',
+      instructions: 'the step',
+    });
+    await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    expect(rig.calls.newSession[0]?._meta).toEqual({
+      claudeCode: {
+        options: {
+          strictMcpConfig: true,
+        },
+      },
       systemPrompt: {
-        text: 'only these rules',
-        mode: 'override',
+        append: 'the adapter wins',
       },
     });
-    expect(rig.calls.newSession[0]?.systemPrompt?.mode).toBe('override');
+    expect(rig.calls.newSession[1]?._meta).toEqual({
+      claudeCode: {
+        options: {
+          strictMcpConfig: true,
+        },
+      },
+      systemPrompt: {
+        append: 'the adapter wins',
+      },
+    });
+    await rig.close();
+  });
+
+  test('is left off when there is none', async () => {
+    const rig = await createAcpTestRig();
+    await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    expect(rig.calls.newSession[0]?._meta).toBeUndefined();
     await rig.close();
   });
 });
 
-function assertCapability(error: unknown, capability: string): void {
-  if (!isAcpCapabilityError(error)) {
-    throw new Error(`expected an AcpCapabilityError, got ${String(error)}`);
-  }
-  expect(error.capability).toBe(capability);
-}
+describe('fingerprints', () => {
+  test("a session's fingerprint is what fingerprintFor says for the same request", async () => {
+    const rig = await createAcpTestRig({
+      instructionsMeta: claudeFallback,
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+      instructions: 'rules',
+    });
+    expect(session.fingerprint).toBe(
+      rig.connection.fingerprintFor({
+        cwd: '/workspace',
+        instructions: 'rules',
+      }),
+    );
+    expect(session.fingerprint).not.toBe(
+      rig.connection.fingerprintFor({
+        cwd: '/workspace',
+        instructions: 'other rules',
+      }),
+    );
+    expect(session.fingerprint).not.toBe(
+      rig.connection.fingerprintFor({
+        cwd: '/elsewhere',
+        instructions: 'rules',
+      }),
+    );
+    await rig.close();
+  });
+
+  test('canonicalJson ignores key order, and nothing else', () => {
+    expect(
+      canonicalJson({
+        a: 1,
+        b: {
+          c: 2,
+          d: 3,
+        },
+      }),
+    ).toBe(
+      canonicalJson({
+        b: {
+          d: 3,
+          c: 2,
+        },
+        a: 1,
+      }),
+    );
+    expect(
+      canonicalJson({
+        a: [
+          1,
+          2,
+        ],
+      }),
+    ).not.toBe(
+      canonicalJson({
+        a: [
+          2,
+          1,
+        ],
+      }),
+    );
+  });
+});
+
+describe('a failed load', () => {
+  test('leaves nothing tracked: a later update for that session is not delivered', async () => {
+    const rig = await createAcpTestRig({
+      script: {
+        capabilities: {
+          loadSession: true,
+        },
+        loadRejects: RequestError.resourceNotFound('gone'),
+        onPrompt: async (conn) => {
+          await conn.sessionUpdate(textChunk('gone', 'stale'));
+        },
+      },
+    });
+    const error = await rig.connection
+      .loadSession({
+        sessionId: 'gone',
+        cwd: '/workspace',
+      })
+      .catch((e: unknown) => e);
+    expect(Reflect.get(frameworkCast<object>(error), 'code')).toBe(-32002);
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+    expect(rig.updates.some((n) => n.sessionId === 'gone')).toBe(false);
+    await rig.close();
+  });
+});
 
 //#endregion
 
-//#region Elicitation
+//#region Questions
 
 const FORM_REQUEST = (sessionId: string): acp.CreateElicitationRequest => ({
   mode: 'form',
@@ -264,36 +282,23 @@ const FORM_REQUEST = (sessionId: string): acp.CreateElicitationRequest => ({
   },
 });
 
-describe('elicitation', () => {
-  test('advertises form elicitation when the host answers it', async () => {
-    const rig = await createAcpTestRig({
-      onElicitation: async () => ({
-        action: 'decline',
-      }),
-    });
-    expect(rig.calls.initialize[0]?.clientCapabilities?.elicitation).toEqual({
+describe('questions', () => {
+  test('form elicitation is advertised by default, and withdrawn by config', async () => {
+    const bare = await createAcpTestRig();
+    expect(bare.calls.initialize[0]?.clientCapabilities?.elicitation).toEqual({
       form: {},
     });
-    await rig.close();
-  });
-
-  test('advertises nothing without a handler, and capability config overrides', async () => {
-    const bare = await createAcpTestRig();
-    expect(bare.calls.initialize[0]?.clientCapabilities?.elicitation).toBeUndefined();
     await bare.close();
     const withdrawn = await createAcpTestRig({
       capabilities: {
         elicitation: false,
       },
-      onElicitation: async () => ({
-        action: 'decline',
-      }),
     });
     expect(withdrawn.calls.initialize[0]?.clientCapabilities?.elicitation).toBeUndefined();
     await withdrawn.close();
   });
 
-  test("the agent's request is answered by the handler", async () => {
+  test("the agent's question reaches the host's handler and its answer the agent", async () => {
     let asked: acp.CreateElicitationRequest | undefined;
     let answer: acp.CreateElicitationResponse | undefined;
     const rig = await createAcpTestRig({
@@ -364,7 +369,7 @@ describe('elicitation', () => {
 
 //#endregion
 
-//#region Subagents
+//#region Whose updates count
 
 function subagentAnnounce(parent: string, child: string): acp.SessionNotification {
   return {
@@ -373,40 +378,18 @@ function subagentAnnounce(parent: string, child: string): acp.SessionNotificatio
       sessionUpdate: 'subagent_update',
       sessionId: child,
       title: 'Explore',
-      capabilities: {
-        cancel: {},
-      },
-      state: {
-        state: 'running',
-      },
     },
   };
 }
 
-describe('subagents', () => {
-  test('advertises the capability when the host takes subagent updates', async () => {
+describe("subagents' own sessions", () => {
+  test("a child session's updates, nested ones too, never reach the step", async () => {
     const rig = await createAcpTestRig({
-      onSubagentUpdate: () => undefined,
-    });
-    expect(rig.calls.initialize[0]?.clientCapabilities?.subagents).toEqual({});
-    await rig.close();
-    const bare = await createAcpTestRig();
-    expect(bare.calls.initialize[0]?.clientCapabilities?.subagents).toBeUndefined();
-    await bare.close();
-  });
-
-  test("a child session's updates go to the handler and never to the step", async () => {
-    const events: AcpSubagentEvent[] = [];
-    const rig = await createAcpTestRig({
-      onSubagentUpdate: (event) => {
-        events.push(event);
-      },
       script: {
         onPrompt: async (conn, params) => {
           const parent = params.sessionId;
           await conn.sessionUpdate(subagentAnnounce(parent, 'child-1'));
           await conn.sessionUpdate(textChunk('child-1', 'subagent text'));
-          // A nested subagent, announced on its parent subagent's session.
           await conn.sessionUpdate(subagentAnnounce('child-1', 'child-2'));
           await conn.sessionUpdate(textChunk('child-2', 'nested text'));
           await conn.sessionUpdate(textChunk(parent, 'the answer'));
@@ -419,58 +402,20 @@ describe('subagents', () => {
     const result = await session.prompt({
       content: PROMPT,
     });
-
     expect(result.text).toBe('the answer');
-    // The step sees its own session only: the top-level announcement (raw)
-    // and its answer — no subagent text, no nested announcement.
-    expect(rig.updates.map((n) => n.sessionId)).toEqual([
-      session.sessionId,
-      session.sessionId,
-    ]);
-    expect(rig.updates.map((n) => n.update.sessionUpdate)).toEqual([
-      'subagent_update',
-      'agent_message_chunk',
-    ]);
-    expect(
-      events.map((e) => [
-        e.sessionId,
-        e.parentSessionId,
-        e.update.sessionUpdate,
-      ]),
-    ).toEqual([
-      [
-        'child-1',
-        session.sessionId,
-        'subagent_update',
-      ],
-      [
-        'child-1',
-        session.sessionId,
-        'agent_message_chunk',
-      ],
-      [
-        'child-2',
-        'child-1',
-        'subagent_update',
-      ],
-      [
-        'child-2',
-        'child-1',
-        'agent_message_chunk',
-      ],
-    ]);
+    expect(rig.updates.every((n) => n.sessionId === session.sessionId)).toBe(true);
+    expect(JSON.stringify(rig.updates)).not.toContain('subagent text');
+    expect(JSON.stringify(rig.updates)).not.toContain('nested text');
     await rig.close();
   });
 
-  test('cancel sends session/cancel for the child alone', async () => {
-    let child: AcpSubagentEvent | undefined;
+  test("a child's update sent before its announcement never reaches the step", async () => {
     const rig = await createAcpTestRig({
-      onSubagentUpdate: (event) => {
-        child ??= event;
-      },
       script: {
         onPrompt: async (conn, params) => {
-          await conn.sessionUpdate(subagentAnnounce(params.sessionId, 'child-9'));
+          await conn.sessionUpdate(textChunk('early-child', 'too early'));
+          await conn.sessionUpdate(subagentAnnounce(params.sessionId, 'early-child'));
+          await conn.sessionUpdate(textChunk(params.sessionId, 'the answer'));
         },
       },
     });
@@ -480,22 +425,61 @@ describe('subagents', () => {
     await session.prompt({
       content: PROMPT,
     });
-    await child?.cancel();
-    await waitFor(() => rig.calls.cancel.length > 0);
-    expect(rig.calls.cancel).toEqual([
-      {
-        sessionId: 'child-9',
+    expect(JSON.stringify(rig.updates)).not.toContain('too early');
+    await rig.close();
+  });
+
+  test('an update for a session nobody owns is dropped', async () => {
+    const rig = await createAcpTestRig({
+      script: {
+        onPrompt: async (conn) => {
+          await conn.sessionUpdate(textChunk('stranger', 'not ours'));
+        },
       },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    await session.prompt({
+      content: PROMPT,
+    });
+    expect(JSON.stringify(rig.updates)).not.toContain('not ours');
+    await rig.close();
+  });
+
+  test("the agent's updates for a session it is still creating are delivered once it is known", async () => {
+    const rig = await createAcpTestRig({
+      script: {
+        beforeNewSessionAnswer: async (conn, sessionId) => {
+          await conn.sessionUpdate({
+            sessionId,
+            update: {
+              sessionUpdate: 'available_commands_update',
+              availableCommands: [
+                {
+                  name: 'review',
+                  description: 'Review the diff',
+                },
+              ],
+            },
+          });
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    expect(rig.updates.map((n) => n.update.sessionUpdate)).toEqual([
+      'available_commands_update',
+    ]);
+    expect(session.availableCommands.map((command) => command.name)).toEqual([
+      'review',
     ]);
     await rig.close();
   });
 
   test("codex-acp's draft subagent_spawned announces a child too", async () => {
-    const events: AcpSubagentEvent[] = [];
     const rig = await createAcpTestRig({
-      onSubagentUpdate: (event) => {
-        events.push(event);
-      },
       script: {
         onPrompt: async (conn, params) => {
           await conn.sessionUpdate(
@@ -504,9 +488,6 @@ describe('subagents', () => {
               update: {
                 sessionUpdate: 'subagent_spawned',
                 subagentSessionId: 'codex-child',
-                name: 'worker',
-                task: 'look around',
-                capabilities: {},
               },
             }),
           );
@@ -517,38 +498,10 @@ describe('subagents', () => {
     const session = await rig.connection.newSession({
       cwd: '/workspace',
     });
-    const result = await session.prompt({
-      content: PROMPT,
-    });
-    expect(result.text).toBe('');
-    expect(events.map((e) => e.sessionId)).toEqual([
-      'codex-child',
-      'codex-child',
-    ]);
-    expect(rig.updates.every((n) => n.sessionId === session.sessionId)).toBe(true);
-    await rig.close();
-  });
-
-  test('an announcement on a session the connection does not own registers nothing', async () => {
-    const events: AcpSubagentEvent[] = [];
-    const rig = await createAcpTestRig({
-      onSubagentUpdate: (event) => {
-        events.push(event);
-      },
-      script: {
-        onPrompt: async (conn) => {
-          await conn.sessionUpdate(subagentAnnounce('stranger', 'orphan'));
-          await conn.sessionUpdate(textChunk('orphan', 'x'));
-        },
-      },
-    });
-    const session = await rig.connection.newSession({
-      cwd: '/workspace',
-    });
     await session.prompt({
       content: PROMPT,
     });
-    expect(events).toHaveLength(0);
+    expect(JSON.stringify(rig.updates)).not.toContain('worker text');
     await rig.close();
   });
 });
@@ -576,81 +529,3 @@ describe('announcedChild', () => {
 });
 
 //#endregion
-
-//#region What the session runs with
-
-describe('turn result', () => {
-  test('carries the config options, mode and response _meta', async () => {
-    const rig = await createAcpTestRig({
-      script: {
-        configOptions: [
-          {
-            id: 'model',
-            name: 'Model',
-            type: 'select',
-            category: 'model',
-            currentValue: 'sonnet',
-            options: [
-              {
-                value: 'sonnet',
-                name: 'Sonnet',
-              },
-              {
-                value: 'opus',
-                name: 'Opus',
-              },
-            ],
-          },
-        ],
-        modes: {
-          currentModeId: 'default',
-          availableModes: [
-            {
-              id: 'default',
-              name: 'Default',
-            },
-          ],
-        },
-        responseMeta: {
-          quota: {
-            token_count: {
-              inputTokens: 10,
-              outputTokens: 3,
-            },
-          },
-        },
-      },
-    });
-    const session = await rig.connection.newSession({
-      cwd: '/workspace',
-    });
-    await session.setModel('opus');
-    const result = await session.prompt({
-      content: PROMPT,
-    });
-    const model = result.configOptions?.find((option) => option.id === 'model');
-    expect(model?.type === 'select' ? model.currentValue : undefined).toBe('opus');
-    expect(result.currentModeId).toBe('default');
-    expect(result.responseMeta).toEqual({
-      quota: {
-        token_count: {
-          inputTokens: 10,
-          outputTokens: 3,
-        },
-      },
-    });
-    await rig.close();
-  });
-});
-
-//#endregion
-
-async function waitFor(check: () => boolean): Promise<void> {
-  for (let i = 0; i < 100; i += 1) {
-    if (check()) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  throw new Error('timed out waiting');
-}

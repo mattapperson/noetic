@@ -272,7 +272,7 @@ Each is checked against what the agent advertised — on `session/new`, or on `s
 
 When the agent itself rejects a request — `Authentication required` on `session/new`, an unknown mode — the step fails with `step_failed` and the agent's message, its error detail and code, never `[object Object]`. The error's `cause` still has the agent's `code` and `data`.
 
-## Session settings and the system prompt
+## Instructions
 
 ```ts
 import { step } from '@noetic-tools/core';
@@ -282,68 +282,45 @@ step.acpAgent({
   id: 'implement',
   agent: claudeCode(),
   prompt: 'Implement the plan',
-  // Sent verbatim as `_meta` on session/new: the agent's own session options.
-  sessionMeta: {
-    claudeCode: { options: { strictMcpConfig: true, settingSources: [] } },
-  },
-  // Trusted instructions, appended to the agent's own system prompt.
-  systemPrompt: 'Never push to main.',
+  instructions: 'Never push to main.', // or (ctx) => string, as on callModel
 });
 ```
 
-`sessionMeta` is passed through untouched, so a host can use any option an agent reads from `_meta` without noetic naming the agent. `systemPrompt` (a string, or `{ text, mode: 'append' | 'override' }`) goes as the protocol's `systemPrompt` when the agent advertises `sessionCapabilities.systemPrompt`. `claudeCode()` falls back to claude-agent-acp's `_meta.systemPrompt.append` for bridges that predate it; any other agent without the capability throws `AcpCapabilityError` instead of dropping the instructions (`defineAcpAgent({ systemPromptMeta })` declares a fallback for your own agent). Both are fixed when the session is created: a step that reuses a session with different ones fails with `ACP_SESSION_SETTING_CONFLICT`.
+`instructions` works as it does on `callModel`, and a JSON `acp-agent` node takes it as a string. They are added to the agent's own system prompt, so the agent keeps its identity: as the protocol's `systemPrompt` when the agent advertises `sessionCapabilities.systemPrompt`, otherwise through the adapter's own extension (`claudeCode()` uses claude-agent-acp's `_meta.systemPrompt.append`). An agent with neither fails the step with `AGENT_CAPABILITY_MISSING` rather than dropping them.
+
+Options only one vendor understands belong to the agent, not the step: `claudeCode({ sessionMeta: { claudeCode: { options: { … } } } })` sends them as `_meta` on every session it opens. `agent` can be a `(ctx) => AcpAgent` getter, so you can build one per run.
+
+A session keeps the instructions and agent settings it was opened with. A step that reuses it (`session.reuse`) with different ones fails with `ACP_SESSION_SETTING_CONFLICT`, and so does a resumed step that would reattach to a session opened differently.
 
 ## Questions the agent asks
 
-Some agents ask the user for structured input mid-turn (`elicitation/create`) — claude-agent-acp presents Claude Code's `AskUserQuestion` this way. Answer with `onElicitation`; giving it advertises form elicitation:
+Some agents ask the user for input mid-turn (claude-agent-acp presents Claude Code's `AskUserQuestion` this way). Noetic holds each question for a person exactly like any other held call, so your host answers it the way it answers approvals — nothing about it is agent-specific:
 
 ```ts
-import { step } from '@noetic-tools/core';
-import { claudeCode } from '@noetic-tools/acp';
+import { AgentHarness } from '@noetic-tools/core';
 
-declare const askSomeone: (message: string) => Promise<Record<string, string> | undefined>;
+declare const askInYourUi: (message: string, schema: unknown) => Promise<Record<string, string> | undefined>;
 
-step.acpAgent({
-  id: 'interactive',
-  agent: claudeCode(),
-  prompt: 'Set up the project',
-  onElicitation: async (request) => {
-    const answer = await askSomeone(request.message); // your UI or channel
-    return answer ? { action: 'accept', content: answer } : { action: 'decline' };
+const harness = new AgentHarness({
+  name: 'app',
+  params: {},
+  onHeld: async (call) => {
+    if (call.reason !== 'question' || !call.question) {
+      return undefined;
+    }
+    const answer = await askInYourUi(call.question.message, call.question.schema);
+    return answer ? { output: answer } : { action: 'deny' }; // deny = the person declined
   },
 });
 ```
 
-A handler that throws, or a turn with none, answers `cancel`. `clientCapabilities.elicitation` overrides the advertisement.
+The question also shows up in `harness.pending()` and as a `tool_call_held` event, and an answer can come later as a decision passed to `execute()`. An answer that does not fit the question's form is refused and the question stays open. The turn stays live while the agent waits. Set `clientCapabilities: { elicitation: false }` on a step whose agent must not ask.
 
 ## Subagents
 
-An agent that runs subagents can report each as its own child session. Give `onSubagentUpdate` and the client advertises `subagents`; every update on a child session then goes to the handler and never into the step's text, items or events, so a subagent's answer cannot leak into yours:
+An agent's subagents can run in their own child sessions. Only the step's own session produces its output: a subagent's text, tool calls and updates never reach the step's text, items, events or result.
 
-```ts
-import { step } from '@noetic-tools/core';
-import { claudeCode } from '@noetic-tools/acp';
-import type { AcpSubagentEvent } from '@noetic-tools/types';
-
-declare const tracker: { record(event: AcpSubagentEvent): void };
-
-step.acpAgent({
-  id: 'research',
-  agent: claudeCode(),
-  prompt: 'Survey the codebase',
-  onSubagentUpdate: (event) => {
-    // event.sessionId (child), event.parentSessionId, event.update; event.cancel() stops that subagent alone
-    tracker.record(event);
-  },
-});
-```
-
-Nested subagents are followed too, and codex-acp's earlier `subagent_spawned` announcement is read the same way.
-
-## What the turn ran with
-
-The turn's `response.completed` event carries `reportedUsage` (the prompt answer's `usage`), `configOptions` as they stood at the end of the turn (read the `model` option's `currentValue` for the model it ran with), `currentModeId`, and `responseMeta` — the answer's `_meta`, verbatim, where agents report what the protocol has no field for (codex-acp's `quota.token_count`).
-
+## Giving the agent your tools
 ## Giving the agent your tools
 
 Pass the same `tool()` definitions a `callModel` step takes. The agent calls them over MCP, and each call runs the same path a model's tool call does: the `beforeToolCall` layers, input validation, `needsApproval` and the harness approver, execution, the result item, its `tool_call_started` / `tool_call_completed` events, and its `tool.call` span. The agent gets the exact string a model would.

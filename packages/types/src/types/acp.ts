@@ -264,59 +264,17 @@ export type AcpPermissionSteerer = (
 
 //#endregion
 
-//#region Elicitation and subagents
+//#region Questions
 
 /**
- * Answers an agent's `elicitation/create` request — structured input it asks
- * the user for mid-turn (claude-agent-acp presents Claude Code's
- * `AskUserQuestion` this way). Resolves to the protocol's response:
- * `{ action: 'accept', content }`, `{ action: 'decline' }` or
- * `{ action: 'cancel' }`. A throw answers `cancel`.
+ * Answers an agent's `elicitation/create` request. The runtime binds it to the
+ * harness's held-question seam (spec 27 § Questions the agent asks); the
+ * protocol client only asks and relays the answer. A throw answers `cancel`.
  * @public
  */
-export type AcpElicitationHandler = (
-  request: acp.CreateElicitationRequest,
-  ctx: Context,
-  info: AcpPermissionRequestInfo,
-) => Promise<acp.CreateElicitationResponse>;
-
-/** @public {@link AcpElicitationHandler} as the protocol client sees it, bound to its context. */
 export type AcpBoundElicitationHandler = (
   request: acp.CreateElicitationRequest,
 ) => Promise<acp.CreateElicitationResponse>;
-
-/**
- * One `session/update` that belongs to a subagent's child session, or that
- * announced one (spec 27 § Subagents).
- * @public
- */
-export interface AcpSubagentEvent {
-  /** The child session. */
-  readonly sessionId: string;
-  /** The session that announced the child: the step's session, or a parent subagent's. */
-  readonly parentSessionId: string;
-  /**
-   * The update, verbatim. A draft variant the protocol library does not know
-   * (codex-acp's `subagent_spawned`) arrives here as sent.
-   */
-  readonly update: acp.SessionNotification['update'];
-  /** Send `session/cancel` for the child alone; the parent's turn goes on. */
-  cancel(): Promise<void>;
-}
-
-/**
- * Receives every {@link AcpSubagentEvent} of the step's turn. Child-session
- * updates never reach the step's own output.
- * @public
- */
-export type AcpSubagentHandler = (
-  event: AcpSubagentEvent,
-  ctx: Context,
-  info: AcpPermissionRequestInfo,
-) => void;
-
-/** @public {@link AcpSubagentHandler} as the protocol client sees it, bound to its context. */
-export type AcpBoundSubagentHandler = (event: AcpSubagentEvent) => void;
 
 //#endregion
 
@@ -352,16 +310,11 @@ export interface AcpClientCapabilityConfig {
    */
   allowAnyPath?: boolean;
   /**
-   * Advertise form elicitation (`elicitation: { form: {} }`). Defaults to
-   * whether the host has an elicitation handler.
+   * Advertise form elicitation (`elicitation: { form: {} }`), so the agent may
+   * ask a person questions; each is held for a person (spec 27 § Questions the
+   * agent asks). Default `true`; `false` withdraws it.
    */
   elicitation?: boolean;
-  /**
-   * Advertise the subagents capability (`subagents: {}`), so an agent exposes
-   * each subagent as a child session. Defaults to whether the host has a
-   * subagent handler.
-   */
-  subagents?: boolean;
 }
 
 /**
@@ -446,12 +399,6 @@ export interface AcpClientHost {
   onPermissionRequest?: AcpBoundPermissionHandler;
   /** Answers `elicitation/create`. Per-turn; none answers `cancel`. */
   onElicitation?: AcpBoundElicitationHandler;
-  /**
-   * Receives a subagent's child-session updates and the announcements of
-   * children. Per-turn. Child-session updates never reach
-   * {@link onSessionUpdate}.
-   */
-  onSubagentUpdate?: AcpBoundSubagentHandler;
   /**
    * Receive every `session/update` notification for the active session. Also
    * per-turn — it routes to the running step's event bridge, so a reused
@@ -644,31 +591,11 @@ export interface AcpTurnResult {
   availableCommands?: ReadonlyArray<acp.AvailableCommand>;
   /** Mode the session ended the turn in, when the agent reports modes. */
   currentModeId?: string;
-  /**
-   * The session's config options (model, effort, …) as they stand at the end
-   * of the turn — after the step's `model` was applied.
-   */
-  configOptions?: ReadonlyArray<acp.SessionConfigOption>;
-  /**
-   * The `_meta` of the agent's `session/prompt` answer, verbatim, for what
-   * the protocol has no field for (codex-acp's `quota.token_count`).
-   */
-  responseMeta?: Readonly<Record<string, unknown>>;
 }
 
 //#endregion
 
 //#region Session + connection
-
-/**
- * Trusted instructions for a session. `append` (the default) adds them to the
- * agent's own system prompt; `override` replaces it.
- * @public
- */
-export interface AcpSystemPrompt {
-  text: string;
-  mode?: 'append' | 'override';
-}
 
 /** @public Options for creating a session. */
 export interface AcpNewSessionOptions {
@@ -677,17 +604,12 @@ export interface AcpNewSessionOptions {
   /** MCP servers the agent should connect to, gated by its `mcpCapabilities`. */
   mcpServers?: ReadonlyArray<acp.McpServer>;
   /**
-   * Sent verbatim as the request's `_meta`: agent-specific session options
-   * (Claude Code's `{ claudeCode: { options } }`).
+   * Trusted instructions added to the agent's own system prompt: the protocol
+   * `systemPrompt` (append) when the agent advertises
+   * `sessionCapabilities.systemPrompt`, else the adapter's extension; with
+   * neither, the request is refused with {@link AcpCapabilityError}.
    */
-  meta?: Readonly<Record<string, unknown>>;
-  /**
-   * Sent as the protocol's `systemPrompt` when the agent advertises
-   * `sessionCapabilities.systemPrompt`, else through the agent's fallback
-   * `_meta`; with neither, the request is refused with
-   * {@link AcpCapabilityError}.
-   */
-  systemPrompt?: AcpSystemPrompt;
+  instructions?: string;
 }
 
 /** @public Options for resuming a previously created session via `session/load`. */
@@ -702,6 +624,12 @@ export interface AcpLoadSessionOptions extends AcpNewSessionOptions {
  */
 export interface AcpSession {
   readonly sessionId: string;
+  /**
+   * What the session was opened with — instructions and `_meta` as sent, cwd,
+   * MCP servers, client capabilities — as canonical JSON. Absent on a
+   * reattached session, which no request opened here.
+   */
+  readonly fingerprint?: string;
   /** Mode state when the agent supports session modes. */
   readonly modes?: acp.SessionModeState;
   /**
@@ -753,6 +681,12 @@ export interface AcpAgentConnection {
   /** Create a session (`session/new`). */
   newSession(opts: AcpNewSessionOptions): Promise<AcpSession>;
   /**
+   * The {@link AcpSession.fingerprint} a session opened with `opts` on this
+   * connection would have: compare it with a stored one before adopting a
+   * session.
+   */
+  fingerprintFor(opts: AcpNewSessionOptions): string;
+  /**
    * Resume a session (`session/load`). Throws {@link AcpCapabilityError} when
    * the agent did not advertise `loadSession`.
    */
@@ -803,10 +737,6 @@ export interface AcpLiveSession {
   mcpServers?: ReadonlyArray<acp.McpServer>;
   /** Noetic tools served to the agent at creation — also fixed for its lifetime. */
   tools?: ReadonlyArray<AcpTool>;
-  /** `_meta` the session was created with — also fixed for its lifetime. */
-  meta?: Readonly<Record<string, unknown>>;
-  /** System prompt the session was created with — also fixed for its lifetime. */
-  systemPrompt?: AcpSystemPrompt;
 }
 
 /** @public Options handed to {@link AcpAgent.connect}. */

@@ -3,12 +3,9 @@ import type {
   AcpAgent,
   AcpClientCapabilityConfig,
   AcpContentBlock,
-  AcpElicitationHandler,
   AcpPermissionHandler,
   AcpPermissionPolicy,
   AcpSessionPolicy,
-  AcpSubagentHandler,
-  AcpSystemPrompt,
   AnyProfile,
   ConnectionEvent,
   ConnectionHandle,
@@ -140,14 +137,8 @@ export interface StepAcpAgentOpts<TContext, O, I = unknown>
   permissions?: AcpPermissionPolicy;
   /** Async resolver consulted when the policy and steering both abstain. */
   onPermissionRequest?: AcpPermissionHandler;
-  /** Sent verbatim as `_meta` on the session this step opens: agent-specific session options. */
-  sessionMeta?: Lazy<Readonly<Record<string, unknown>> | undefined, TContext>;
-  /** Trusted instructions for the session this step opens; appended unless `mode: 'override'`. */
-  systemPrompt?: Lazy<string | AcpSystemPrompt | undefined, TContext>;
-  /** Answers the agent's `elicitation/create` requests; giving it advertises form elicitation. */
-  onElicitation?: AcpElicitationHandler;
-  /** Receives subagent child-session updates, kept out of the step's output; giving it advertises `subagents`. */
-  onSubagentUpdate?: AcpSubagentHandler;
+  /** Trusted instructions added to the agent's own system prompt, as `callModel`'s `instructions`. */
+  instructions?: Lazy<string | undefined, TContext>;
   /** Which client capabilities to advertise to the agent. */
   clientCapabilities?: AcpClientCapabilityConfig;
   /** Optional Standard Schema; when set the assistant text is JSON-parsed and validated. */

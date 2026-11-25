@@ -2879,6 +2879,10 @@
               "type": "string",
               "minLength": 1
             },
+            "instructions": {
+              "type": "string",
+              "minLength": 1
+            },
             "cwd": {
               "type": "string",
               "minLength": 1

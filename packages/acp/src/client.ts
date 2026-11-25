@@ -28,26 +28,21 @@ import { allowOnceOption } from './tool-permissions';
 /** Build the `ClientCapabilities` sent during `initialize`. */
 export function clientCapabilitiesFor(host: AcpClientHost): acp.ClientCapabilities {
   const config = host.capabilities;
-  const elicitation = config?.elicitation ?? host.onElicitation !== undefined;
-  const subagents = config?.subagents ?? host.onSubagentUpdate !== undefined;
   return {
     fs: {
       readTextFile: config?.readTextFile !== false,
       writeTextFile: config?.writeTextFile !== false,
     },
     terminal: config?.terminal !== false,
-    ...(elicitation
-      ? {
+    // An agent's questions are held for a person (spec 27 § Questions the agent
+    // asks); URL questions are not advertised, since nothing here opens a page.
+    ...(config?.elicitation === false
+      ? {}
+      : {
           elicitation: {
             form: {},
           },
-        }
-      : {}),
-    ...(subagents
-      ? {
-          subagents: {},
-        }
-      : {}),
+        }),
   };
 }
 

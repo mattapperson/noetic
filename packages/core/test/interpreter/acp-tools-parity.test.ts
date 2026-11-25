@@ -99,6 +99,7 @@ function scriptedAgent(
         agentCapabilities: {},
         authMethods: [],
         protocolVersion: 1,
+        fingerprintFor: (): string => 'fake',
         async authenticate() {},
         async newSession() {
           return session;

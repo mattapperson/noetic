@@ -17,12 +17,12 @@ import type {
   AcpContentBlock,
   AcpKeepAlive,
   AcpLiveSession,
+  AcpNewSessionOptions,
   AcpPermissionOutcome,
   AcpPermissionSteerer,
   AcpReattachHandle,
   AcpSession,
   AcpSessionPolicy,
-  AcpSystemPrompt,
   AcpTurnResult,
   AcpWhenHostExits,
   Context,
@@ -38,6 +38,8 @@ import {
   createMessage,
   extractAssistantText,
   frameworkCast,
+  isAcpCapabilityError,
+  isAcpConnectError,
   NoeticConfigError,
   NoeticErrorImpl,
   SteeringAction,
@@ -49,6 +51,7 @@ import { isRpcError, RpcFailure } from '../util/error-message';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
 import { renderLayerContext } from './acp-layers';
+import { questionAsker } from './acp-questions';
 import { ACP_RESUME_NOTICE, acpSessionRecords } from './acp-resume';
 import { AcpToolRunner, mergeBridgedItems, resolveAcpTools } from './acp-tools';
 import { appendUserInput, MAX_STEERING_RETRIES, resolveLazy } from './execute-action';
@@ -293,22 +296,13 @@ function bindHostToStep<TContext, I, O>(
           stepId: opts.step.id,
         })
     : undefined;
-  const elicit = opts.step.onElicitation;
-  host.onElicitation = elicit
-    ? (request) =>
-        elicit(request, opts.ctx, {
-          agentId: opts.agentId,
-          stepId: opts.step.id,
-        })
-    : undefined;
-  const subagents = opts.step.onSubagentUpdate;
-  host.onSubagentUpdate = subagents
-    ? (event) =>
-        subagents(event, opts.ctx, {
-          agentId: opts.agentId,
-          stepId: opts.step.id,
-        })
-    : undefined;
+  // An agent's question is a question for a person: held like any other (spec 27
+  // § Questions the agent asks), answered by whoever answers held calls.
+  host.onElicitation = questionAsker({
+    ctx: opts.ctx,
+    agentId: opts.agentId,
+    stepId: opts.step.id,
+  });
   host.onSessionUpdate = opts.onUpdate;
   host.onClientActivity = opts.onActivity;
   // A step that gives no tools gets none, even on a session another step
@@ -343,7 +337,7 @@ function buildHost<TContext, I, O>(
     threadId: opts.ctx.threadId,
     signal: abortSignalOf(opts.ctx),
     // Connection-level: ACP negotiates the capability set once, in `initialize`.
-    capabilities: effectiveCapabilities(opts.step),
+    capabilities: opts.step.clientCapabilities,
     onSessionUpdate: opts.onUpdate,
     onClientActivity: opts.onActivity,
   };
@@ -366,36 +360,8 @@ function normalizedCapabilities(config: AcpClientCapabilityConfig | undefined): 
     additionalDirectories: [
       ...(config?.additionalDirectories ?? []),
     ].sort(),
-    elicitation: config?.elicitation === true,
-    subagents: config?.subagents === true,
+    elicitation: config?.elicitation !== false,
   });
-}
-
-/**
- * The step's capability config with the hook-derived defaults made explicit:
- * a step that answers elicitations or takes subagent updates advertises them
- * unless it says otherwise.
- */
-function effectiveCapabilities<TContext, I, O>(
-  step: StepAcpAgent<TContext, I, O>,
-): AcpClientCapabilityConfig | undefined {
-  const config = step.clientCapabilities;
-  if (!config && !step.onElicitation && !step.onSubagentUpdate) {
-    return undefined;
-  }
-  return {
-    ...config,
-    ...(step.onElicitation && config?.elicitation === undefined
-      ? {
-          elicitation: true,
-        }
-      : {}),
-    ...(step.onSubagentUpdate && config?.subagents === undefined
-      ? {
-          subagents: true,
-        }
-      : {}),
-  };
 }
 
 /**
@@ -423,19 +389,16 @@ function assertSessionScopedSettingsMatch<TContext, I, O>(
       'A session is created in one working directory. Give every step sharing a `session.reuse` key the same `cwd`, or use a separate session.',
     );
   }
-  if (settings.meta !== undefined && JSON.stringify(settings.meta) !== JSON.stringify(live.meta)) {
-    throw conflict(
-      'sessionMeta',
-      'A session takes its `_meta` when it is created. Give every step sharing a `session.reuse` key the same `sessionMeta`, or leave it off the later steps.',
-    );
-  }
+  // Instructions, the adapter's `_meta`, cwd and capabilities as the connection
+  // would send them, against what it sent when the session opened.
+  const opened = live.session.fingerprint;
   if (
-    settings.systemPrompt !== undefined &&
-    JSON.stringify(settings.systemPrompt) !== JSON.stringify(live.systemPrompt)
+    opened !== undefined &&
+    opened !== live.connection.fingerprintFor(sessionRequest(cwd, settings))
   ) {
     throw conflict(
-      'systemPrompt',
-      'A session takes its system prompt when it is created. Give every step sharing a `session.reuse` key the same `systemPrompt`, or leave it off the later steps.',
+      'instructions or agent settings',
+      'A session takes its instructions and its agent settings when it is created. Give every step sharing a `session.reuse` key the same `instructions` and agent, or use a separate session.',
     );
   }
   // The agent reads its tool list once, so a step may serve any part of it —
@@ -473,7 +436,7 @@ function assertCapabilitiesCompatible<TContext, I, O>(
   step: StepAcpAgent<TContext, I, O>,
   live: AcpLiveSession,
 ): void {
-  const requested = effectiveCapabilities(step);
+  const requested = step.clientCapabilities;
   if (requested === undefined) {
     return;
   }
@@ -487,47 +450,52 @@ function assertCapabilitiesCompatible<TContext, I, O>(
   });
 }
 
-/** The `_meta` and system prompt the step opens its session with. */
+/** What the step opens its session with, beside its cwd. */
 interface SessionSettings {
-  meta?: Readonly<Record<string, unknown>>;
-  systemPrompt?: AcpSystemPrompt;
-}
-
-/** A string prompt appends; an empty one is no prompt. */
-function systemPromptOf(prompt: string | AcpSystemPrompt | undefined): AcpSystemPrompt | undefined {
-  const normalized =
-    typeof prompt === 'string'
-      ? {
-          text: prompt,
-        }
-      : prompt;
-  if (!normalized || normalized.text.trim().length === 0) {
-    return undefined;
-  }
-  return {
-    text: normalized.text,
-    mode: normalized.mode ?? 'append',
-  };
+  instructions?: string;
 }
 
 async function resolveSessionSettings<TContext, I, O>(
   step: StepAcpAgent<TContext, I, O>,
   ctx: Context<TContext>,
 ): Promise<SessionSettings> {
-  const meta = await resolveLazy(step.sessionMeta, ctx);
-  const systemPrompt = systemPromptOf(await resolveLazy(step.systemPrompt, ctx));
+  const instructions = await resolveLazy(step.instructions, ctx);
+  if (instructions === undefined || instructions.trim().length === 0) {
+    return {};
+  }
   return {
-    ...(meta
-      ? {
-          meta,
-        }
-      : {}),
-    ...(systemPrompt
-      ? {
-          systemPrompt,
-        }
-      : {}),
+    instructions,
   };
+}
+
+/** The session request for `cwd` and `settings`, as `fingerprintFor` takes it. */
+function sessionRequest(cwd: string, settings: SessionSettings): AcpNewSessionOptions {
+  return {
+    cwd,
+    ...settings,
+  };
+}
+
+/** JSON-RPC "resource not found", which an agent answers a load of a session it no longer has with. */
+const RESOURCE_NOT_FOUND = -32002;
+
+/**
+ * Whether a failed `session/load` says the agent no longer has the session —
+ * the one failure a resumed step starts over from. Anything else may mean the
+ * old turn is still there, so the step fails rather than repeat its work.
+ */
+function sessionIsGone(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  if (Reflect.get(error, 'code') === RESOURCE_NOT_FOUND) {
+    return true;
+  }
+  const message = Reflect.get(error, 'message');
+  return (
+    typeof message === 'string' &&
+    /session.*not found|unknown session|no such session/i.test(message)
+  );
 }
 
 /** Keeping a connection is always explicit; the default closes it with the step. */
@@ -606,7 +574,12 @@ async function sessionOn(
         cwd,
         ...settings,
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        if (sessionIsGone(error)) {
+          return undefined;
+        }
+        throw error;
+      });
     if (session) {
       return {
         session,
@@ -636,6 +609,8 @@ async function openSession<TContext, I, O>(opts: {
   resumeId?: string;
   /** How to reach the agent that earlier attempt left running, when it can outlive its host. */
   reattach?: AcpReattachHandle;
+  /** The fingerprint that earlier attempt's session was opened with. */
+  fingerprint?: string;
   settings: SessionSettings;
 }): Promise<SessionResolution> {
   let resumed = false;
@@ -661,6 +636,9 @@ async function openSession<TContext, I, O>(opts: {
     const kept = await reattachTo(opts.agent, connectOptions, {
       reattach: opts.reattach,
       sessionId: opts.resumeId,
+      fingerprint: opts.fingerprint,
+      request: sessionRequest(opts.cwd, opts.settings),
+      stepId: opts.step.id,
     });
     if (kept) {
       resumed = true;
@@ -673,7 +651,6 @@ async function openSession<TContext, I, O>(opts: {
         keepAlive,
         cwd: opts.cwd,
         tools: opts.tools?.tools,
-        ...opts.settings,
       };
     }
     const connection = holdingConnections(
@@ -703,7 +680,6 @@ async function openSession<TContext, I, O>(opts: {
         keepAlive,
         cwd: opts.cwd,
         tools: opts.tools?.tools,
-        ...opts.settings,
       };
     } catch (e) {
       await connection.close().catch(() => undefined);
@@ -748,12 +724,14 @@ function whenHostExitsOf(ctx: Context<ContextData>): AcpWhenHostExits {
 async function reattachTo(
   agent: AcpAgent,
   connectOptions: AcpConnectOptions,
-  {
-    reattach,
-    sessionId,
-  }: {
+  opts: {
     reattach: AcpReattachHandle | undefined;
     sessionId: string | undefined;
+    /** What the session was opened with, as stored; absent on an older record. */
+    fingerprint: string | undefined;
+    /** What this step would open it with. */
+    request: AcpNewSessionOptions;
+    stepId: string;
   },
 ): Promise<
   | {
@@ -762,27 +740,68 @@ async function reattachTo(
     }
   | undefined
 > {
-  if (!reattach || sessionId === undefined) {
+  if (!opts.reattach || opts.sessionId === undefined) {
     return undefined;
   }
+  // Only "the agent is gone" starts the step over; any other failure fails it.
   const connection = await agent
     .connect({
       ...connectOptions,
-      reattach,
+      reattach: opts.reattach,
     })
-    .catch(() => undefined);
+    .catch(goneOrThrow);
   if (!connection) {
     return undefined;
   }
-  const session = await connection.attachSession?.(sessionId).catch(() => undefined);
-  if (!session?.resumeTurn) {
+  try {
+    const session = await connection.attachSession?.(opts.sessionId).catch(goneOrThrow);
+    if (!session?.resumeTurn) {
+      await connection.close().catch(() => undefined);
+      return undefined;
+    }
+    assertSameSettings(opts, connection);
+    return {
+      connection,
+      session,
+    };
+  } catch (error) {
     await connection.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Undefined for "the agent or its session is gone", the error itself otherwise. */
+function goneOrThrow(error: unknown): undefined {
+  if (isAcpConnectError(error)) {
     return undefined;
   }
-  return {
-    connection,
-    session,
-  };
+  throw error;
+}
+
+/**
+ * A reattached session runs with what it was opened with. A step that would
+ * open it differently must not adopt it: the old turn may already have acted on
+ * the old instructions.
+ */
+function assertSameSettings(
+  opts: {
+    fingerprint: string | undefined;
+    request: AcpNewSessionOptions;
+    stepId: string;
+  },
+  connection: AcpAgentConnection,
+): void {
+  if (
+    opts.fingerprint === undefined ||
+    opts.fingerprint === connection.fingerprintFor(opts.request)
+  ) {
+    return;
+  }
+  throw new NoeticConfigError({
+    code: 'ACP_SESSION_SETTING_CONFLICT',
+    message: `step.acpAgent(${JSON.stringify(opts.stepId)}) resumes a session that was opened with different instructions or agent settings than the step now gives.`,
+    hint: 'A resumed step must resolve the same instructions, cwd and agent settings as the run that started it.',
+  });
 }
 
 /**
@@ -873,16 +892,28 @@ async function applySessionSelection<TContext, I, O>(
   }
 }
 
-/** Turn a failed turn into the step's typed error, after closing the bracket. */
-function turnFailure(
+/**
+ * Whatever went wrong, as a Noetic error (spec 27 § Failures are Noetic errors):
+ * a host never sees a protocol error. A missing capability is the workflow's
+ * configuration; everything else the agent did, or failed to do, is the step
+ * failing, with the agent's own message.
+ */
+function stepFailure(
   step: {
     id: string;
   },
   cause: unknown,
   baseCtx: Context<ContextData>,
-): NoeticErrorImpl {
-  if (cause instanceof NoeticErrorImpl) {
+): NoeticErrorImpl | NoeticConfigError {
+  if (cause instanceof NoeticErrorImpl || cause instanceof NoeticConfigError) {
     return cause;
+  }
+  if (isAcpCapabilityError(cause)) {
+    return new NoeticConfigError({
+      code: 'AGENT_CAPABILITY_MISSING',
+      message: `step.acpAgent(${JSON.stringify(step.id)}): ${cause.message}`,
+      hint: `The agent does not support '${cause.capability}'. Leave that setting off this step, or use an agent that supports it.`,
+    });
   }
   if (baseCtx.aborted) {
     return new NoeticErrorImpl({
@@ -899,25 +930,6 @@ function turnFailure(
     cause: cause instanceof Error && !isRpcError(cause) ? cause : new RpcFailure(cause),
     retriesExhausted: false,
   });
-}
-
-/**
- * A failure while opening the session or applying its mode/model. Typed
- * errors (capability, connect, config) pass through; a JSON-RPC rejection from
- * the agent — or anything thrown that is not an Error — becomes the step's
- * `step_failed` error with a readable message.
- */
-function setupFailure(
-  step: {
-    id: string;
-  },
-  cause: unknown,
-  baseCtx: Context<ContextData>,
-): unknown {
-  if (cause instanceof Error && !isRpcError(cause)) {
-    return cause;
-  }
-  return turnFailure(step, cause, baseCtx);
 }
 
 //#region Turn
@@ -1000,15 +1012,18 @@ async function runTurn<TContext, I, O>(params: {
     // Close the turn on the event surface before rethrowing. A consumer driving
     // a UI off `getFullStream()` saw `response.created` and would otherwise
     // wait forever for a completion that never comes — the stream just stops.
-    bridge.abort(e);
+    // The stream carries the same Noetic error `execute()` throws.
+    const failure = stepFailure(step, turnError.error ?? e, baseCtx);
+    bridge.abort(failure);
     await discardIfFresh(resolution, baseCtx);
-    throw turnFailure(step, turnError.error ?? e, baseCtx);
+    throw failure;
   }
   await settle(tools);
   if (turnError.error !== undefined) {
-    bridge.abort(turnError.error);
+    const failure = stepFailure(step, turnError.error, baseCtx);
+    bridge.abort(failure);
     await discardIfFresh(resolution, baseCtx);
-    throw turnFailure(step, turnError.error, baseCtx);
+    throw failure;
   }
   if (tools) {
     const merged = mergeBridgedItems(result.items, tools.takeFinished());
@@ -1100,6 +1115,7 @@ export async function executeAcpAgent<TContext, I, O>(
   const sameAgent = recorded?.agentId === agent.agentId;
   const resumeId = sameAgent ? recorded?.sessionId : undefined;
   const reattach = sameAgent ? recorded?.reattach : undefined;
+  const fingerprint = sameAgent ? recorded?.fingerprint : undefined;
   // `session/load` replays the session's conversation as updates. They are the
   // agent's history, not this turn's work: they reach raw-event consumers
   // marked `replay: true`, and never the text, reasoning or item streams.
@@ -1154,10 +1170,11 @@ export async function executeAcpAgent<TContext, I, O>(
     tools,
     resumeId,
     reattach,
+    fingerprint,
     settings,
   })
     .catch((cause: unknown) => {
-      throw setupFailure(step, cause, baseCtx);
+      throw stepFailure(step, cause, baseCtx);
     })
     .finally(() => {
       reloading = false;
@@ -1171,11 +1188,12 @@ export async function executeAcpAgent<TContext, I, O>(
       agentId: agent.agentId,
       // How a resumed run reaches this agent if it outlives this host.
       reattach: resolution.live.connection.reattach,
+      fingerprint: resolution.live.session.fingerprint,
     });
   }
 
   await applySessionSelection(step, ctx, resolution, baseCtx).catch((cause: unknown) => {
-    throw setupFailure(step, cause, baseCtx);
+    throw stepFailure(step, cause, baseCtx);
   });
   turnError.cancel = () => resolution.live.session.cancel();
 

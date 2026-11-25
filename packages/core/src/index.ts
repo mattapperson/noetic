@@ -609,6 +609,7 @@ export type {
   HeldCallEvent,
   HeldCallHandler,
   HeldCallSettled,
+  HeldQuestion,
   HeldResolution,
   HeldSteerPolicy,
   ItemSchemaConfig,

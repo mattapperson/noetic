@@ -28,6 +28,11 @@ const AcpSessionRecordSchema = z.object({
   agentId: z.string(),
   /** How to reach the agent if it outlived the host that opened the session. */
   reattach: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * What the session was opened with (`AcpSession.fingerprint`). Absent on a
+   * record written before fingerprints were kept: such a session is accepted.
+   */
+  fingerprint: z.string().optional(),
 });
 
 /** The agent session a step opened, as stored. */

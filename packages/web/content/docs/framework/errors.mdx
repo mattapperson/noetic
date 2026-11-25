@@ -646,9 +646,15 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### ACP_SESSION_SETTING_CONFLICT
 
-**Cause:** A step reuses a session but asks for a different `cwd` or different MCP servers than the session was created with, or serves a tool the session's tool list lacks (the error names it).
+**Cause:** A step reuses a session but asks for a different `cwd`, different `instructions` or a differently set-up agent than the session was created with, or serves a tool the session's tool list lacks (the error names it). A resumed step that reattaches to a session opened with other instructions or agent settings fails the same way.
 
-**Fix:** Give every step that shares a `session.reuse` key the same `cwd` and `tools`, or use a separate session.
+**Fix:** Give every step that shares a `session.reuse` key the same `cwd`, `instructions`, agent and `tools`, or use a separate session. A resumed step must resolve the same instructions and settings as the run that started it.
+
+#### AGENT_CAPABILITY_MISSING
+
+**Cause:** A step asks an agent for something it did not advertise: `instructions` to an agent with no system prompt support and no adapter fallback, a `mode` or `model` it does not offer, or prompt content (images, audio, embedded resources) it does not accept. The message names the capability.
+
+**Fix:** Leave that setting off the step, or use an agent that supports it.
 
 #### ACP_TRANSPORT_CANNOT_REACH
 
