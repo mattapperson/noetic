@@ -72,7 +72,16 @@ export interface SpendSettlement {
   readonly cost: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
+  /** The dispatch's model, when its record read. */
+  readonly model?: string;
+  /** Ledger key of the round or step that made the call. */
+  readonly path?: string;
   readonly writtenOff?: true;
+  /**
+   * Written off at 0 by `harness.forget()` because nothing bounded the call: its model
+   * publishes no price, its request set no output cap, or its record is unreadable.
+   */
+  readonly unbounded?: true;
 }
 
 /** @public Options for `harness.reconcileSpend()`. */

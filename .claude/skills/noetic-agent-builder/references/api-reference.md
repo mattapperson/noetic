@@ -2160,7 +2160,19 @@ harness.getAuditTrail(scope: { threadId } | { executionId }): Promise<TrailMark[
 // TrailMark: { executionId, path, stepId, kind, completedAt, version?, term?, holder?, receipt? }
 ```
 
-A turn resumed under another `version` keeps the steps that still match. If the first step that differs already had a lasting effect (a `once`/`effects` connection operation, or a `durable: true` tool), the turn stops with `NoeticError` `turn_stuck` and waits: `wake()` skips it until that decision arrives. Give an effect step a `replayKey` to keep it matching across edits. Trail marks outlive the ledger and `clearCheckpoint`.
+A turn resumed under another `version` keeps the steps that still match. If the first step that differs already had a lasting effect (a `once`/`effects` connection operation, or a `durable: true` tool), the turn stops with `NoeticError` `turn_stuck` and waits: `wake()` skips it until that decision arrives. Give an effect step a `replayKey` to keep it matching across edits. Trail marks outlive the ledger and `clearCheckpoint`; only `forget` deletes them.
+
+### Forgetting threads and executions
+
+```ts
+harness.forget(scope: { threadId } | { executionId }, options?: { keepTrail?: boolean; patienceMs?: number; waitMs?: number; subprocesses?: SubprocessAdapter[] }): Promise<ForgetReport>;
+// ForgetReport: { threadId?, executionIds: string[], spend: SpendSettlement[] }
+harness.listStoredThreads(options?: { prefix?: string }): Promise<string[]>;
+harness.listStoredExecutions(options?: { prefix?: string }): Promise<StoredExecution[]>;
+// StoredExecution: { executionId, parts: ExecutionPart[], resumable }  — parts: snapshot|ledger|trail|held|intent|pending|child|other
+```
+
+When a thread or run is over, `forget` deletes everything core keeps for it — never build `session:`/`execution:`/`turn-lease:`/`output:` keys yourself. A thread's forget covers its record, lease, display output, thread- and execution-scoped layer state, and every execution it ran (the record lists them in `executions`); an execution's forget leaves thread records alone. Pending spend is settled first: priced through the provider (up to `patienceMs`), else written off at its ceiling, or at 0 with `unbounded: true`. Settlements carry `model` and `path` for attribution. A turn running/queued in this harness, a second concurrent forget, or a lease held elsewhere after `waitMs`, is refused with `lease_lost`; the forget holds and renews the thread lease until done, and a message sent to the thread on this harness meanwhile waits and starts it afresh. A spend record that cannot be settled stops it with `ledger_write_failed` before anything is deleted. `forget({})` throws `INVALID_FORGET_SCOPE`. Spawns a subprocess adapter runs out of process are linked (`execution:<run>:child:<child>`, with the adapter's source and a `settled` mark) and forgotten with their run, transitively: an unfinished child is stopped first through the adapter that ran it (environment, the step's own via the step registry, or one passed in `subprocesses`); if none can be known the forget throws `FORGET_CHILD_UNREACHABLE` before deleting anything. Then spend is settled and keys deleted. Each forgotten run's connection-pool leases go too: one still held here is released (its connection freed), and stored lease records — crash leftovers included — are deleted. Layer state is deleted for known thread-scoped layer ids (configured, seen durable by the harness, or named in the thread record's `layers`). Sweep with `listStoredThreads({ prefix })`; decide resumability with `listStoredExecutions()`'s `resumable` (a trail alone is not a checkpoint).
 
 ### Held tool calls
 

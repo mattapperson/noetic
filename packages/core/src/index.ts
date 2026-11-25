@@ -624,13 +624,17 @@ export type {
 
 /** @public */
 export type {
+  ForgetOptions,
+  ForgetReport,
+  ListStoredOptions,
   PendingSpend,
   ReconcileSpendOptions,
   SpendSettlement,
+  StoredExecution,
   WriteOffSpendOptions,
 } from '@noetic-tools/types';
 /** @public */
-export { SpendKind } from '@noetic-tools/types';
+export { ExecutionPart, SpendKind } from '@noetic-tools/types';
 
 //#endregion
 

@@ -12,6 +12,7 @@
  * provisioned ahead with an empty setup and serve requests that pass none.
  */
 
+import { storageGetMany } from '@noetic-tools/context';
 import type {
   Connection,
   ConnectionLease,
@@ -59,6 +60,11 @@ export interface AcquireRequest {
   readonly scope: FreshScope;
   readonly setup: Readonly<Record<string, unknown>>;
   readonly signal: AbortSignal;
+  /**
+   * The root execution of the run that holds the lease, kept with its stored
+   * record so a forget of the run finds it (spec 23 § Forgetting).
+   */
+  readonly executionId?: string;
 }
 
 //#endregion
@@ -71,7 +77,12 @@ export const DEFAULT_POOL_WAIT_MS = 6e4;
 const StoredLeaseSchema = z.object({
   id: z.string(),
   expiresAt: z.number(),
+  /** The run that holds it. Absent in records written before it was kept. */
+  executionId: z.string().optional(),
 });
+
+/** @internal The prefix every pool lease record is stored under: `<prefix><pool>/<holder>`. */
+export const POOL_LEASE_PREFIX = 'noetic/connections/leases/';
 
 //#endregion
 
@@ -92,6 +103,8 @@ export class ConnectionPool {
   private readonly held = new Map<string, HeldConnection>();
   /** Holders that stopped renewing (a failed run): reclaimed once their lease expires. */
   private readonly orphaned = new Set<string>();
+  /** The run each holder's lease belongs to, kept with its stored record. */
+  private readonly owners = new Map<string, string>();
   private readonly acquiring = new Map<string, Promise<HeldConnection>>();
   private readonly idle: Connection[] = [];
   private provisioning = 0;
@@ -171,6 +184,7 @@ export class ConnectionPool {
     }
     this.held.delete(scopeKey);
     this.orphaned.delete(scopeKey);
+    this.owners.delete(scopeKey);
     await this.deps.storage.delete(this.leaseKey(scopeKey));
     this.deps.onLease?.(held.lease, change);
     this.wake();
@@ -375,8 +389,22 @@ export class ConnectionPool {
     }
   }
 
+  /** The stored record of a lease. */
+  private record(scopeKey: string, lease: ConnectionLease): z.infer<typeof StoredLeaseSchema> {
+    const executionId = this.owners.get(scopeKey);
+    return {
+      id: lease.id,
+      expiresAt: lease.expiresAt,
+      ...(executionId === undefined
+        ? {}
+        : {
+            executionId,
+          }),
+    };
+  }
+
   private leaseKey(scopeKey: string): string {
-    return `noetic/connections/leases/${this.deps.name}/${scopeKey}`;
+    return `${POOL_LEASE_PREFIX}${this.deps.name}/${scopeKey}`;
   }
 
   private async leaseFor(request: AcquireRequest): Promise<ConnectionLease> {
@@ -392,10 +420,13 @@ export class ConnectionPool {
       holder: request.scopeKey,
       expiresAt: now + this.reclaimMs,
     };
-    await this.deps.storage.set(this.leaseKey(request.scopeKey), {
-      id,
-      expiresAt: lease.expiresAt,
-    });
+    if (request.executionId !== undefined) {
+      this.owners.set(request.scopeKey, request.executionId);
+    }
+    await this.deps.storage.set(
+      this.leaseKey(request.scopeKey),
+      this.record(request.scopeKey, lease),
+    );
     return lease;
   }
 
@@ -415,13 +446,43 @@ export class ConnectionPool {
         lease,
         connection: held.connection,
       });
-      await this.deps.storage.set(this.leaseKey(scopeKey), {
-        id: lease.id,
-        expiresAt: lease.expiresAt,
-      });
+      await this.deps.storage.set(this.leaseKey(scopeKey), this.record(scopeKey, lease));
       this.deps.onLease?.(lease, 'renewed');
     }
   }
+}
+
+//#endregion
+
+//#region Forgetting
+
+/**
+ * @internal
+ * The stored pool lease records that belong to any of `executionIds`: those that
+ * name one as their run, and, in records written before the run was kept, those
+ * whose holder is the run (`<id>`) or one of its parallel paths (`<id>:path:…`).
+ */
+export async function poolLeasesOf(
+  storage: StorageAdapter,
+  executionIds: ReadonlySet<string>,
+): Promise<string[]> {
+  const keys = await storage.list(POOL_LEASE_PREFIX);
+  if (keys.length === 0 || executionIds.size === 0) {
+    return [];
+  }
+  const records = await storageGetMany<unknown>(storage, keys);
+  return keys.filter((key) => {
+    const stored = StoredLeaseSchema.safeParse(records.get(key));
+    if (stored.success && stored.data.executionId !== undefined) {
+      return executionIds.has(stored.data.executionId);
+    }
+    for (const id of executionIds) {
+      if (key.endsWith(`/${id}`) || key.includes(`/${id}:path:`)) {
+        return true;
+      }
+    }
+    return false;
+  });
 }
 
 //#endregion

@@ -193,7 +193,7 @@ Session totals add each turn's increase in usage rather than its context's total
 `harness.execute()` runs each turn of a thread on a fresh execution. With durability on, each thread keeps a stored record under `session:<threadId>` (`runtime/durable/session-store.ts`): the history after the thread's last finished turn, what its turns have spent, and the turn in flight.
 
 - Every turn reads the thread's history from the record. `seedSessionHistory` writes to it.
-- Before a turn runs, the record names the turn's execution and the ids of the messages it delivers.
+- Before a turn runs, the record names the turn's execution and the ids of the messages it delivers, and adds the execution to `executions`: every execution the thread began, which `forget` and the thread's trail read (`23-durable-execution` § Forgetting).
 - When a turn finishes, the record stores the new history, clears the turn, and the turn's checkpoint and ledger are discarded.
 - When a turn is cut off, its record stays. If the same message ids arrive again — a host with at-least-once delivery re-sends what it never saw answered — the turn resumes on its recorded execution: finished steps replay and the turn continues. Different messages abandon the cut-off turn: its checkpoint is cleared and they start a fresh turn.
 

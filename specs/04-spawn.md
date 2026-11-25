@@ -221,7 +221,7 @@ interface StepSubprocessRequest {
 }
 ```
 
-and calls `adapter.spawn(request)`. The adapter returns the running `SubprocessHandle` and a `settled` promise that resolves with the final handle the moment the child finishes. For `runCode` the interpreter awaits `settled` and unwraps `handle.metadata.result` (or rehydrates `handle.metadata.error`); for `detachedSpawn` the spawn is wrapped in a `DetachedHandle` whose `.await()` waits on the same promise. Nothing polls, so a step's result reaches its caller on the next microtask, whatever the nesting depth. Once a handle settles the adapter forgets it.
+and calls `adapter.spawn(request)`. The adapter returns the running `SubprocessHandle` and a `settled` promise that resolves with the final handle the moment the child finishes. For `runCode` the interpreter awaits `settled` and unwraps `handle.metadata.result` (or rehydrates `handle.metadata.error`); for `detachedSpawn` the spawn is wrapped in a `DetachedHandle` whose `.await()` waits on the same promise. Nothing polls, so a step's result reaches its caller on the next microtask, whatever the nesting depth. Once a handle settles the adapter forgets it. On a durable run, a `spawn` or `detachedSpawn` an adapter runs out of process is linked to the run's root (`execution:<rootId>:child:<childId>`) before it is dispatched, so `harness.forget()` of the run finds and forgets it (`23-durable-execution` § Forgetting); an adapter that runs steps in the calling process needs no link.
 
 ### Step Registry and Cross-Process Lookup
 

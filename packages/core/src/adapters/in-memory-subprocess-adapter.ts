@@ -7,6 +7,7 @@ import type {
   SubprocessHandleMetadata,
   SubprocessRequest,
 } from '@noetic-tools/types';
+import { markInProcess } from '../runtime/durable/child-links';
 import {
   clearManifest,
   listManifests,
@@ -158,7 +159,8 @@ export function createInMemorySubprocessAdapter(
     };
   }
 
-  return {
+  // Steps run through the caller's local executor, in this process.
+  return markInProcess({
     async spawn(request) {
       if (isStepRequest(request)) {
         return spawnStepHandle(request);
@@ -261,7 +263,7 @@ export function createInMemorySubprocessAdapter(
         ...found.values(),
       ];
     },
-  };
+  });
 }
 
 //#endregion

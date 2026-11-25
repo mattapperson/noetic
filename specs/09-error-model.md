@@ -187,7 +187,7 @@ Durable execution (`23-durable-execution`) adds two `NoeticError` kinds, raised 
 |---|---|---|
 | `lease_lost` | `executionId`, `term`, `reason` | Another harness holds or took the thread's turn. Raised when the lease cannot be taken, and when a renewal or a ledger write shows it is gone. `executionId` is the thread id when the turn had no execution yet. |
 | `turn_stuck` | `executionId`, `path`, `from`, `to` | A turn resumed under flow version `to` would have to redo the step at `path`, which had a lasting effect under version `from`, so it stopped (`23-durable-execution` § Versions). The host settles it with a decision item passed to `harness.execute()`. |
-| `ledger_write_failed` | `executionId`, `path`, `cause: Error` | A step-ledger entry or the thread record could not be written, so the turn stopped. `path` is the ledger path, or `session:<threadId>`. |
+| `ledger_write_failed` | `executionId`, `path`, `cause: Error` | A step-ledger entry or the thread record could not be written, so the turn stopped. `path` is the ledger path, `session:<threadId>`, or `spend:<id>` for a spend record `forget` could not settle (`23-durable-execution` § Forgetting). |
 
 ## Held Call Errors
 

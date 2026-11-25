@@ -55,9 +55,12 @@ const WRITE_ATTEMPTS = 3;
 const SWAP_ATTEMPTS = 20;
 const WRITE_RETRY_MS = 10;
 
+/** @internal The prefix every thread's display output key starts with. */
+export const OUTPUT_PREFIX = 'output:';
+
 /** @internal The storage key a thread's display output is kept under. */
 export function outputKey(scope: string): string {
-  return `output:${scope}`;
+  return `${OUTPUT_PREFIX}${scope}`;
 }
 
 /** What makes two snapshots the same item: its id, else its call, else its content. */

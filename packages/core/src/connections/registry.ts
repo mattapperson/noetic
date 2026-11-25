@@ -1066,6 +1066,7 @@ class Runtime implements ConnectionRuntime {
       scope: request.fresh ?? 'run',
       setup: request.setup ?? {},
       signal: request.scope.signal,
+      executionId: request.rootId ?? runOf(request.ctx) ?? request.scope.executionId,
     });
     try {
       this.negotiate(entry.name, held.connection.manifest, request);
@@ -1360,6 +1361,19 @@ class Runtime implements ConnectionRuntime {
  */
 export function createConnectionRuntime(options: ConnectionRuntimeOptions): ConnectionRuntime {
   return new Runtime(options);
+}
+
+//#endregion
+
+//#region Helpers
+
+/** The id of the run `ctx` belongs to: its topmost ancestor's. */
+function runOf(ctx: Context | undefined): string | undefined {
+  let current = ctx;
+  while (current?.parent) {
+    current = current.parent;
+  }
+  return current?.id;
 }
 
 //#endregion

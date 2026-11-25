@@ -576,7 +576,7 @@ if (ctx) await harness.run(graph, input, ctx);
 
 `rerun` belongs to the context that restore returns: it holds for that context's run and ends when the run does, even one that fails before it executes. A later `restore(executionId)` without `rerun` is refused again.
 
-A failed run keeps its pool leases, no longer renewed: a resume within the reclaim window takes them back; otherwise they are reclaimed. A `fresh: 'path'` lease goes back to its pool as soon as its `inParallel` path ends.
+A failed run keeps its pool leases, no longer renewed: a resume within the reclaim window takes them back; otherwise they are reclaimed. To give them up at once, forget the run: [`harness.forget({ executionId })`](/docs/framework/durability#forgetting-a-thread-or-an-execution) releases the leases this harness holds for it and deletes the lease records a crashed process left. A `fresh: 'path'` lease goes back to its pool as soon as its `inParallel` path ends.
 
 ## Writing a Provider
 

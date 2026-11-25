@@ -460,6 +460,15 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   // Settle a call that can never be priced at an amount the host asserts.
   writeOffSpend(id: string, opts: { assumedCost: number }): Promise<SpendSettlement | undefined>;
 
+  // Forgetting (see 23-durable-execution § Forgetting). Delete everything the
+  // harness keeps for a thread — its record, lease, display output, layer state,
+  // and every execution it ran — or for one execution, after settling the spend
+  // they left pending. Refused with `lease_lost` for a turn still running.
+  forget(scope: { threadId: string } | { executionId: string }, options?: ForgetOptions): Promise<ForgetReport>;
+  // What is stored, found by key, so a sweep never builds a key itself.
+  listStoredThreads(options?: { prefix?: string }): Promise<string[]>;
+  listStoredExecutions(options?: { prefix?: string }): Promise<StoredExecution[]>;
+
   // Lifecycle. A string is the reason alone; `{ drainMs }` drains first and
   // resolves with the drain's report (see Graceful Stop).
   cancel(ctx: Context, options?: string | CancelOptions): Promise<DrainReport | undefined>;

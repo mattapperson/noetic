@@ -180,7 +180,7 @@ const items = await harness.getSessionOutput({ threadId: 't1' });
 
 | Behavior | Detail |
 |---|---|
-| Storage | One key per thread, `output:<threadId>`, in the harness's storage adapter. With no storage configured it is kept in memory. |
+| Storage | One key per thread, `output:<threadId>`, in the harness's storage adapter. With no storage configured it is kept in memory. `forget({ threadId })` deletes it. |
 | Display only | Nothing resumes or replays from it. Checkpoints, the step ledger and the model's history are stored apart. |
 | Saving | In the background while the thread streams. The harness waits for it when a root run ends, when a run fails, and in `close()`. |
 | A failed save | Never fails the run: it is logged and stays queued for the next flush, and the run's result and history stand. `getSessionOutput()` and `close()` throw `OutputStoreError` until a later write lands. |
@@ -363,6 +363,9 @@ When the harness is constructed with a durable `environment.storage.adapter` (an
 | `listStuckRuns()` | List the turns that stopped with `turn_stuck` rather than redo a recorded effect under a newer [flow version](/docs/framework/durability#flow-versions). |
 | `execute({ type: 'noetic:decision', action }, { threadId })` | Settle a stuck turn: `'continue'` (accept the difference and resume), `'restart'` (run it from the top) or `'abandon'` (drop it). Refused with `decision_refused` when the thread has none. |
 | `getAuditTrail(scope)` | [The trail](/docs/framework/durability#the-trail) of a thread or an execution: each finished step with its flow version, lease holder and receipt. |
+| `forget(scope, options?)` | [Forget](/docs/framework/durability#forgetting-a-thread-or-an-execution) a thread (`{ threadId }`) or an execution (`{ executionId }`): settle its pending spend, then delete every record the harness keeps for it. `options`: `keepTrail`, `patienceMs`, `waitMs`, `subprocesses`. Resolves a `ForgetReport` `{ threadId?, executionIds, spend }`. Refused with `lease_lost` while a turn runs. |
+| `listStoredThreads(options?)` | Every thread with a record, a turn lease or display output stored. `{ prefix }` narrows the ids. |
+| `listStoredExecutions(options?)` | Every execution with anything stored: `{ executionId, parts, resumable }`. `{ prefix }` narrows the ids. |
 | `cancel(ctx, options?)` | Cancel a running execution: abort `ctx` and every live descendant context (parallel paths, spawn children), then run context-layer teardown — `onComplete` with `outcome: 'aborted'`, then `dispose` — bottom-up. Layer hooks already running on a context (`recall`, `store`, `beforeToolCall`, `afterModelCall`, `onDecision`) finish, up to their timeouts, before that context's teardown starts. A no-op on an already-cancelled context. `options` is the reason as a string, or `{ reason?, drainMs? }`; `drainMs` makes it a [graceful stop](#graceful-stop). Resolves with the drain's `DrainReport` when a drain ran, `undefined` otherwise. |
 
 Cancellation reaches inside the work in flight: blocked channel `recv`/`send` calls reject with `cancelled`, the current provider stream and ACP agent turn are cut short, and the next step boundary throws `cancelled`. Tokens and cost already spent stay charged to the context. Beyond those points it is cooperative — a `runCode` body that ignores `ctx.aborted` between `await`s runs to its next step boundary.
