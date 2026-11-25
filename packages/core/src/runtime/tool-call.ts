@@ -216,9 +216,11 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
   const recordId = recordIdOf(params);
   const prior = recordId === undefined ? undefined : await holds.load(scope, recordId);
   if (!prior && params.layers && params.layers.length > 0) {
+    // The tool's own name, as the approver below gets it: a layer's allowlist
+    // names `plan/updatePrd`, never the `plan_updatePrd` the wire carries.
     const decision = await params.harness.beforeToolCall(
       params.layers,
-      params.toolName,
+      matchedTool.name,
       params.args,
       params.context,
       params.callId,

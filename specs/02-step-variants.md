@@ -214,7 +214,7 @@ The agent harness owns the tool call loop. The SDK makes one model request per r
 
 1. **Request.** Send the conversation so far (the View plus this step's earlier rounds) to the SDK's `callModel()`, streaming its events to the session broadcaster through `getFullResponsesStream()` and reading the finished response from `getResponse()`.
 2. **Stop check.** If the round's output holds no function calls, the step is done.
-3. **Run tools.** Otherwise run each function call in order: look the tool up in the step's allowed subset (see Unified Tool Set), run the layers' `beforeToolCall` steering hooks, validate the arguments against `Tool.input`, and call `Tool.execute`. An unknown tool, malformed JSON arguments, invalid arguments, a steering denial or redirect, or a thrown error becomes an error tool result for the model to read; it does not fail the step.
+3. **Run tools.** Otherwise run each function call in order: look the tool up in the step's allowed subset (see Unified Tool Set), run the layers' `beforeToolCall` steering hooks (given the tool's own name, `plan/updatePrd`, not the sanitized wire name `plan_updatePrd` the model sent — as the approver is), validate the arguments against `Tool.input`, and call `Tool.execute`. An unknown tool, malformed JSON arguments, invalid arguments, a steering denial or redirect, or a thrown error becomes an error tool result for the model to read; it does not fail the step.
 4. **Append.** Add the `function_call` and `function_call_output` items to the conversation, then go back to step 1.
 
 Limits and recovery:
