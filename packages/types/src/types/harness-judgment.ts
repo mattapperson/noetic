@@ -146,20 +146,23 @@ export type HeldResolution =
  * - `skipped`: a steer applied at the `held` steer point skipped it.
  * - `cancelled`: its turn was aborted, interrupted or abandoned, the agent that asked
  *   stopped waiting, or the harness closed.
+ * - `elsewhere`: another harness over the same storage settled it and went on with
+ *   the turn, and this one cannot tell how.
  */
 export interface HeldCallSettled {
   readonly callId: string;
   readonly name: string;
   readonly argsHash: string;
   readonly reason: HeldCall['reason'];
-  readonly by: 'answer' | 'due' | 'skipped' | 'cancelled';
+  readonly by: 'answer' | 'due' | 'skipped' | 'cancelled' | 'elsewhere';
 }
 
 /** @public What the `onHeld` handler is given beside the call. */
 export interface HeldCallContext {
   /**
    * Aborts once the call is settled any way at all; `signal.reason` is the
-   * `HeldCallSettled`. A host closes the question it showed when it aborts.
+   * `HeldCallSettled`. A host closes the question it showed when it aborts. A call
+   * settled by another harness over shared storage is seen within two seconds.
    */
   readonly signal: AbortSignal;
   /** The execution the call is held under. */

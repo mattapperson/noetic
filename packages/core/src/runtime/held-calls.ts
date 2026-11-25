@@ -14,12 +14,10 @@
 import type { StorageAdapter } from '@noetic-tools/context';
 import type {
   Context,
-  ExecutionScope,
   HeldCall,
   HeldCallHandler,
   HeldCallSettled,
   HeldResolution,
-  SessionScope,
   ToolApprover,
 } from '@noetic-tools/types';
 import { NoeticErrorImpl } from '@noetic-tools/types';
@@ -84,18 +82,26 @@ export interface HoldHost {
   };
   /** The thread a context's held calls belong to, when it is a thread's turn. */
   heldThreadOf?(ctx: Context): string | undefined;
-  /** Answer a held call and wake the turn it holds, as a decision item does. */
-  resolveHeld?(
-    scope: SessionScope | ExecutionScope | undefined,
-    answer: HeldResolution & {
-      readonly callId: string;
-      readonly argsHash?: string;
-    },
-  ): Promise<void>;
+  /**
+   * Answer a call held under `executionId`, as a decision item does, and wake its
+   * thread's turn when that turn is this execution and parked.
+   */
+  answerHeld?(answer: HeldAnswerRequest): Promise<void>;
+}
+
+/** @internal An answer to a held call, for the execution that holds it. */
+export interface HeldAnswerRequest {
+  readonly executionId: string;
+  /** The thread whose turn held the call, when it was a thread's turn. */
+  readonly threadId?: string;
+  readonly callId: string;
+  readonly argsHash: string;
+  readonly resolution: HeldResolution;
 }
 
 /** Who is told when a call this process announced held stops being held. */
 interface HeldWatch {
+  readonly executionId: string;
   readonly held: HeldCall;
   readonly controller: AbortController;
   readonly emit: (settled: HeldCallSettled) => void;
@@ -202,6 +208,30 @@ function settledByOf(record: HeldRecord | undefined, now: number): HeldCallSettl
   return 'cancelled';
 }
 
+/**
+ * How a watched call was settled, as a sweep reads its record: answered, gone (settled
+ * by another harness, in a way this one cannot know), replaced by another question,
+ * or still the question shown (`undefined`).
+ */
+function sweptBy(
+  record: HeldRecord | undefined,
+  held: HeldCall,
+): HeldCallSettled['by'] | undefined {
+  if (record === undefined) {
+    return 'elsewhere';
+  }
+  if (record.resolution !== undefined) {
+    return 'answer';
+  }
+  if (record.argsHash !== held.argsHash) {
+    return 'elsewhere';
+  }
+  if (record.reason !== held.reason) {
+    return 'answer';
+  }
+  return undefined;
+}
+
 /** A held record as hosts see it. */
 export function toHeldCall(record: HeldRecord): HeldCall {
   return {
@@ -237,6 +267,10 @@ export class HeldCalls {
   private readonly waiters = new Map<string, Set<() => void>>();
   /** Calls announced held in this process, by execution and call. */
   private readonly watches = new Map<string, HeldWatch>();
+  /** Watched calls this process is closing: a sweep leaves them to `close`. */
+  private readonly closing = new Set<string>();
+  /** Re-reads watched calls on shared storage, which another harness may settle. */
+  private sweeper: ReturnType<typeof setInterval> | undefined;
 
   constructor(
     private readonly storage: StorageAdapter,
@@ -336,20 +370,30 @@ export class HeldCalls {
    */
   async close(executionId: string, callId: string, by?: HeldCallSettled['by']): Promise<void> {
     const key = watchKey(executionId, callId);
-    const settledBy =
-      this.watches.has(key) && by === undefined
-        ? settledByOf(await this.load(executionId, callId), this.now())
-        : by;
-    await this.storage.delete(`${heldPrefix(executionId)}${callId}`);
-    if (settledBy !== undefined) {
-      this.settleWatch(key, settledBy);
+    const watched = this.watches.has(key);
+    if (watched) {
+      this.closing.add(key);
+    }
+    try {
+      const settledBy =
+        watched && by === undefined
+          ? settledByOf(await this.load(executionId, callId), this.now())
+          : by;
+      await this.storage.delete(`${heldPrefix(executionId)}${callId}`);
+      if (settledBy !== undefined) {
+        this.settleWatch(key, settledBy);
+      }
+    } finally {
+      this.closing.delete(key);
     }
   }
 
   /**
    * Note that this process announced `held`. Resolves the signal a handler waits on,
    * or `undefined` when the same question is already being watched here. A different
-   * question under the same id replaces the old one, which is settled as cancelled.
+   * question under the same id replaces the old one: a call held for a new reason
+   * moved on because the old question was answered; one held for other arguments
+   * voided it.
    */
   watch(
     executionId: string,
@@ -362,19 +406,61 @@ export class HeldCalls {
       return undefined;
     }
     if (existing) {
-      this.settleWatch(key, 'cancelled');
+      this.settleWatch(key, existing.held.reason === held.reason ? 'cancelled' : 'answer');
     }
     const controller = new AbortController();
     this.watches.set(key, {
+      executionId,
       held,
       controller,
       emit,
     });
+    this.armSweep();
     return controller.signal;
+  }
+
+  /**
+   * On shared storage another harness may answer, skip or drop a call this process
+   * announced, and finish its turn, so nothing here would ever close it. Watched
+   * calls are read again every so often while any are watched.
+   */
+  private armSweep(): void {
+    if (!this.shared || this.sweeper !== undefined) {
+      return;
+    }
+    const sweeper = setInterval(() => {
+      void this.sweep().catch(() => undefined);
+    }, HELD_POLL_MS);
+    if (typeof sweeper === 'object' && 'unref' in sweeper) {
+      sweeper.unref();
+    }
+    this.sweeper = sweeper;
+  }
+
+  private stopSweep(): void {
+    clearInterval(this.sweeper);
+    this.sweeper = undefined;
+  }
+
+  /** Settle every watched call whose record says it is no longer the question shown. */
+  async sweep(): Promise<void> {
+    for (const [key, watch] of [
+      ...this.watches,
+    ]) {
+      const record = await this.load(watch.executionId, watch.held.callId);
+      if (this.watches.get(key) !== watch || this.closing.has(key)) {
+        continue;
+      }
+      const by = sweptBy(record, watch.held);
+      if (by !== undefined) {
+        this.settleWatch(key, by);
+      }
+    }
   }
 
   /** The harness is closing: every handler still waiting is let go, with no event. */
   releaseWatches(): void {
+    this.stopSweep();
     for (const [key, watch] of [
       ...this.watches,
     ]) {
@@ -389,6 +475,9 @@ export class HeldCalls {
       return;
     }
     this.watches.delete(key);
+    if (this.watches.size === 0) {
+      this.stopSweep();
+    }
     const settled = settledOf(watch.held, by);
     try {
       watch.emit(settled);
@@ -807,23 +896,19 @@ async function askHandler(opts: {
   if (answer === undefined || signal.aborted) {
     return;
   }
-  const decision = {
-    ...answer,
-    callId: held.callId,
-    argsHash: held.argsHash,
-  };
   try {
-    if (harness.resolveHeld) {
-      await harness.resolveHeld(
-        threadId === undefined
-          ? {
-              executionId,
-            }
+    if (harness.answerHeld) {
+      await harness.answerHeld({
+        executionId,
+        ...(threadId === undefined
+          ? {}
           : {
               threadId,
-            },
-        decision,
-      );
+            }),
+        callId: held.callId,
+        argsHash: held.argsHash,
+        resolution: answer,
+      });
       return;
     }
     await heldCallsOf(harness).resolve(executionId, {

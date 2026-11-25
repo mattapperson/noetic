@@ -25,6 +25,7 @@ import { pendingTasksOf, resumableWaitsOf } from '../interpreter/connection-step
 import { turnEndingIn } from '../interpreter/turn-ending';
 import { AcpSessionStore } from '../runtime/acp-session-store';
 import { stubOf } from '../runtime/durable/step-ledger';
+import type { HeldAnswerRequest } from '../runtime/held-calls';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
 import type { OutputSnapshot } from '../runtime/output-store';
 import { OutputStore } from '../runtime/output-store';
@@ -1673,7 +1674,31 @@ export class AgentHarness<
     if (scope && 'executionId' in scope) {
       return;
     }
-    const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
+    await this.wakeAnswered(scope?.threadId ?? DEFAULT_THREAD_ID, options);
+  }
+
+  /**
+   * An `onHeld` handler's answer: for the execution that held the call, never for a
+   * later turn on the same thread. Wakes the thread's turn when it is that execution.
+   * @internal
+   */
+  async answerHeld(answer: HeldAnswerRequest): Promise<void> {
+    await heldCallsOf(this).resolve(answer.executionId, {
+      callId: answer.callId,
+      argsHash: answer.argsHash,
+      resolution: answer.resolution,
+    });
+    if (answer.threadId === undefined) {
+      return;
+    }
+    if ((await this.turnExecutionId(answer.threadId)) !== answer.executionId) {
+      return;
+    }
+    await this.wakeAnswered(answer.threadId);
+  }
+
+  /** A thread's turn was answered: resume it if parked, now or once it comes to rest. */
+  private async wakeAnswered(threadId: string, options?: ExecuteOptions): Promise<void> {
     const runner = this.sessions.get(threadId)?.runner;
     if (runner?.context === undefined) {
       await this.wake({

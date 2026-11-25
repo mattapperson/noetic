@@ -505,7 +505,9 @@ export class AcpToolRunner implements AcpToolHost {
             }),
         });
       }
-      await waitOnHeldCalls({
+      // The wait throws `cancelled` when the agent's signal ends it, as it does for
+      // the turn's own abort: only the latter is the turn's to handle.
+      const gaveUp = await waitOnHeldCalls({
         harness: ctx.harness,
         ctx,
         callIds: [
@@ -513,11 +515,19 @@ export class AcpToolRunner implements AcpToolHost {
         ],
         signal,
         park: false,
-      });
+      }).then(
+        () => signal.aborted,
+        (error: unknown) => {
+          if (signal.aborted) {
+            return true;
+          }
+          throw error;
+        },
+      );
       // The agent stopped waiting for this call: nobody is left to give an answer to.
-      if (signal.aborted) {
+      if (gaveUp) {
         if (mayWriteHolds(ctx)) {
-          await heldCallsOf(ctx.harness).close(heldScopeOf(ctx), held.callId);
+          await heldCallsOf(ctx.harness).close(heldScopeOf(ctx), held.callId, 'cancelled');
         }
         return {
           output: CANCELLED_OUTPUT,

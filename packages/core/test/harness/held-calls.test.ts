@@ -24,7 +24,7 @@ import {
   SteerPoint,
 } from '@noetic-tools/types';
 import { z } from 'zod';
-import { callModel } from '../../src/builders/step-builders';
+import { callModel, invokeTool } from '../../src/builders/step-builders';
 import { hold, tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
@@ -153,6 +153,24 @@ function setup(reply: (input: unknown[]) => unknown[]): Setup {
       });
     },
   });
+  // Needs approval, then leaves its result open: two questions for one call.
+  const ship = tool({
+    name: 'ship',
+    description: 'Ship an order, once a person confirms the address.',
+    input: z.object({
+      order: z.string(),
+    }),
+    output: z.string(),
+    needsApproval: true,
+    execute: async ({ order }) => {
+      runs.push('ship');
+      return hold({
+        request: {
+          confirm: `address for ${order}`,
+        },
+      });
+    },
+  });
   const agent = callModel<ContextData, string, string>({
     id: 'agent',
     model: 'test/model',
@@ -160,6 +178,7 @@ function setup(reply: (input: unknown[]) => unknown[]): Setup {
       lookup,
       refund,
       askPerson,
+      ship,
     ],
   });
   return {
@@ -1438,6 +1457,191 @@ describe('onHeld', () => {
     expect(response.text).toBe('order A1 found | refunded 420');
     expect(shown).toHaveLength(1);
     await h.close();
+  });
+});
+
+describe('onHeld, more questions and more places', () => {
+  it('asks again when an approved call then leaves its result open', async () => {
+    const { runs, harness } = setup(
+      modelAsking([
+        call('ship', {
+          order: 'A1',
+        }),
+      ]),
+    );
+    const asked: HeldCall['reason'][] = [];
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld: (held) => {
+        asked.push(held.reason);
+        return held.reason === 'approval'
+          ? {
+              action: 'allow',
+            }
+          : {
+              output: 'confirmed: 1 Main St',
+            };
+      },
+    });
+    const events = followHeld(h);
+    await h.execute('ship A1', THREAD);
+    expect((await h.getAgentResponse(THREAD)).text).toBe('confirmed: 1 Main St');
+    expect(asked).toEqual([
+      'approval',
+      'result',
+    ]);
+    expect(runs).toEqual([
+      'ship',
+    ]);
+    await until(() => events.length === 4, 'both questions held and settled');
+    expect(events.map((event) => event.type)).toEqual([
+      'held',
+      'settled',
+      'held',
+      'settled',
+    ]);
+  });
+
+  it('answers the execution that held the call, never a later turn on the thread', async () => {
+    const { harness } = setup(LOOKUP_THEN_REFUND);
+    const h = harness({
+      approveToolCall: holdIt,
+    });
+    await h.execute('refund A1', THREAD);
+    const held = await heldCall(h);
+    const reason = await refusal(() =>
+      h.answerHeld({
+        executionId: 'an-earlier-turn',
+        threadId: 't',
+        callId: held.callId,
+        argsHash: held.argsHash,
+        resolution: {
+          action: 'allow',
+        },
+      }),
+    );
+    expect(reason).toBe('no call with this id is held');
+    expect(await h.pending(THREAD)).toHaveLength(1);
+    await decide(h, THREAD, {
+      callId: held.callId,
+      action: 'deny',
+    });
+    await h.getAgentResponse(THREAD);
+  });
+
+  it('is told, by a sweep, when another harness answers and finishes the turn', async () => {
+    const fixture = setup(LOOKUP_THEN_REFUND);
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const { shown, onHeld } = cards();
+    const a = fixture.harness({
+      storage,
+      approveToolCall: holdIt,
+      onHeld,
+    });
+    await a.execute('refund A1', THREAD);
+    expect((await a.getAgentResponse(THREAD)).parked).toBeDefined();
+    const [card] = shown;
+    assert(card);
+
+    const b = fixture.harness({
+      storage,
+      approveToolCall: holdIt,
+    });
+    const [held] = await b.pending(THREAD);
+    assert(held);
+    await decide(b, THREAD, {
+      callId: held.callId,
+      action: 'allow',
+    });
+    expect((await b.getAgentResponse(THREAD)).text).toBe('order A1 found | refunded 420');
+    await until(() => card.held.signal.aborted, 'the sweep');
+    expect(card.held.signal.reason).toMatchObject({
+      by: expect.stringMatching(/^(answer|elsewhere)$/),
+    });
+    await a.close();
+    await b.close();
+  }, 10e3);
+
+  it('shows a call an invokeTool step holds, and its answer runs the step', async () => {
+    const runs: string[] = [];
+    const add = tool({
+      name: 'add',
+      description: 'Add.',
+      input: z.object({
+        a: z.number(),
+        b: z.number(),
+      }),
+      output: z.number(),
+      needsApproval: true,
+      execute: async ({ a, b }) => {
+        runs.push('add');
+        return a + b;
+      },
+    });
+    const asked: HeldCall[] = [];
+    const h = new AgentHarness({
+      name: 'held',
+      params: {},
+      onHeld: (held) => {
+        asked.push(held);
+        return {
+          action: 'allow',
+        };
+      },
+    });
+    const total = await h.run(
+      invokeTool({
+        id: 'add-step',
+        tool: add,
+      }),
+      {
+        a: 1,
+        b: 2,
+      },
+      h.createContext(),
+    );
+    expect(total).toBe(3);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({
+      name: 'add',
+      reason: 'approval',
+    });
+    expect(runs).toEqual([
+      'add',
+    ]);
+  });
+
+  it('answers harness.approve(), the seam other packages ask', async () => {
+    const asked: HeldCall[] = [];
+    const h = new AgentHarness({
+      name: 'held',
+      params: {},
+      onHeld: (held, { threadId }) => {
+        asked.push(held);
+        expect(threadId).toBeUndefined();
+        return {
+          action: 'deny',
+          guidance: 'not today',
+        };
+      },
+    });
+    const decision = await h.approve({
+      toolName: 'plan/exit',
+      toolArgs: {
+        plan: 'x',
+      },
+      callId: 'plan-1',
+      ctx: h.createContext(),
+    });
+    expect(decision).toMatchObject({
+      action: 'deny',
+      guidance: 'not today',
+    });
+    expect(asked.map((held) => held.name)).toEqual([
+      'plan/exit',
+    ]);
   });
 });
 
