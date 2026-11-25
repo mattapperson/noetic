@@ -11,7 +11,7 @@ import type * as acp from '@agentclientprotocol/sdk';
 import type { AgentSideConnection } from '@agentclientprotocol/sdk';
 import { RequestError } from '@agentclientprotocol/sdk';
 import { AgentHarness, execute, step } from '@noetic-tools/core';
-import type { ContextData, HeldCall, HeldCallHandler } from '@noetic-tools/types';
+import type { AgentScope, ContextData, HeldCall, HeldCallHandler } from '@noetic-tools/types';
 import { isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { claudeCode } from '../src/agents';
 import { defineAcpAgent } from '../src/define';
@@ -126,6 +126,7 @@ function agent(log: AgentLog, script?: AgentScript, sessionMeta?: Record<string,
 interface Captured {
   type: string;
   data: Record<string, unknown>;
+  scope?: AgentScope;
 }
 
 async function run(
@@ -286,7 +287,7 @@ describe('an agent step, as a host sees it', () => {
     expect(events.some((e) => e.type === 'host-features:tool_call_settled')).toBe(true);
   });
 
-  it("keeps a subagent's output out of the step's text and events", async () => {
+  it("shows a subagent as a nested agent: its output scoped, never the step's", async () => {
     const log = emptyLog();
     const { output, events } = await run(
       step.acpAgent<ContextData, unknown, string>({
@@ -299,6 +300,10 @@ describe('an agent step, as a host sees it', () => {
                 sessionUpdate: 'subagent_update',
                 sessionId: 'child',
                 title: 'Explore',
+                description: 'Look around',
+                state: {
+                  state: 'running',
+                },
               },
             });
             await conn.sessionUpdate({
@@ -311,14 +316,85 @@ describe('an agent step, as a host sees it', () => {
                 },
               },
             });
+            await conn.sessionUpdate({
+              sessionId,
+              update: {
+                sessionUpdate: 'subagent_update',
+                sessionId: 'child',
+                state: {
+                  state: 'idle',
+                  stopReason: 'end_turn',
+                },
+              },
+            });
           },
         }),
         prompt: 'go',
         tools: [],
       }),
     );
+    expect(log.initialize[0]?.clientCapabilities?.subagents).toEqual({});
     expect(output).toBe('final answer');
-    expect(JSON.stringify(events)).not.toContain('SUBAGENT TEXT');
+    const scoped = events.filter((e) => e.scope !== undefined);
+    const scope = scoped[0]?.scope;
+    assert(scope);
+    expect(scope.title).toBe('Explore');
+    expect(scope.parentId).toBeUndefined();
+    expect(scoped.every((e) => e.scope?.id === scope.id)).toBe(true);
+    // The subagent's text is its own output...
+    const childText = scoped
+      .filter((e) => e.type === 'response.output_text.delta')
+      .map((e) => e.data.delta);
+    expect(childText).toEqual([
+      'SUBAGENT TEXT',
+    ]);
+    // ...and never the step's.
+    const rootText = events
+      .filter((e) => e.scope === undefined && e.type === 'response.output_text.delta')
+      .map((e) => e.data.delta)
+      .join('');
+    expect(rootText).toBe('final answer');
+    // Its life: started, its status, completed when the turn ends.
+    const life = scoped
+      .filter((e) => /:agent_(started|status|completed)$/.test(e.type))
+      .map((e) => [
+        e.type.split(':')[1],
+        e.data.status ?? e.data.title,
+      ]);
+    expect(life).toEqual([
+      [
+        'agent_started',
+        'Explore',
+      ],
+      [
+        'agent_status',
+        'running',
+      ],
+      [
+        'agent_status',
+        'idle',
+      ],
+      [
+        'agent_completed',
+        'completed',
+      ],
+    ]);
+  });
+
+  it('withdrawing subagents leaves the capability unadvertised', async () => {
+    const log = emptyLog();
+    await run(
+      step.acpAgent<ContextData, unknown, string>({
+        id: 'no-sub',
+        agent: agent(log),
+        prompt: 'go',
+        tools: [],
+        clientCapabilities: {
+          subagents: false,
+        },
+      }),
+    );
+    expect(log.initialize[0]?.clientCapabilities?.subagents).toBeUndefined();
   });
 
   it("fails with a Noetic error carrying the agent's own message", async () => {

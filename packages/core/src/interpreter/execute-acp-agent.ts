@@ -266,6 +266,8 @@ interface HostBindingOptions<TContext, I, O> {
   onActivity: NonNullable<AcpClientHost['onClientActivity']>;
   layers?: ContextLayer[];
   onUpdate: AcpClientHost['onSessionUpdate'];
+  /** A subagent's traffic: a nested agent of this turn (spec 08 § Nested agents). */
+  onChildUpdate: NonNullable<AcpClientHost['onChildUpdate']>;
   /** The step's tools, served to the agent; `undefined` when it gave none. */
   tools?: AcpToolRunner;
   events: AcpEventBridge;
@@ -303,6 +305,7 @@ function bindHostToStep<TContext, I, O>(
   // § Questions the agent asks), answered by whoever answers held calls.
   host.onElicitation = opts.questions.ask;
   host.onSessionUpdate = opts.onUpdate;
+  host.onChildUpdate = opts.onChildUpdate;
   host.onClientActivity = opts.onActivity;
   // A step that gives no tools gets none, even on a session another step
   // opened with tools. The session's runner stays listed, so the agent's
@@ -360,6 +363,7 @@ function normalizedCapabilities(config: AcpClientCapabilityConfig | undefined): 
       ...(config?.additionalDirectories ?? []),
     ].sort(),
     elicitation: config?.elicitation !== false,
+    subagents: config?.subagents !== false,
   });
 }
 
@@ -1176,6 +1180,13 @@ async function runAcpStep<TContext, I, O>(params: {
       }
       tools?.observe(notification.update);
       events.forward(notification);
+    },
+    onChildUpdate: (update) => {
+      // A loaded session's history is not this turn's work, its subagents' included.
+      if (reloading) {
+        return;
+      }
+      events.forwardChild(update);
     },
     onActivity: (activity: AcpClientActivity) => {
       events.forwardActivity(activity);

@@ -318,7 +318,7 @@ The question also shows up in `harness.pending()` and as a `tool_call_held` even
 
 ## Subagents
 
-An agent's subagents can run in their own child sessions. Only the step's own session produces its output: a subagent's text, tool calls and updates never reach the step's text, items, events or result.
+An agent's subagents run in their own child sessions, and each shows up as a [nested agent](/docs/framework/runtime#nested-agents): its text, reasoning and tool calls reach `getFullStream()` with a `scope` naming it, framed by `agent_started`, `agent_status` and `agent_completed` events. They never reach the step's text, items or result, or `getTextStream()`. Set `clientCapabilities: { subagents: false }` to have the agent keep its subagents to itself.
 
 ## Giving the agent your tools
 

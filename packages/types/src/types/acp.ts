@@ -282,6 +282,20 @@ export type AcpBoundElicitationHandler = (
   info: AcpElicitationInfo,
 ) => Promise<acp.CreateElicitationResponse>;
 
+/**
+ * @public One update about a subagent's child session: its announcement on the
+ * session that started it, or the child's own update.
+ */
+export interface AcpChildUpdate {
+  /** The child session. */
+  readonly sessionId: string;
+  /** The session that announced it. */
+  readonly parentSessionId: string;
+  readonly update: acp.SessionNotification['update'];
+  /** True for the announcement (`subagent_update` / `subagent_spawned`) on the parent. */
+  readonly announcement: boolean;
+}
+
 /** @public What identifies an agent's question beyond its params. */
 export interface AcpElicitationInfo {
   /**
@@ -330,6 +344,12 @@ export interface AcpClientCapabilityConfig {
    * agent asks). Default `true`; `false` withdraws it.
    */
   elicitation?: boolean;
+  /**
+   * Advertise the subagents capability (`subagents: {}`), so an agent runs
+   * each subagent in a child session the harness shows as a nested agent
+   * (spec 08 § Nested agents). Default `true`; `false` withdraws it.
+   */
+  subagents?: boolean;
 }
 
 /**
@@ -414,6 +434,12 @@ export interface AcpClientHost {
   onPermissionRequest?: AcpBoundPermissionHandler;
   /** Answers `elicitation/create`. Per-turn; none answers `cancel`. */
   onElicitation?: AcpBoundElicitationHandler;
+  /**
+   * Receives a subagent's child-session traffic and each announcement of a
+   * child, which the runtime shows as a nested agent. Per-turn. Child-session
+   * updates never reach {@link onSessionUpdate}.
+   */
+  onChildUpdate?: (update: AcpChildUpdate) => void;
   /**
    * Receive every `session/update` notification for the active session. Also
    * per-turn — it routes to the running step's event bridge, so a reused

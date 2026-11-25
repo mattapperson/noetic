@@ -19,6 +19,7 @@ import type * as acp from '@agentclientprotocol/sdk';
 import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 import type {
   AcpAgentConnection,
+  AcpChildUpdate,
   AcpClientHost,
   AcpContentBlock,
   AcpLoadSessionOptions,
@@ -515,6 +516,8 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     setup?: Readonly<Record<string, unknown>>;
     /** Where an update of one of this connection's own sessions goes. */
     deliver?: (notification: AcpSessionNotification) => void;
+    /** Where a subagent's child-session traffic goes. */
+    toChild?: (update: AcpChildUpdate) => void;
   } = {};
 
   constructor(
@@ -586,8 +589,23 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     const child = announcedChild(notification.update);
     if (child !== undefined && child !== owner && this.owns(owner)) {
       this.adoptChild(child, owner);
+      this.settings.toChild?.({
+        sessionId: child,
+        parentSessionId: owner,
+        update: notification.update,
+        announcement: true,
+      });
     }
-    if (this.children.has(owner)) {
+    const parent = this.children.get(owner);
+    if (parent !== undefined) {
+      if (child === undefined || child === owner) {
+        this.settings.toChild?.({
+          sessionId: owner,
+          parentSessionId: parent,
+          update: notification.update,
+          announcement: false,
+        });
+      }
       return;
     }
     if (this.sessions.has(owner)) {
@@ -963,6 +981,8 @@ export async function openAcpConnection(
       sink?.(notification);
       host.onSessionUpdate(notification);
     },
+    // Read at call time: the runtime rebinds it for every turn.
+    toChild: (update) => host.onChildUpdate?.(update),
   };
   return connection;
 }
