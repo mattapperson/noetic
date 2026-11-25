@@ -1,3 +1,52 @@
+## @noetic-tools/types-v3.19.0-next.1 (2026-11-25)
+
+* fix(core): a decision that cannot be taken is refused, not half applied ([7d07818](https://github.com/mattapperson/noetic/commit/7d07818))
+* fix(core): a held call's result is given by a decision item only ([6be6795](https://github.com/mattapperson/noetic/commit/6be6795))
+* fix(core): close the holes a review found in leases, parking and held calls ([1790461](https://github.com/mattapperson/noetic/commit/1790461))
+* fix(core): events are not acknowledged unstored, and a dropped one is named ([a29284b](https://github.com/mattapperson/noetic/commit/a29284b))
+* feat: one approval seam for every path that asks a person ([f2979cc](https://github.com/mattapperson/noetic/commit/f2979cc))
+* feat(core): cron() works on a host with no process between events ([f79a72f](https://github.com/mattapperson/noetic/commit/f79a72f))
+* feat(core): decision_refused, for a decision that does not fit the thread ([4cfadbe](https://github.com/mattapperson/noetic/commit/4cfadbe))
+* feat(core): decisions go through execute; one way in for hosts ([2a45239](https://github.com/mattapperson/noetic/commit/2a45239))
+* feat(core): durable emit, triggers as data, a dead list, and message dedupe ([03cd64c](https://github.com/mattapperson/noetic/commit/03cd64c))
+* feat(core): durable on tools, and a harness that wakes the turns it parked ([159d48e](https://github.com/mattapperson/noetic/commit/159d48e))
+* feat(core): flow versions, stuck turns and a trail that outlives the ledger ([111210d](https://github.com/mattapperson/noetic/commit/111210d))
+* feat(core): hold a tool call for a person and answer it with harness.resolve() ([30189d5](https://github.com/mattapperson/noetic/commit/30189d5))
+* feat(core): one writer per turn with a storage-backed lease ([31bfa04](https://github.com/mattapperson/noetic/commit/31bfa04))
+* feat(core): park a waiting turn and wake it later ([7234b88](https://github.com/mattapperson/noetic/commit/7234b88))
+* feat(core): record each tool call so a cut round resumes at the one that was running ([7b59fea](https://github.com/mattapperson/noetic/commit/7b59fea))
+
+### BREAKING CHANGE
+
+* a call that needs approval on a harness with no
+approveToolCall is now held until harness.resolve() answers it. It used
+to run unapproved with a warning, and a model's call to a connection
+operation that needs approval used to be denied.
+
+Specs 02, 08 and 09, the invoke-tool, errors and API docs, and the
+agent-builder skill are updated.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+* a step's call to a connection operation that needs
+approval, on a harness with no approveToolCall, is held instead of
+denied. A coding agent's permission request that nothing settles, on a
+step whose policy names no default, is held instead of denied; name
+`default: 'deny'` to keep the old behavior.
+
+Specs 08, 12, 23, 27, 29, 31 and 35, the matching docs, and the
+agent-builder skill are updated.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+* an event whose turn failed five times is no longer
+delivered again at the next start; call harness.replayTrigger(). A
+message passed to execute() with a messageId whose turn already finished
+is answered from the record instead of starting a new turn.
+
+Specs 08, 23a and 35, the connections, durability and runtime docs, and
+the agent-builder skill are updated.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+
 ## @noetic-tools/types-v3.18.0 (2026-11-04)
 
 * feat: one way to attach MCP servers, served to every agent (#156) ([2195f69](https://github.com/mattapperson/noetic/commit/2195f69)), closes [#156](https://github.com/mattapperson/noetic/issues/156)
