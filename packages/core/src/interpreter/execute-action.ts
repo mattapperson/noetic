@@ -132,7 +132,13 @@ export async function executeRunCode<TContext, I, O>(
       if (ending) {
         throw ending;
       }
-      lastError = e instanceof Error ? e : new Error(String(e));
+      // A thrown non-Error keeps the value itself as the wrapper's cause.
+      lastError =
+        e instanceof Error
+          ? e
+          : new Error(String(e), {
+              cause: e,
+            });
 
       if (attempt < maxAttempts - 1 && retry) {
         const delay = computeDelay(retry, attempt);

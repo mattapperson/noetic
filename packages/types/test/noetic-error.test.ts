@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import { ZodError, z } from 'zod';
-import { isNoeticError, NoeticErrorImpl } from '../src/errors/noetic-error';
+import { failureCause, isNoeticError, NoeticErrorImpl } from '../src/errors/noetic-error';
 
 describe('isNoeticError', () => {
   it('returns true for a real NoeticErrorImpl instance (regression)', () => {
@@ -112,5 +112,104 @@ describe('spawn_summary_failed', () => {
     assert(err.noeticError.kind === 'spawn_summary_failed');
     expect(err.noeticError.childOutput).toBe('raw findings');
     expect(err.message).toBe("Spawn 'research' summary failed: summarizer timed out");
+  });
+});
+
+describe('NoeticErrorImpl cause (#140)', () => {
+  class TypedFailure extends Error {
+    constructor(readonly code: string) {
+      super(code);
+      this.name = 'TypedFailure';
+    }
+  }
+
+  it('sets the standard Error.cause to a step_failed error’s cause', () => {
+    const original = new TypedFailure('http_500');
+    const err = new NoeticErrorImpl({
+      kind: 'step_failed',
+      stepId: 'inner',
+      cause: original,
+      retriesExhausted: false,
+    });
+    expect(err.cause).toBe(original);
+    expect(err.noeticError.kind).toBe('step_failed');
+  });
+
+  it('sets Error.cause to a spawn_summary_failed error’s summaryCause', () => {
+    const original = new Error('summary broke');
+    const err = new NoeticErrorImpl({
+      kind: 'spawn_summary_failed',
+      stepId: 's',
+      childOutput: null,
+      summaryCause: original,
+    });
+    expect(err.cause).toBe(original);
+  });
+
+  it('leaves Error.cause unset for a kind that carries no cause', () => {
+    const err = new NoeticErrorImpl({
+      kind: 'cancelled',
+    });
+    expect('cause' in err).toBe(false);
+  });
+});
+
+describe('failureCause', () => {
+  it('returns the error at the bottom of nested step_failed wrappers', () => {
+    const original = new RangeError('deep');
+    const inner = new NoeticErrorImpl({
+      kind: 'step_failed',
+      stepId: 'inner',
+      cause: original,
+      retriesExhausted: false,
+    });
+    const outer = new NoeticErrorImpl({
+      kind: 'step_failed',
+      stepId: 'outer',
+      cause: inner,
+      retriesExhausted: false,
+    });
+    expect(failureCause(outer)).toBe(original);
+  });
+
+  it('returns a NoeticError without a cause as is', () => {
+    const cancelled = new NoeticErrorImpl({
+      kind: 'cancelled',
+    });
+    expect(failureCause(cancelled)).toBe(cancelled);
+  });
+
+  it('returns a plain error or a non-error value as is', () => {
+    const plain = new Error('plain');
+    expect(failureCause(plain)).toBe(plain);
+    expect(failureCause('text')).toBe('text');
+    expect(failureCause(undefined)).toBeUndefined();
+  });
+
+  it('stops at a plain Error even when that error has its own cause', () => {
+    const root = new Error('root');
+    const plain = new Error('plain', {
+      cause: root,
+    });
+    const wrapped = new NoeticErrorImpl({
+      kind: 'step_failed',
+      stepId: 's',
+      cause: plain,
+      retriesExhausted: false,
+    });
+    expect(failureCause(wrapped)).toBe(plain);
+  });
+
+  it('stops after a bounded depth on a cyclic chain', () => {
+    const a = new NoeticErrorImpl({
+      kind: 'step_failed',
+      stepId: 'a',
+      cause: new Error('placeholder'),
+      retriesExhausted: false,
+    });
+    Object.defineProperty(a, 'cause', {
+      value: a,
+    });
+    expect(failureCause(a)).toBe(a);
   });
 });

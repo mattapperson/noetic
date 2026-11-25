@@ -1,7 +1,7 @@
 # Error Model
 
 > **Depends On:** `01-step-type` (stepId concept)
-> **Exports:** `NoeticError`, `NoeticConfigError`, `isNoeticError`, `isNoeticConfigError`
+> **Exports:** `NoeticError`, `NoeticConfigError`, `isNoeticError`, `isNoeticConfigError`, `failureCause`
 
 ---
 
@@ -32,6 +32,8 @@ type NoeticError =
 ### Step Failure
 
 Retry per policy (see `RetryPolicy` in `02-step-variants`). If retries exhausted, throw `step_failed`. The parent (loop, inParallel, etc.) decides what to do.
+
+The error a step threw is never lost. `step_failed.cause` holds it as thrown (the last attempt's error after retries); a thrown value that is not an `Error` is wrapped in an `Error` whose own `cause` is that value. Every `NoeticErrorImpl` whose kind carries an error (`cause`, or `summaryCause` for `spawn_summary_failed`) also sets the standard `Error.cause` to it, so `error.cause instanceof MyFailure` works on the error a caller catches. An error that crosses several code steps is wrapped once per step; `failureCause(e)` follows `cause` through every wrapping `NoeticError` and returns the first value that is not one — the error the failure started from — so a host can branch on a typed failure (a billing code, a provider's HTTP status) without parsing the message.
 
 ### Model Provider Failure
 
