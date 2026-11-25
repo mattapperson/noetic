@@ -1757,6 +1757,17 @@ hooks: {
 
 `AgentHarness` is generic over `TParams`. The `config` property exposes `AgentConfig<TParams>`, and steps/tools access params via `ctx.harness.config.params`. Execution surfaces are configured via the `environment` option (`{ storage?: { adapter?, checkpointStore?, layerStateStore?, stepLedgerRetention? }, fs?, shell?, subprocess? }`); every field defaults to an in-memory adapter, except `checkpointStore`, which defaults to a store over `storage.adapter` when one is given. The top-level `durability?: boolean` option (default on whenever storage is given) turns every durability surface off when `false`. Usage carries both `cost` (what the work cost, replayed work included) and `billedCost` (what was paid now — `0` for replayed work) on `LLMResponse`, `StepMeta`, `Context`, `HarnessResponse`, and `SessionUsage`. `Context`, `HarnessResponse`, and `SessionUsage` also carry `heldCost`: spend held at its ceiling for cut-off paid calls with no settled bill yet (see Paid dispatches). The `fs` property exposes the configured `FsAdapter`, and `shell` the configured `ShellAdapter`. Default context layers come in through `contextLayers`, and the default model-provider configuration through `callModelDefaults` (an `LlmProviderConfig`).
 
+### Step hooks
+
+```typescript
+new AgentHarness({ /* … */ hooks: {
+  beforeStep: async (step, ctx) => { /* before each step executes, nested ones included */ },
+  afterStep: async (step, result, ctx) => { /* after success, before the ledger record */ },
+} });
+```
+
+Not run for a step replayed from the ledger; `afterStep` not run for a failed or cancelled step. A hook that throws fails its step (`step_failed` with the hook error as `cause`; Noetic errors pass through); a step whose `afterStep` threw is not recorded.
+
 ### Sessions and the Message Queue
 
 Each `threadId` is a **session**: a long-lived broadcaster + message queue + item log carried across turns. `execute()` enqueues a message on the session identified by `options.threadId` (or a default thread) and returns `Promise<void>` once the message is accepted. Response is observed via session-scoped accessors.

@@ -442,8 +442,10 @@ interface AgentHooks {
 
 | Hook | When it fires | Typical use |
 |---|---|---|
-| `beforeStep` | Before each step executes. | Logging, injecting state, guard checks. |
-| `afterStep` | After each step completes. | Metrics collection, state updates, audit logging. |
+| `beforeStep` | Before each step executes, nested steps included, on the context the step runs on. | Logging, timing, guard checks. |
+| `afterStep` | After a step succeeded, with its output, before it is recorded. Not for a step that failed or was cancelled. | Metrics collection, audit logging. |
+
+A parent's `beforeStep` runs before its children's and its `afterStep` after theirs. A step [replayed on resume](/docs/framework/durability#step-level-resume) does not execute, so neither hook runs for it; watch `step_replayed` for those. A hook that throws fails the step it ran for: a Noetic error passes through unchanged, and any other error becomes `step_failed` with the hook's error as its `cause`. A step whose `afterStep` threw is not recorded, so a resume runs it again.
 
 ```ts
 const harness = new AgentHarness({

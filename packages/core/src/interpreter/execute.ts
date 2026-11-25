@@ -1,6 +1,11 @@
 import type { ContextData } from '@noetic-tools/context';
-import type { Context, Item, Step } from '@noetic-tools/types';
-import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
+import type { AgentHooks, Context, Item, Step } from '@noetic-tools/types';
+import {
+  frameworkCast,
+  isNoeticConfigError,
+  isNoeticError,
+  NoeticErrorImpl,
+} from '@noetic-tools/types';
 import { recordedScopeOf, recordStepOutput } from '../expression/step-outputs';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
@@ -218,6 +223,33 @@ async function recordToLedger<TContext, I, O>(opts: {
   });
 }
 
+/**
+ * Run one of the harness's step hooks (spec 08 § Step hooks). A hook that throws fails
+ * the step it ran for: a Noetic error passes through as is, anything else becomes
+ * `step_failed` with the hook's error as its cause.
+ */
+async function runStepHook(stepId: string, hook: () => Promise<void>): Promise<void> {
+  try {
+    await hook();
+  } catch (error) {
+    if (isNoeticError(error) || isNoeticConfigError(error)) {
+      throw error;
+    }
+    throw new NoeticErrorImpl({
+      kind: 'step_failed',
+      stepId,
+      cause: error instanceof Error ? error : new Error(String(error)),
+      retriesExhausted: false,
+    });
+  }
+}
+
+/** The step hooks a context's harness was configured with, when it has any. */
+function stepHooksOf(ctx: Context): AgentHooks | undefined {
+  const hooks = ctx.harness.config.hooks;
+  return hooks?.beforeStep || hooks?.afterStep ? hooks : undefined;
+}
+
 //#endregion
 
 /**
@@ -361,8 +393,15 @@ async function executeStep<TContext, I, O>(
 
   // Parking needs to know which steps are in flight (spec 23 § Parked turns).
   const leaveParking = ledger?.parking.enter(lane?.currentDispatch()?.path);
+  const hooks = stepHooksOf(baseCtx);
+  const hookStep = frameworkCast<Step>(step);
+  const hookCtx = frameworkCast<Context>(stepCtx);
   let result: O;
   try {
+    const before = hooks?.beforeStep;
+    if (before) {
+      await runStepHook(step.id, () => before(hookStep, hookCtx));
+    }
     await beginEmitItems(step, input, stepCtx);
     result = await dispatchStepKind(step, input, {
       stepCtx,
@@ -373,6 +412,13 @@ async function executeStep<TContext, I, O>(
     // Inside the try, so an item the schemas refuse fails the dispatch like any other
     // error; before the ledger record, so the entry holds the items and replays them.
     await emitStepItems(step, result, stepCtx);
+    // The step completes only once afterStep returns: one that throws fails it, and
+    // the step is not recorded, so a resume runs it again.
+    const after = hooks?.afterStep;
+    if (after) {
+      const output = result;
+      await runStepHook(step.id, () => after(hookStep, output, hookCtx));
+    }
     // A JSON workflow node's output is readable as `$steps.<id>` from here on (spec 33).
     const outputScope = recordedScopeOf(step);
     if (outputScope) {

@@ -26,9 +26,19 @@ import type { Span, TraceExporter } from './observability';
 import type { Step, StepLike, StepsInput, StepsOutput, ValidStepChain } from './step';
 import type { Tool } from './tool';
 
-/** @public Optional lifecycle hooks invoked before and after each step execution. */
+/**
+ * @public Hooks the interpreter runs around every step it executes, nested steps
+ * included (spec 08 § Step hooks). A step replayed from the ledger does not execute,
+ * so neither hook runs for it. A hook that throws fails the step it ran for.
+ */
 export interface AgentHooks {
+  /** Runs before the step executes, on the context the step runs on. */
   beforeStep?: (step: Step, ctx: Context) => Promise<void>;
+  /**
+   * Runs once the step succeeded, with its output, before it is recorded: the step
+   * completes only when this returns. Not called for a step that failed or was
+   * cancelled.
+   */
   afterStep?: (step: Step, result: unknown, ctx: Context) => Promise<void>;
 }
 
