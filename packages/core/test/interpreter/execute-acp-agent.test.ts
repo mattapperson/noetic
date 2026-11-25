@@ -1256,6 +1256,8 @@ describe('executeAcpAgent — readable agent errors (#96)', () => {
     expect(String(error)).not.toContain('[object Object]');
     assert(error.noeticError.kind === 'step_failed');
     expect(error.noeticError.cause.message).toBe('Authentication required (-32000)');
+    // The rejection's code stays readable to a caller that branches on it.
+    expect(Reflect.get(error.noeticError.cause, 'code')).toBe(-32000);
   });
 
   it("keeps an Error-shaped JSON-RPC rejection's data detail when mode selection fails", async () => {
@@ -1294,6 +1296,39 @@ describe('executeAcpAgent — readable agent errors (#96)', () => {
     expect(error.noeticError.cause.message).toBe(
       'Internal error: mode read-only is not available (-32603)',
     );
+  });
+});
+
+describe('executeAcpAgent — aborted during setup', () => {
+  it("fails with kind 'cancelled' when the run is aborted while the session opens", async () => {
+    const { ctx } = harnessCtx();
+    let closes = 0;
+    const acpStep = step.acpAgent({
+      id: 'aborted-setup',
+      agent: fakeAgent({
+        onNewSession: () => {
+          ctx.abort('user stopped the run');
+        },
+        // The agent answers the aborted request with its own rejection.
+        throwOnNewSession: {
+          code: -32800,
+          message: 'Request cancelled',
+        },
+        onClose: () => {
+          closes++;
+        },
+      }),
+      prompt: 'go',
+    });
+
+    const error = await execute(acpStep, undefined, ctx).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('cancelled');
+    expect(closes).toBe(1);
   });
 });
 

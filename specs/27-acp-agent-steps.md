@@ -93,9 +93,11 @@ A session's `modes` and `configOptions` come from the answer that opened it —
 `current_mode_update` moves `modes.currentModeId`, `config_option_update`
 replaces `configOptions`. A loaded session that advertised modes therefore
 takes a follow-up `setMode`, and one that advertised none still refuses it.
-`setModel` selects the value of the agent's `model` config option (category
-`model`, type `select`) through `session/set_config_option`; an agent that
-advertises no such option refuses it.
+`setModel` selects the value of the agent's `model` config option (a `select`
+with category `model`, else one with id `model`) through
+`session/set_config_option`. An agent that advertises no such option is sent
+the draft `session/set_model` request it may predate config options with; one
+that answers "method not found" refuses it with `AcpCapabilityError`.
 
 A capability the agent did not advertise is refused **before anything reaches
 the wire**, with `AcpCapabilityError` — loading a session, switching mode or
@@ -107,7 +109,11 @@ model selection, or the prompt — fails the step with `step_failed` whose cause
 reads the rejection in full: its message, its `data` detail (`data.message`,
 `data.details`, or the serialized data) and its code, as in
 `Internal error: Authentication required (-32603)`. A protocol error object is
-never reduced to `[object Object]` or a bare "Internal error".
+never reduced to `[object Object]` or a bare "Internal error". The cause keeps
+the rejection's `code` and `data`, with the original rejection as its own
+`cause`, so a caller can still branch on a code such as auth-required. An
+abort (a `DOMException`) is not a protocol error, and a step aborted while its
+session opens fails with `cancelled`.
 
 ## Transport
 
@@ -172,7 +178,12 @@ process Noetic spawns is rarely the agent itself. `localMachine()` and
 `stdioAcpTransport` start every process as the leader of its own process group
 (POSIX) and, when the transport closes or its signal aborts, stop the whole
 group: end its stdin, `SIGTERM`, a two-second grace period, then `SIGKILL`; on
-Windows, `taskkill /T /F` on its tree. Every wait is bounded, so an
+Windows, `taskkill /T /F` on its tree, even when the immediate child already
+exited, so its descendants still stop. A leader that exited but is not yet
+reaped makes its group refuse signals (EPERM on macOS); shutdown then waits for
+it to be reaped rather than failing. A child that is not a group leader is
+signalled itself. `localMachine().close()` stops everything it started in
+parallel. Every wait is bounded, so an
 uncooperative child cannot hang the host, and our ends of the pipes are
 released last, so a grandchild that inherited them cannot keep the host alive.
 `close()` is idempotent — every call shares one shutdown. A missing binary, or
@@ -542,8 +553,13 @@ for protocol-native consumers.
 
 The client accepts every `session/update` variant of the current protocol, so
 normal traffic from current bridges never draws a `-32602 Invalid params`
-answer. Variants with no transcript content still reach the host and the event
-surface; the turn accumulator ignores them.
+answer. A variant newer than the protocol library is taken off the stream
+before the library sees it and handed to the host as it is, so it reaches the
+`acp_event` stream and `acp.<sessionUpdate>` rather than being rejected.
+Variants with no transcript content still reach the host and the event
+surface; the turn accumulator ignores them, except the draft plan updates: a
+`plan_update` with `items` replaces the plan snapshot and `plan_removed` clears
+it.
 
 **Usage.** Two different numbers, kept apart:
 

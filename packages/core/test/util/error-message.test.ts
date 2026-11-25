@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { errorMessage, isRpcError } from '../../src/util/error-message';
+import { errorMessage, isRpcError, RpcFailure } from '../../src/util/error-message';
 
 class RequestError extends Error {
   constructor(
@@ -120,5 +120,59 @@ describe('isRpcError', () => {
     ).toBe(false);
     expect(isRpcError('x')).toBe(false);
     expect(isRpcError(null)).toBe(false);
+  });
+});
+
+describe('errorMessage edge cases', () => {
+  it('keeps an empty Error message empty', () => {
+    expect(errorMessage(new Error())).toBe('');
+  });
+
+  it('names a bare code', () => {
+    expect(
+      errorMessage({
+        code: -32603,
+      }),
+    ).toBe('JSON-RPC error (-32603)');
+  });
+
+  it('reads a non-RPC object by its message', () => {
+    expect(
+      errorMessage({
+        message: 'plain',
+      }),
+    ).toBe('plain');
+  });
+
+  it('treats a DOMException as a plain error, not a JSON-RPC one', () => {
+    const abort = new DOMException('This operation was aborted', 'AbortError');
+    expect(isRpcError(abort)).toBe(false);
+    expect(errorMessage(abort)).toBe('This operation was aborted');
+  });
+});
+
+describe('RpcFailure', () => {
+  it('carries the readable message, the code, the data and the original', () => {
+    const original = new RequestError(-32000, 'Authentication required', {
+      methods: [
+        'oauth',
+      ],
+    });
+    const failure = new RpcFailure(original);
+    expect(failure.message).toBe('Authentication required: {"methods":["oauth"]} (-32000)');
+    expect(failure.code).toBe(-32000);
+    expect(failure.data).toEqual({
+      methods: [
+        'oauth',
+      ],
+    });
+    expect(failure.cause).toBe(original);
+  });
+
+  it('leaves code and data undefined for a value without them', () => {
+    const failure = new RpcFailure('boom');
+    expect(failure.message).toBe('boom');
+    expect(failure.code).toBeUndefined();
+    expect(failure.data).toBeUndefined();
   });
 });

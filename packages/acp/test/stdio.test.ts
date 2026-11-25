@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -168,6 +169,33 @@ describe('stdio transport start failures', () => {
   });
 });
 
+describe.skipIf(!POSIX)('stdio transport aborted while starting', () => {
+  it('rejects and stops the process when the signal aborts before it has started', async () => {
+    const controller = new AbortController();
+    const opening = stdioAcpTransport({
+      agentId: 'racing',
+      command: process.execPath,
+      args: [
+        FIXTURE,
+        'stubborn',
+      ],
+    })({
+      cwd: tmpdir(),
+      signal: controller.signal,
+    });
+    // spawn() has run; its 'spawn' event has not been seen yet.
+    controller.abort(new Error('stop'));
+
+    const error = await opening.then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(isAcpConnectError(error)).toBe(true);
+    expect(String(error)).toContain('aborted while starting');
+  }, 10e3);
+});
+
 describe.skipIf(!POSIX)('stopProcessTree', () => {
   it('returns at once for a child that has already exited', async () => {
     const child = spawn(
@@ -221,5 +249,62 @@ describe.skipIf(!POSIX)('stopProcessTree', () => {
     });
     await expectStopped(pids);
     expect(Date.now() - started).toBeLessThan(1.5e3);
+  });
+});
+
+describe.skipIf(!POSIX)('stopProcessTree edge cases', () => {
+  it('stops cleanly when the leader exited but is not yet reaped (EPERM)', async () => {
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        '0',
+      ],
+      {
+        detached: true,
+        stdio: [
+          'pipe',
+          'pipe',
+          'ignore',
+        ],
+      },
+    );
+    await new Promise((resolve) => child.once('spawn', resolve));
+    // Block the event loop so the exited leader stays unreaped.
+    const until = Date.now() + 500;
+    while (Date.now() < until) {
+      // busy wait
+    }
+    await stopProcessTree(child, {
+      graceMs: 50,
+    });
+    expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+  });
+
+  it('stops a child that was not started as a group leader', async () => {
+    const child = spawn(
+      process.execPath,
+      [
+        FIXTURE,
+        'child',
+        'stubborn',
+      ],
+      {
+        stdio: [
+          'pipe',
+          'pipe',
+          'ignore',
+        ],
+      },
+    );
+    await new Promise((resolve) => child.once('spawn', resolve));
+    const pid = child.pid;
+    assert(pid);
+    await stopProcessTree(child, {
+      graceMs: 50,
+    });
+    await expectStopped([
+      pid,
+    ]);
   });
 });

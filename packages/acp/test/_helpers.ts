@@ -8,7 +8,7 @@
  */
 
 import type * as acp from '@agentclientprotocol/sdk';
-import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk';
+import { AgentSideConnection, ndJsonStream, RequestError } from '@agentclientprotocol/sdk';
 import type {
   AcpAgentConnection,
   AcpBoundPermissionHandler,
@@ -191,6 +191,8 @@ export interface FakeAgentScript {
   loadResponse?: acp.LoadSessionResponse;
   /** The `usage` the `session/prompt` answer reports. */
   usage?: acp.Usage;
+  /** Answer the draft `session/set_model` request (agents that predate config options). */
+  acceptsSetModel?: boolean;
   /** Stop reason returned from `session/prompt`. Defaults to `end_turn`. */
   stopReason?: acp.PromptResponse['stopReason'];
   /**
@@ -213,6 +215,8 @@ export interface FakeAgentCalls {
   cancel: acp.CancelNotification[];
   setMode: acp.SetSessionModeRequest[];
   setConfigOption: acp.SetSessionConfigOptionRequest[];
+  /** Draft `session/set_model` requests, as sent. */
+  setModel: Record<string, unknown>[];
   authenticate: acp.AuthenticateRequest[];
 }
 
@@ -225,6 +229,7 @@ function emptyCalls(): FakeAgentCalls {
     cancel: [],
     setMode: [],
     setConfigOption: [],
+    setModel: [],
     authenticate: [],
   };
 }
@@ -306,6 +311,13 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
       async setSessionMode(params) {
         calls.setMode.push(params);
         return {};
+      },
+      async extMethod(method, params) {
+        if (method === 'session/set_model' && script.acceptsSetModel) {
+          calls.setModel.push(params);
+          return {};
+        }
+        throw RequestError.methodNotFound(method);
       },
       async setSessionConfigOption(params) {
         calls.setConfigOption.push(params);

@@ -222,9 +222,9 @@ step.acpAgent({
 });
 ```
 
-Each is checked against what the agent advertised — on `session/new`, or on `session/load` for a loaded session, so a follow-up step can pick a mode for a session it loaded. Asking for a mode from an agent that reports none, or a model from one with no `model` config option, throws `AcpCapabilityError` rather than failing opaquely mid-turn. `session.configOptions` lists the options the agent advertises (model, reasoning effort, …) and follows `config_option_update`.
+Each is checked against what the agent advertised — on `session/new`, or on `session/load` for a loaded session, so a follow-up step can pick a mode for a session it loaded. Asking for a mode from an agent that reports none throws `AcpCapabilityError` rather than failing opaquely mid-turn. A model is set through the agent's `model` config option; an agent without one is sent the older `session/set_model` request, and one that knows neither throws `AcpCapabilityError`. `session.configOptions` lists the options the agent advertises (model, reasoning effort, …) and follows `config_option_update`.
 
-When the agent itself rejects a request — `Authentication required` on `session/new`, an unknown mode — the step fails with `step_failed` and the agent's message, its error detail and code, never `[object Object]`.
+When the agent itself rejects a request — `Authentication required` on `session/new`, an unknown mode — the step fails with `step_failed` and the agent's message, its error detail and code, never `[object Object]`. The error's `cause` still has the agent's `code` and `data`.
 
 ## Giving the agent your tools
 
@@ -414,7 +414,7 @@ for await (const chunk of harness.getTextStream()) {
 | `tool_call` | `getItemStream()` as a function call |
 | every other update — `plan`, `available_commands_update`, `current_mode_update`, `tool_call_update`, `config_option_update`, `session_info_update`, `usage_update`, … | `getFullStream()` as `acp.<update>` |
 
-Every notification is *also* emitted raw as an `acp_event` framework event, `{ stepId, agentId, sessionId, update }`.
+Every notification is *also* emitted raw as an `acp_event` framework event, `{ stepId, agentId, sessionId, update }`. An update type newer than noetic's protocol library still arrives this way instead of being rejected.
 
 **Usage.** A `usage_update` (Codex sends `{ used, size }`) is how full the agent's context window is, not tokens you were billed for, so it stays on the event stream and never becomes token usage or cost. The usage an agent reports with its answer is kept as `reportedUsage` on the turn result and on `response.completed`.
 

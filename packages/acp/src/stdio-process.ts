@@ -49,23 +49,25 @@ function waitForExit(child: ChildProcess, ms: number): Promise<void> {
 }
 
 /**
- * Signal a process group. False when the group no longer exists. A group whose
- * only members are zombies awaiting reaping answers EPERM to a probe on macOS;
- * that still counts as present.
+ * What signalling a process group found: `sent`; `gone` (ESRCH — no such
+ * group); or `zombie` (EPERM — on macOS a group whose only member is an exited
+ * leader not yet reaped refuses signals).
  */
-function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
+type GroupSignal = 'sent' | 'gone' | 'zombie';
+
+function signalGroup(pid: number, signal: NodeJS.Signals | 0): GroupSignal {
   try {
     process.kill(-pid, signal);
-    return true;
+    return 'sent';
   } catch (error) {
     if (!(error instanceof Error) || !('code' in error)) {
       throw error;
     }
     if (error.code === 'ESRCH') {
-      return false;
+      return 'gone';
     }
-    if (error.code === 'EPERM' && signal === 0) {
-      return true;
+    if (error.code === 'EPERM') {
+      return 'zombie';
     }
     throw error;
   }
@@ -74,13 +76,42 @@ function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
 /** Poll until the group is gone or `ms` passes. True when it is gone. */
 async function waitForGroup(pid: number, ms: number): Promise<boolean> {
   const deadline = Date.now() + ms;
-  while (signalGroup(pid, 0)) {
+  while (signalGroup(pid, 0) !== 'gone') {
     if (Date.now() >= deadline) {
       return false;
     }
     await wait(POLL_MS);
   }
   return true;
+}
+
+/**
+ * Signal the group, reaping an exited leader first when the group refuses
+ * signals. False when there is nothing left to signal.
+ */
+async function signalLiveGroup(
+  child: ChildProcess,
+  pid: number,
+  signal: NodeJS.Signals,
+): Promise<boolean> {
+  const first = signalGroup(pid, signal);
+  if (first !== 'zombie') {
+    return first === 'sent' || signalChild(child, signal);
+  }
+  await waitForExit(child, KILL_WAIT_MS);
+  // Still refused once the leader is reaped: no member we may signal remains.
+  return signalGroup(pid, signal) === 'sent';
+}
+
+/**
+ * A child that was not started as a group leader has no group to signal; stop
+ * the child itself rather than leave it running.
+ */
+function signalChild(child: ChildProcess, signal: NodeJS.Signals): boolean {
+  if (exited(child)) {
+    return false;
+  }
+  return child.kill(signal);
 }
 
 function killWindowsTree(pid: number): Promise<void> {
@@ -164,20 +195,22 @@ async function signalTree(child: ChildProcess, graceMs: number): Promise<void> {
     return;
   }
   if (process.platform === 'win32') {
-    if (exited(child)) {
-      return;
-    }
+    // Even when the child itself exited, its descendants may not have:
+    // taskkill answers 128 when there is nothing left.
     await killWindowsTree(pid);
     return;
   }
-  if (!signalGroup(pid, 'SIGTERM')) {
+  if (!(await signalLiveGroup(child, pid, 'SIGTERM'))) {
     return;
   }
-  if (await waitForGroup(pid, graceMs)) {
-    await waitForExit(child, KILL_WAIT_MS);
+  const groupGone = await waitForGroup(pid, graceMs);
+  // A child that is not a group leader has no group to watch: it gets the
+  // kill wait as its grace period.
+  await waitForExit(child, groupGone ? KILL_WAIT_MS : 0);
+  if (groupGone && exited(child)) {
     return;
   }
-  signalGroup(pid, 'SIGKILL');
+  await signalLiveGroup(child, pid, 'SIGKILL');
   await Promise.all([
     waitForExit(child, KILL_WAIT_MS),
     waitForGroup(pid, KILL_WAIT_MS),

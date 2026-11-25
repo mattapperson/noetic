@@ -222,6 +222,20 @@ export class AcpTurnAccumulator {
       ];
       return;
     }
+    if (update.sessionUpdate === 'plan_update') {
+      // The draft plan protocol: an item plan replaces the snapshot; a file or
+      // markdown plan has no entries to fold, and stays on the event stream.
+      if (update.plan.type === 'items') {
+        this.plan = [
+          ...update.plan.entries,
+        ];
+      }
+      return;
+    }
+    if (update.sessionUpdate === 'plan_removed') {
+      this.plan = [];
+      return;
+    }
     if (update.sessionUpdate === 'available_commands_update') {
       this.availableCommands = [
         ...update.availableCommands,

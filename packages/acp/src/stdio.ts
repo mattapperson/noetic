@@ -96,10 +96,12 @@ export function localMachine(agentId = 'local'): AcpMachineFactory {
         }),
       spawn: (command) => start(command, serverEnv(command.env)),
       async close() {
-        for (const transport of started) {
-          await transport.close().catch(() => undefined);
-        }
+        // In parallel: each stop may take its whole grace period.
+        const closing = [
+          ...started,
+        ].map((transport) => transport.close().catch(() => undefined));
         started.clear();
+        await Promise.all(closing);
       },
     };
   };

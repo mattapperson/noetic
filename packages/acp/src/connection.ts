@@ -35,6 +35,7 @@ import type { WatchedTransport } from './liveness';
 import { watchTransport } from './liveness';
 import type { ToolBridge } from './tool-bridge';
 import { AcpTurnAccumulator } from './turn';
+import { divertNewerUpdates } from './update-filter';
 
 //#region Types
 
@@ -86,6 +87,15 @@ export function assertPromptContentSupported(
       });
     }
   }
+}
+
+/** JSON-RPC's "method not found". */
+const METHOD_NOT_FOUND = -32601;
+
+function isMethodNotFound(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && Reflect.get(error, 'code') === METHOD_NOT_FOUND
+  );
 }
 
 //#endregion
@@ -235,24 +245,65 @@ class AcpSessionImpl implements AcpSession {
   }
 
   async setModel(modelId: string): Promise<void> {
-    const model = this.options?.find(
-      (option) => option.category === 'model' && option.type === 'select',
+    const model = this.modelOption();
+    if (model && this.agent.setSessionConfigOption) {
+      const response = await Promise.race([
+        this.agent.setSessionConfigOption({
+          sessionId: this.sessionId,
+          configId: model.id,
+          value: modelId,
+        }),
+        this.death,
+      ]);
+      this.options = response.configOptions;
+      return;
+    }
+    await this.setModelDirectly(modelId);
+  }
+
+  /**
+   * The `model` config option: by category, else by id, for an agent that
+   * leaves the (optional, UX-only) category off.
+   */
+  private modelOption(): acp.SessionConfigOption | undefined {
+    const selects = (this.options ?? []).filter((option) => option.type === 'select');
+    return (
+      selects.find((option) => option.category === 'model') ??
+      selects.find((option) => option.id === 'model')
     );
-    if (!model || !this.agent.setSessionConfigOption) {
+  }
+
+  /**
+   * An agent that advertises no `model` config option may still take the
+   * draft `session/set_model` request (it predates config options). One that
+   * does not know it answers "method not found", which is the capability
+   * error a step expects.
+   */
+  private async setModelDirectly(modelId: string): Promise<void> {
+    const request = this.agent.extMethod?.bind(this.agent);
+    if (!request) {
       throw new AcpCapabilityError({
         agentId: this.agentId,
         capability: 'session/set_config_option:model',
       });
     }
-    const response = await Promise.race([
-      this.agent.setSessionConfigOption({
-        sessionId: this.sessionId,
-        configId: model.id,
-        value: modelId,
-      }),
-      this.death,
-    ]);
-    this.options = response.configOptions;
+    try {
+      await Promise.race([
+        request('session/set_model', {
+          sessionId: this.sessionId,
+          modelId,
+        }),
+        this.death,
+      ]);
+    } catch (error) {
+      if (isMethodNotFound(error)) {
+        throw new AcpCapabilityError({
+          agentId: this.agentId,
+          capability: 'session/set_config_option:model',
+        });
+      }
+      throw error;
+    }
   }
 }
 
@@ -440,17 +491,18 @@ export async function openAcpConnection(
   const client = new NoeticAcpClient({
     host,
     permitsBridged: opts.tools?.permits,
-    onNotify: (notification) => {
-      sink?.(notification);
-      host.onSessionUpdate(notification);
-    },
+    onNotify: (notification) => notify(notification),
   });
   // The protocol library never rejects pending responses when the stream ends,
   // so without this a dead agent leaves every request hanging forever.
   const watch = watchTransport(opts.agentId, opts.transport, opts.signal);
+  const notify = (notification: AcpSessionNotification): void => {
+    sink?.(notification);
+    host.onSessionUpdate(notification);
+  };
   const agent = new ClientSideConnection(
     () => client,
-    ndJsonStream(opts.transport.writable, watch.readable),
+    ndJsonStream(opts.transport.writable, divertNewerUpdates(watch.readable, notify)),
   );
 
   let initialized: acp.InitializeResponse;

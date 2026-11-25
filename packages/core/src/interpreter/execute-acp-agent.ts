@@ -41,7 +41,7 @@ import {
 import { assertAgentTakesTools } from '../builders/acp-agent-checks';
 import { runtimeOf } from '../connections/model-tools';
 import type { AcpSessionStore } from '../runtime/acp-session-store';
-import { errorMessage, isRpcError } from '../util/error-message';
+import { isRpcError, RpcFailure } from '../util/error-message';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
 import { renderLayerContext } from './acp-layers';
@@ -701,12 +701,7 @@ function turnFailure(
     // A JSON-RPC rejection keeps its detail (`data`) in the message, so a
     // failure reads "Internal error: Authentication required (-32603)", never
     // "[object Object]" or a bare "Internal error".
-    cause:
-      cause instanceof Error && !isRpcError(cause)
-        ? cause
-        : new Error(errorMessage(cause), {
-            cause,
-          }),
+    cause: cause instanceof Error && !isRpcError(cause) ? cause : new RpcFailure(cause),
     retriesExhausted: false,
   });
 }
