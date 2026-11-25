@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.10 (2026-11-25)
+
+* feat: an agent step's turn reaches the host as a model call's does (#171) ([196b1e1](https://github.com/mattapperson/noetic/commit/196b1e1)), closes [#171](https://github.com/mattapperson/noetic/issues/171) [#169](https://github.com/mattapperson/noetic/issues/169)
+
 ## @noetic-tools/core-v5.22.0-next.9 (2026-11-25)
 
 * feat: an agent step's subagents are nested agents on the ordinary event stream (#170) ([31dd1b9](https://github.com/mattapperson/noetic/commit/31dd1b9)), closes [#170](https://github.com/mattapperson/noetic/issues/170) [#169](https://github.com/mattapperson/noetic/issues/169)
