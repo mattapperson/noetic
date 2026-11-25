@@ -14,7 +14,7 @@ import { spawn } from 'node:child_process';
 
 //#region Constants
 
-/** How long a group has to exit after SIGTERM before it is killed. */
+/** @public How long a group has to exit after SIGTERM before it is killed. */
 export const TERM_GRACE_MS = 2e3;
 /** How long to wait for the group to vanish after SIGKILL, and for taskkill. */
 const KILL_WAIT_MS = 1e3;
@@ -122,7 +122,7 @@ function killWindowsTree(pid: number): Promise<void> {
 
 //#region Public API
 
-/** Options for {@link stopProcessTree}. */
+/** @public Options for {@link stopProcessTree}. */
 export interface StopProcessTreeOptions {
   /** Grace period between SIGTERM and SIGKILL. Default {@link TERM_GRACE_MS}. */
   graceMs?: number;
@@ -134,6 +134,11 @@ export interface StopProcessTreeOptions {
  * our ends of the pipes, which a descendant that left the group (`setsid`)
  * may still hold — such a descendant must manage its own lifetime. Bounded
  * throughout, so an uncooperative child cannot hang the host.
+ *
+ * For a host that spawns its own agent process (a sandbox-wrapped command, a
+ * transport that rewrites lines): spawn it with `detached: true` on POSIX so it
+ * leads its own group, and call this from the transport's `close()`.
+ * @public
  */
 export async function stopProcessTree(
   child: ChildProcess,

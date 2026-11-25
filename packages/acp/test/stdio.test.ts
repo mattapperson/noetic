@@ -10,8 +10,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { AcpTransport } from '@noetic-tools/types';
 import { isAcpConnectError } from '@noetic-tools/types';
-import { localMachine, stdioAcpTransport } from '../src/stdio';
-import { stopProcessTree } from '../src/stdio-process';
+import { localMachine, stdioAcpTransport, stopProcessTree } from '../src/stdio';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/stdio-tree.ts', import.meta.url));
 const POSIX = process.platform !== 'win32';

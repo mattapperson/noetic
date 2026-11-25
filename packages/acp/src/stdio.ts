@@ -21,6 +21,9 @@ import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
 import { serverEnv } from './server-env';
 import { stopProcessTree } from './stdio-process';
 
+export type { StopProcessTreeOptions } from './stdio-process';
+export { stopProcessTree, TERM_GRACE_MS } from './stdio-process';
+
 /** @public How to launch an ACP agent as a child process. */
 export interface StdioAgentSpec {
   /** Identifier used in error messages. */

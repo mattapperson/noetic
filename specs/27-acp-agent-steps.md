@@ -178,7 +178,10 @@ released last, so a grandchild that inherited them cannot keep the host alive.
 `close()` is idempotent — every call shares one shutdown. A missing binary, or
 a signal already aborted, rejects when the transport is opened, with
 `AcpConnectError`, not later at `close()`. A descendant that leaves the group
-(`setsid`) is outside this and must manage its own lifetime.
+(`setsid`) is outside this and must manage its own lifetime. A host that spawns
+the agent itself — a sandbox-wrapped command, a transport that rewrites lines —
+gets the same shutdown from `stopProcessTree(child, { graceMs? })`
+(`@noetic-tools/acp/stdio`), given a child spawned with `detached: true`.
 
 **Presets.** `claudeCode()` and `codex()` launch the maintained bridges,
 `npx -y @agentclientprotocol/claude-agent-acp` and

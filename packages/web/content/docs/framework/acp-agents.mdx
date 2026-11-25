@@ -66,7 +66,7 @@ Every preset accepts `command`, `args`, and `env` overrides, a `machine` to run 
 
 ### Stopping the agent's processes
 
-Bridges usually start through a wrapper — `npx`, or a Node launcher that runs a native binary as its child — so the process noetic spawns is rarely the agent itself. A local agent therefore runs as the leader of its own process group, and closing the connection (or aborting the step) stops the whole group: stdin is closed, then `SIGTERM`, a two-second grace period, then `SIGKILL`; on Windows, `taskkill /T /F` on its tree. No agent process or inherited pipe outlives the connection to keep your host running. A missing binary fails when the connection opens, with `AcpConnectError`.
+Bridges usually start through a wrapper — `npx`, or a Node launcher that runs a native binary as its child — so the process noetic spawns is rarely the agent itself. A local agent therefore runs as the leader of its own process group, and closing the connection (or aborting the step) stops the whole group: stdin is closed, then `SIGTERM`, a two-second grace period, then `SIGKILL`; on Windows, `taskkill /T /F` on its tree. No agent process or inherited pipe outlives the connection to keep your host running. A missing binary fails when the connection opens, with `AcpConnectError`. If you spawn the agent yourself in a custom `transport`, spawn it with `detached: true` and call `stopProcessTree(child)` from `@noetic-tools/acp/stdio` in its `close()` for the same shutdown.
 
 ## Filesystem confinement
 
