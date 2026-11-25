@@ -468,6 +468,9 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
   // What is stored, found by key, so a sweep never builds a key itself.
   listStoredThreads(options?: { prefix?: string }): Promise<string[]>;
   listStoredExecutions(options?: { prefix?: string }): Promise<StoredExecution[]>;
+  // What a thread's stored record holds (see 23a § Sessions): undefined when it
+  // has none. A host decides whether to seed history from this, never from keys.
+  getStoredThread(threadId: string): Promise<StoredThread | undefined>;
 
   // Lifecycle. A string is the reason alone; `{ drainMs }` drains first and
   // resolves with the drain's report (see Graceful Stop).
@@ -717,7 +720,7 @@ interface FrameworkStreamEvent {
 | `{name}:turn_aborted` | Emitted when a turn is aborted or errors. Data: `{ turnId, reason }` |
 | `{name}:steer_accepted` | Emitted when a steer is queued while a turn runs. Always precedes the `inbox_injected` that applies it. Data: `{ messageId, turnId, deliveryMode }` |
 | `{name}:steer_pending` | Emitted once per steer when it is deferred at `before_tool_call`, waiting for tool calls to finish. Data: `{ messageId, waitingOn: callId[] }` |
-| `{name}:steer_dropped` | Emitted when a layer drops a steer. No turn will answer it. Data: `{ messageId, point }` |
+| `{name}:steer_dropped` | Emitted when a layer drops a steer, or a turn started with `keptSteers: 'drop'` drops an unapplied steer its stored record kept. The record event follows a successful write. Data: `{ messageId, point }` from a layer, `{ messageId, reason: 'kept_steers' }` from the record |
 | `{name}:inbox_injected` | Emitted when applied steers are added before a model call. Data: `{ round, count, messageIds }` |
 | `{name}:model_call_steered` | Emitted when a steer stops a round's stream at an item boundary. Data: `{ round, itemCount }` |
 | `{name}:step_started` | Emitted before each step executes. Data: `{ stepId, kind }` |
@@ -783,6 +786,22 @@ interface ExecuteOptions {
   connections?: ConnectionEntries;
   /** Per-call override of the harness default. */
   deliveryMode?: DeliveryMode;
+  /**
+   * What the turn this message starts does with the steers its thread's stored
+   * record kept (23a § Sessions). `'apply'` (default) puts them back in the
+   * queue. `'drop'` removes them from the record in the turn's own fenced write
+   * and emits `steer_dropped` with `reason: 'kept_steers'` for each: the host's
+   * steers belonged to a connection that is gone.
+   */
+  keptSteers?: 'apply' | 'drop';
+}
+
+interface StoredThread {
+  readonly threadId: string;
+  /** The record holds history from a finished turn or `seedSessionHistory`. */
+  readonly hasHistory: boolean;
+  /** The turn in flight, cut off or parked, as `turnOptions` sees it. */
+  readonly turn?: StoredTurn;
 }
 
 interface SessionScope {

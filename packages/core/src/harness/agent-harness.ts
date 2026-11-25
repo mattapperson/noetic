@@ -30,6 +30,7 @@ import { runEvery } from '../connections/settle';
 import { pendingTasksOf, resumableWaitsOf } from '../interpreter/connection-steps';
 import { turnEndingIn } from '../interpreter/turn-ending';
 import { AcpSessionStore } from '../runtime/acp-session-store';
+import { emitFrameworkEvent } from '../runtime/broadcaster-utils';
 import { stubOf } from '../runtime/durable/step-ledger';
 import type { HeldAnswerRequest } from '../runtime/held-calls';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
@@ -152,6 +153,7 @@ import type {
   HarnessResponse,
   HarnessStatus,
   Item,
+  KeptSteers,
   LLMResponse,
   OnSteerParams,
   PendingSpend,
@@ -171,6 +173,7 @@ import type {
   StepsInput,
   StepsOutput,
   StorageAdapter,
+  StoredThread,
   StoredTurn,
   StreamEvent,
   StreamingItem,
@@ -195,6 +198,7 @@ import type {
 import { resolveCheckpointStore, resolveEnvironmentAdapters } from './harness-options';
 import { createHarnessSpan, recordChannelWarning, resolveTraceExporter } from './harness-tracing';
 import { LlmGateway } from './llm-client';
+import { savedItemIds } from './model-rounds';
 import { buildItemSchemaRegistry } from './model-schema';
 import { DEFAULT_TASK_POLL_MS, DEFAULT_WAKE_DEBOUNCE_MS, ParkWatchers } from './park-watchers';
 import type { ReadDecision } from './read-decision';
@@ -202,6 +206,7 @@ import { readDecision } from './read-decision';
 import { recordedToolCalls } from './recorded-tool-calls';
 import type { SpendClient } from './spend';
 import { Spend } from './spend';
+import { steerInConversation, steerItems } from './steer-inbox';
 import { ThreadRecord } from './thread-record';
 import { TurnCuts } from './turn-cuts';
 
@@ -243,6 +248,34 @@ function keepForLater(
 
 /** A thread's turn in flight, as its record stores it. */
 type StoredTurnRecord = NonNullable<Awaited<ReturnType<ThreadRecord['turn']>>>;
+
+/** A stored turn as a host sees it (`turnOptions`, `getStoredThread`). */
+function storedTurnOf(
+  threadId: string,
+  turn: StoredTurnRecord,
+  cut: StoredTurn['cut'],
+): StoredTurn {
+  return {
+    threadId,
+    executionId: turn.executionId,
+    messageIds: turn.messageIds,
+    ...(turn.version === undefined
+      ? {}
+      : {
+          version: turn.version,
+        }),
+    ...(turn.parked
+      ? {
+          parked: turn.parked,
+        }
+      : {}),
+    ...(cut
+      ? {
+          cut,
+        }
+      : {}),
+  };
+}
 
 //#endregion
 
@@ -1389,26 +1422,14 @@ export class AgentHarness<
         graph,
       );
       this.setTurnTools(ctx, perTurnOptions.tools ?? [], connectionTools);
-      // Steers the last harness accepted but never applied go back in the queue;
-      // ones already in the conversation are skipped when offered.
-      for (const steer of (await record?.steers()) ?? []) {
-        const queued = session.runner.queue.peekAll().some((m) => m.id === steer.id);
-        if (!queued && !messageIds.includes(steer.id)) {
-          // With the options it was sent with, when this process is the one it was sent to.
-          const options = session.keptOptions.get(steer.id) ?? steer.options;
-          session.keptOptions.delete(steer.id);
-          session.runner.queue.enqueue({
-            ...steer,
-            options,
-          });
-        }
-      }
       // A stuck turn the host chose to go on with may discard what no longer matches.
       const accept = (await record?.turn())?.accept;
       if (accept && ctx instanceof ContextImpl) {
         ctx.ledger?.acceptVersionLoss(typeof accept === 'string' ? accept : undefined);
       }
-      await record?.begin(ctx, messageIds);
+      if (record) {
+        await this.beginStoredTurn(session, record, ctx, messageIds, perTurnOptions.keptSteers);
+      }
       // A turn on record can be cut off from here on. A host that sleeps between
       // requests has to know when to come back and look (see `turnDueAt`).
       if (record && this.leaseOptions) {
@@ -1743,6 +1764,115 @@ export class AgentHarness<
     }
   }
 
+  /** Start the stored turn before putting kept messages back or reporting drops. */
+  private async beginStoredTurn(
+    session: Session,
+    record: ThreadRecord,
+    ctx: Context,
+    messageIds: ReadonlyArray<string>,
+    keptSteers: KeptSteers | undefined,
+  ): Promise<void> {
+    const { removed, kept } = await this.splitKeptMessages(session, record, messageIds, keptSteers);
+    try {
+      await record.begin(
+        ctx,
+        messageIds,
+        removed.map((steer) => steer.id),
+      );
+    } catch (error) {
+      await this.#connections.release(ctx.id);
+      throw error;
+    }
+    for (const message of kept) {
+      session.keptOptions.delete(message.id);
+      if (!session.runner.queue.peekAll().some((queued) => queued.id === message.id)) {
+        session.runner.queue.enqueue(message);
+      }
+    }
+    const saved = removed.length > 0 && ctx instanceof ContextImpl ? savedItemIds(ctx) : undefined;
+    // Told only once the record no longer holds them.
+    for (const steer of removed) {
+      if (saved && steerInConversation(steerItems(steer), (id) => saved.has(id))) {
+        continue;
+      }
+      emitFrameworkEvent({
+        broadcaster: session.runner.broadcaster,
+        agentName: this.config.name,
+        eventType: 'steer_dropped',
+        data: {
+          messageId: steer.id,
+          reason: 'kept_steers',
+        },
+      });
+    }
+  }
+
+  /**
+   * Split stored messages between the queue and the steers the start write clears.
+   */
+  private async splitKeptMessages(
+    session: Session,
+    record: ThreadRecord,
+    messageIds: ReadonlyArray<string>,
+    keptSteers: KeptSteers | undefined,
+  ): Promise<{
+    removed: QueuedMessage[];
+    kept: QueuedMessage[];
+  }> {
+    const removed: QueuedMessage[] = [];
+    const kept: QueuedMessage[] = [];
+    for (const steer of await record.steers()) {
+      const queued = session.runner.queue.peekAll().some((m) => m.id === steer.id);
+      if (queued || messageIds.includes(steer.id)) {
+        continue;
+      }
+      // With the options it was sent with, when this process is the one it was sent to.
+      const options = session.keptOptions.get(steer.id);
+      // A message this process kept for a parked turn still has its sender here.
+      if (keptSteers === 'drop' && options === undefined && isSteer(steer)) {
+        removed.push(steer);
+        continue;
+      }
+      kept.push({
+        ...steer,
+        options: options ?? steer.options,
+      });
+    }
+    return {
+      removed,
+      kept,
+    };
+  }
+
+  /**
+   * What the thread's stored record holds (spec 23a § Sessions): whether it has
+   * history and the turn it has in flight, cut off or parked. Undefined when the
+   * thread has no record, or the harness keeps none. A host that keeps its own
+   * copy of the conversation seeds history only when none is stored.
+   * @public
+   */
+  async getStoredThread(threadId: string): Promise<StoredThread | undefined> {
+    await this.forgetting.get(threadId);
+    // Through the session's own record, when there is one: a seed it queued lands first.
+    const record = await (
+      this.sessions.get(threadId)?.record ?? this.threadRecord(threadId)
+    )?.stored();
+    if (!record) {
+      return undefined;
+    }
+    const turn = record.turn;
+    const cut = turn && !turn.parked ? this.cuts?.markOf(threadId, turn) : undefined;
+    return {
+      threadId,
+      hasHistory: record.items.length > 0,
+      ...(turn
+        ? {
+            turn: storedTurnOf(threadId, turn, cut),
+          }
+        : {}),
+    };
+  }
+
   /** The options a stored turn is woken with when the wake names none: `turnOptions`, or none. */
   private async storedTurnOptions(
     threadId: string,
@@ -1752,26 +1882,7 @@ export class AgentHarness<
     if (!this.turnOptionsFor) {
       return {};
     }
-    return await this.turnOptionsFor({
-      threadId,
-      executionId: turn.executionId,
-      messageIds: turn.messageIds,
-      ...(turn.version === undefined
-        ? {}
-        : {
-            version: turn.version,
-          }),
-      ...(turn.parked
-        ? {
-            parked: turn.parked,
-          }
-        : {}),
-      ...(cut
-        ? {
-            cut,
-          }
-        : {}),
-    });
+    return await this.turnOptionsFor(storedTurnOf(threadId, turn, cut));
   }
 
   /**

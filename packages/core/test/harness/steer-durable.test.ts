@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { StorageAdapter } from '@noetic-tools/context';
-import type { ContextData } from '@noetic-tools/types';
+import type { ContextData, ExecuteOptions, StreamEvent } from '@noetic-tools/types';
 import { z } from 'zod';
 import { callModel } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
@@ -148,16 +148,56 @@ async function runCutOff(storage: StorageAdapter, server: FakeOpenRouter): Promi
   ).rejects.toThrow();
 }
 
-async function resume(storage: StorageAdapter, server: FakeOpenRouter): Promise<string> {
+/** Collects `stream` into `into` until an event of type `last`. */
+async function collectUntil(
+  stream: AsyncIterable<StreamEvent>,
+  last: string,
+  into: StreamEvent[],
+): Promise<void> {
+  for await (const event of stream) {
+    into.push(event);
+    if (event.type === last) {
+      return;
+    }
+  }
+}
+
+async function resume(
+  storage: StorageAdapter,
+  server: FakeOpenRouter,
+  options: ExecuteOptions = {},
+): Promise<{
+  text: string;
+  events: StreamEvent[];
+}> {
   const next = harnessOver(storage, server, false);
+  const events: StreamEvent[] = [];
+  const watching = collectUntil(
+    next.getFullStream({
+      threadId: 't',
+    }),
+    'durable-steer:turn_completed',
+    events,
+  );
   await next.execute('go', {
+    ...options,
     threadId: 't',
     messageId: 'm-1',
   });
   const response = await next.getAgentResponse({
     threadId: 't',
   });
-  return response.text;
+  await watching;
+  return {
+    text: response.text,
+    events,
+  };
+}
+
+function droppedSteers(events: ReadonlyArray<StreamEvent>): unknown[] {
+  return events
+    .filter((event) => event.type === 'durable-steer:steer_dropped')
+    .map((event) => ('data' in event ? event.data : undefined));
 }
 
 //#endregion
@@ -174,7 +214,7 @@ describe('durable steers', () => {
       'steer-1',
     ]);
 
-    expect(await resume(storage, server)).toBe('done');
+    expect((await resume(storage, server)).text).toBe('done');
 
     // Request 3 is the resumed round 1: round 0 replayed, the steer applied again.
     expect(steerCount(server, 2)).toBe(1);
@@ -189,7 +229,7 @@ describe('durable steers', () => {
     const storage = createInMemoryStorage();
     await runCutOff(storage, server);
 
-    expect(await resume(storage, server)).toBe('done');
+    expect((await resume(storage, server)).text).toBe('done');
 
     // Request 4 is the resumed round 2, built on the replayed rounds.
     expect(steerCount(server, 3)).toBe(1);
@@ -214,5 +254,170 @@ describe('durable steers', () => {
     ).toBe('done');
     expect(steerCount(server, 1)).toBe(1);
     expect((await createSessionStore(storage).load('t'))?.steers ?? []).toEqual([]);
+  });
+
+  it("a turn resumed with keptSteers: 'drop' drops the kept steer and says so", async () => {
+    const server = startServer();
+    server.dropAt.add(2);
+    const storage = createInMemoryStorage();
+    await runCutOff(storage, server);
+
+    const resumed = await resume(storage, server, {
+      keptSteers: 'drop',
+    });
+
+    expect(resumed.text).toBe('done');
+    // Request 3 is the resumed round 1: the steer is not in it.
+    expect(steerCount(server, 3)).toBe(0);
+    expect(droppedSteers(resumed.events)).toEqual([
+      {
+        messageId: 'steer-1',
+        reason: 'kept_steers',
+      },
+    ]);
+    expect((await createSessionStore(storage).load('t'))?.steers ?? []).toEqual([]);
+  });
+
+  it('replays an applied steer without reporting it as dropped', async () => {
+    const server = startServer();
+    server.dropAt.add(3);
+    const storage = createInMemoryStorage();
+    await runCutOff(storage, server);
+
+    const resumed = await resume(storage, server, {
+      keptSteers: 'drop',
+    });
+
+    expect(resumed.text).toBe('done');
+    expect(steerCount(server, 3)).toBe(1);
+    expect(droppedSteers(resumed.events)).toEqual([]);
+  });
+
+  it('keeps the steer and reports no drop when the start write fails without a lease', async () => {
+    const server = startServer();
+    server.dropAt.add(2);
+    const storage = createInMemoryStorage();
+    await runCutOff(storage, server);
+
+    const next = harnessOver(
+      {
+        ...storage,
+        set: async (key, value) => {
+          if (key === 'session:t') {
+            throw new Error('session write failed');
+          }
+          await storage.set(key, value);
+        },
+      },
+      server,
+      false,
+    );
+    const events: StreamEvent[] = [];
+    const watching = collectUntil(
+      next.getFullStream({
+        threadId: 't',
+      }),
+      'durable-steer:turn_aborted',
+      events,
+    );
+    await next.execute('go', {
+      threadId: 't',
+      messageId: 'm-1',
+      keptSteers: 'drop',
+    });
+
+    await expect(
+      next.getAgentResponse({
+        threadId: 't',
+      }),
+    ).rejects.toThrow();
+    await watching;
+    expect(droppedSteers(events)).toEqual([]);
+    expect(server.rounds).toHaveLength(2);
+    expect((await resume(storage, server)).text).toBe('done');
+    expect(steerCount(server, 2)).toBe(1);
+  });
+
+  it("keptSteers: 'apply' is the default", async () => {
+    const server = startServer();
+    server.dropAt.add(2);
+    const storage = createInMemoryStorage();
+    await runCutOff(storage, server);
+
+    const resumed = await resume(storage, server, {
+      keptSteers: 'apply',
+    });
+
+    expect(steerCount(server, 3)).toBe(1);
+    expect(droppedSteers(resumed.events)).toEqual([]);
+  });
+});
+
+describe('getStoredThread', () => {
+  it('is undefined for a thread with no record', async () => {
+    const harness = harnessOver(createInMemoryStorage(), startServer(), false);
+    expect(await harness.getStoredThread('t')).toBeUndefined();
+  });
+
+  it('names the cut-off turn of a thread with no history yet', async () => {
+    const server = startServer();
+    server.dropAt.add(2);
+    const storage = createInMemoryStorage();
+    await runCutOff(storage, server);
+
+    const stored = await harnessOver(storage, server, false).getStoredThread('t');
+
+    expect(stored?.threadId).toBe('t');
+    expect(stored?.hasHistory).toBe(false);
+    expect(stored?.turn?.messageIds).toEqual([
+      'm-1',
+    ]);
+    expect(stored?.turn?.threadId).toBe('t');
+  });
+
+  it('has history and no turn once a turn finishes', async () => {
+    const server = startServer();
+    const storage = createInMemoryStorage();
+    const harness = harnessOver(storage, server, false);
+    await harness.execute('go', {
+      threadId: 't',
+      messageId: 'm-1',
+    });
+    await harness.getAgentResponse({
+      threadId: 't',
+    });
+
+    expect(await harness.getStoredThread('t')).toEqual({
+      threadId: 't',
+      hasHistory: true,
+    });
+  });
+
+  it('has history once seeded', async () => {
+    const harness = harnessOver(createInMemoryStorage(), startServer(), false);
+    harness.seedSessionHistory('t', [
+      {
+        type: 'message',
+        id: 'seed-1',
+        role: 'user',
+        status: 'completed',
+        content: [
+          {
+            type: 'input_text',
+            text: 'earlier',
+          },
+        ],
+      },
+    ]);
+
+    expect((await harness.getStoredThread('t'))?.hasHistory).toBe(true);
+  });
+
+  it('is undefined on a harness without storage', async () => {
+    const harness = new AgentHarness({
+      name: 'no-storage',
+      params: {},
+    });
+    expect(await harness.getStoredThread('t')).toBeUndefined();
   });
 });

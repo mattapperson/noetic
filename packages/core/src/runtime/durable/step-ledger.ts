@@ -676,6 +676,11 @@ export class StepLedger {
     };
   }
 
+  /** Entries available to replay when a turn resumes. */
+  savedEntries(): Iterable<StepLedgerEntry> {
+    return this.replayable.values();
+  }
+
   /**
    * The recorded entry for `path`, when a previous run completed the same step there on
    * the same input. A divergence — a different step id, kind, or input — returns

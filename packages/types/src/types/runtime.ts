@@ -238,7 +238,20 @@ export interface ExecuteOptions {
    * omitted.
    */
   messageId?: string;
+  /**
+   * What the turn this message starts does with the steers its thread's stored
+   * record kept for it (spec 23a § Sessions). `'apply'` (default) puts them back
+   * in the queue. Use `'drop'` when the sending connections are gone. It removes
+   * their steers in the turn's start write, fenced when leased, then emits
+   * `{name}:steer_dropped` with `{ messageId, reason: 'kept_steers' }` for each
+   * removed steer absent from the saved conversation. Ordinary queued messages,
+   * live queue entries, and messages this harness saved for a parked turn stay.
+   */
+  keptSteers?: KeptSteers;
 }
+
+/** @public What a starting turn does with the steers its stored record kept. */
+export type KeptSteers = 'apply' | 'drop';
 
 //#endregion
 
