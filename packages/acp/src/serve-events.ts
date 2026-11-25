@@ -258,6 +258,22 @@ function fileBlock(content: ContentOf<'input_file'>): WireBlock {
   return linkBlock(content.fileUrl ?? content.fileId ?? name, name);
 }
 
+/** A video: the wire has no video block, so its bytes as a resource, or a link to it. */
+function videoBlock(url: string): WireBlock {
+  const media = DATA_URL.exec(url);
+  if (media?.[1] && media[2] !== undefined) {
+    return {
+      type: 'resource',
+      resource: {
+        uri: 'video',
+        mimeType: media[1],
+        blob: media[2],
+      },
+    };
+  }
+  return linkBlock(url);
+}
+
 const BLOCKS: BlockMappers = {
   input_text: (content) => ({
     type: 'text',
@@ -265,6 +281,7 @@ const BLOCKS: BlockMappers = {
   }),
   input_image: (content) => mediaBlock('image', content.imageUrl) ?? linkBlock(content.imageUrl),
   input_file: fileBlock,
+  input_video: (content) => videoBlock(content.videoUrl),
   resource_link: (content) => content,
   resource: ({ uri, mimeType, text, blob }) => ({
     type: 'resource',

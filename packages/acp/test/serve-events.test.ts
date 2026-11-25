@@ -589,6 +589,14 @@ describe('pumpTurnEvents — a call presents as its events say', () => {
             name: 'l',
           },
           {
+            type: 'input_video',
+            videoUrl: 'data:video/mp4;base64,EE',
+          },
+          {
+            type: 'input_video',
+            videoUrl: 'https://example.test/v.mp4',
+          },
+          {
             type: 'input_text',
             text: 'done',
           },
@@ -654,6 +662,19 @@ describe('pumpTurnEvents — a call presents as its events say', () => {
           type: 'resource_link',
           uri: 'file:///l',
           name: 'l',
+        },
+        {
+          type: 'resource',
+          resource: {
+            uri: 'video',
+            mimeType: 'video/mp4',
+            blob: 'EE',
+          },
+        },
+        {
+          type: 'resource_link',
+          uri: 'https://example.test/v.mp4',
+          name: 'v.mp4',
         },
         {
           type: 'text',
