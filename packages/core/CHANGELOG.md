@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.4 (2026-11-25)
+
+* feat: Durable Object hosting — cut turns, turnOptions, per-turn tools, shared alarm (#166) ([2a3a0cd](https://github.com/mattapperson/noetic/commit/2a3a0cd)), closes [#166](https://github.com/mattapperson/noetic/issues/166)
+
 ## @noetic-tools/core-v5.22.0-next.3 (2026-11-25)
 
 * fix(core): native support for spec-workspace host workarounds (#140, #142, #143, #95) (#165) ([b1f58ca](https://github.com/mattapperson/noetic/commit/b1f58ca)), closes [#140](https://github.com/mattapperson/noetic/issues/140) [#142](https://github.com/mattapperson/noetic/issues/142) [#143](https://github.com/mattapperson/noetic/issues/143) [#95](https://github.com/mattapperson/noetic/issues/95) [#165](https://github.com/mattapperson/noetic/issues/165) [#161](https://github.com/mattapperson/noetic/issues/161)
