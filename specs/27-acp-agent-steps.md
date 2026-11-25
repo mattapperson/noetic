@@ -671,9 +671,9 @@ gives an answer the question refuses. A served turn never waits on nobody.
 
 An agent may run subagents as child sessions of the step's session (the ACP
 subagents RFD: `subagent_update` announces a child; codex-acp's earlier draft,
-`subagent_spawned`). The client advertises `subagents: {}` by default, so an
-agent runs each subagent in its own session; `clientCapabilities.subagents:
-false` withdraws it.
+`subagent_spawned`). The client always advertises `subagents: {}`, so an agent
+runs each subagent in its own session; there is no setting to have a
+subagent's work mixed into the step's output instead.
 
 Only the step's own session produces the step's output. Each child becomes a
 **nested agent** of the turn (`08-runtime` § Nested agents): its updates go

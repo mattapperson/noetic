@@ -381,22 +381,6 @@ describe('an agent step, as a host sees it', () => {
     ]);
   });
 
-  it('withdrawing subagents leaves the capability unadvertised', async () => {
-    const log = emptyLog();
-    await run(
-      step.acpAgent<ContextData, unknown, string>({
-        id: 'no-sub',
-        agent: agent(log),
-        prompt: 'go',
-        tools: [],
-        clientCapabilities: {
-          subagents: false,
-        },
-      }),
-    );
-    expect(log.initialize[0]?.clientCapabilities?.subagents).toBeUndefined();
-  });
-
   it("fails with a Noetic error carrying the agent's own message", async () => {
     const log = emptyLog();
     const error = await run(

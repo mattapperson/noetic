@@ -344,12 +344,6 @@ export interface AcpClientCapabilityConfig {
    * agent asks). Default `true`; `false` withdraws it.
    */
   elicitation?: boolean;
-  /**
-   * Advertise the subagents capability (`subagents: {}`), so an agent runs
-   * each subagent in a child session the harness shows as a nested agent
-   * (spec 08 § Nested agents). Default `true`; `false` withdraws it.
-   */
-  subagents?: boolean;
 }
 
 /**

@@ -44,12 +44,9 @@ export function clientCapabilitiesFor(host: AcpClientHost): acp.ClientCapabiliti
             form: {},
           },
         }),
-    // Each subagent in its own child session, shown as a nested agent.
-    ...(config?.subagents === false
-      ? {}
-      : {
-          subagents: {},
-        }),
+    // Always: each subagent runs in its own child session and is shown as a
+    // nested agent, never mixed into the step's output (spec 27 § Subagents).
+    subagents: {},
   };
 }
 

@@ -363,7 +363,6 @@ function normalizedCapabilities(config: AcpClientCapabilityConfig | undefined): 
       ...(config?.additionalDirectories ?? []),
     ].sort(),
     elicitation: config?.elicitation !== false,
-    subagents: config?.subagents !== false,
   });
 }
 
