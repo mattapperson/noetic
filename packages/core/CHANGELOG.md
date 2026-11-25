@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.11 (2026-11-25)
+
+* feat: support video input in user messages (#173) ([9cd2683](https://github.com/mattapperson/noetic/commit/9cd2683)), closes [#173](https://github.com/mattapperson/noetic/issues/173)
+
 ## @noetic-tools/core-v5.22.0-next.10 (2026-11-25)
 
 * feat: an agent step's turn reaches the host as a model call's does (#171) ([196b1e1](https://github.com/mattapperson/noetic/commit/196b1e1)), closes [#171](https://github.com/mattapperson/noetic/issues/171) [#169](https://github.com/mattapperson/noetic/issues/169)
