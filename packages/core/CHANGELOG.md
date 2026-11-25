@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.8 (2026-11-25)
+
+* fix: preserve queued events and clean up displaced spills ([f72b5f4](https://github.com/mattapperson/noetic/commit/f72b5f4))
+
 ## @noetic-tools/core-v5.22.0-next.7 (2026-11-25)
 
 * feat: an agent step meets the host only through generic concepts (instructions, held questions, Noet ([858cdca](https://github.com/mattapperson/noetic/commit/858cdca)), closes [#169](https://github.com/mattapperson/noetic/issues/169)
