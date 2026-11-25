@@ -46,6 +46,8 @@ interface StepDecideOpts<TContext, Q extends DecideQuestions> {
   projection?: ProjectionPolicy;
   /** Runs per decision on the estimated path, averaged. Ignored on the native path. Default 1. */
   samples?: number;
+  /** Ask a decision model for its long-context limits. Ignored on the estimated path. Default false. */
+  longContext?: boolean;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
@@ -368,6 +370,7 @@ interface StepDecide<TContext = ContextData, _I = unknown, O = unknown> {
   context?: (ctx: Context<TContext>) => Record<string, unknown> | Promise<Record<string, unknown>>;
   projection?: ProjectionPolicy;
   samples: number;
+  longContext?: boolean;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
   /** Phantom field carrying the answers type for inference. Never set at runtime. */
   readonly _answers?: O;
@@ -434,6 +437,7 @@ interface DecideRequest {
   state: ReadonlyArray<DecideStatePart>;
   questions: DecideQuestions;
   samples?: number;
+  longContext?: boolean;
   signal?: AbortSignal;
 }
 
@@ -465,6 +469,20 @@ decisions client shares the model client's response hook, so a native call saves
 its generation id from the `x-generation-id` header when headers arrive, and one
 cut off before its body finishes is still priced later. Estimated calls are
 `callModel` rounds and are recorded as such.
+
+A native call goes to the provider the harness is configured for. When the
+provider's base URL (`LlmProviderConfig.baseUrl`, or the Noetic platform's for
+the `noetic` provider) is not OpenRouter's (`https://openrouter.ai`, with any
+path), the call is sent to `<base URL>/api/alpha/decisions`, the base URL taken
+without trailing slashes. For OpenRouter's own base, or none, the SDK's
+decisions endpoint is used. The harness's credential therefore goes only where
+its model calls go: a harness pointed at another OpenRouter-shaped route never
+sends its key to openrouter.ai.
+
+`longContext: true` adds the header `TypeSafe-Danger-Zone-Long-Context: true` to
+the native request, alongside the dispatch record's header. TypeSafe's
+long-context mode raises how many tokens one request and one question may
+carry. The estimated path has no such mode and ignores the option.
 
 **Estimated.** For any other model, the adapter makes one structured-output
 `callModel` per sample, asking for a probability per boolean, choice, and level,
@@ -607,6 +625,7 @@ interface DecideWorkflowNode {
   questions: Record<string, DecideQuestion>;
   view?: 'full' | 'layers' | 'none';
   samples?: number;
+  longContext?: boolean;
 }
 
 interface RouteSwitchWorkflowNode {

@@ -164,6 +164,30 @@ describe('executeDecide', () => {
     });
   });
 
+  it('asks for long context only when the step does', async () => {
+    const { harness, requests } = harnessWith({});
+    const ask = (id: string, longContext?: boolean): Promise<unknown> =>
+      harness.run(
+        decide({
+          id,
+          model: 'typesafe/jev-1.14',
+          questions: QUESTIONS,
+          longContext,
+        }),
+        'refund please',
+        harness.createContext(),
+      );
+    await ask('long', true);
+    await ask('short', false);
+    await ask('unset');
+
+    expect(requests.map((request) => request.longContext)).toEqual([
+      true,
+      undefined,
+      undefined,
+    ]);
+  });
+
   it('sends the input, instructions, and context selector — under one `context` entry — as state', async () => {
     const { harness, requests } = harnessWith({});
     const ctx = harness.createContext();

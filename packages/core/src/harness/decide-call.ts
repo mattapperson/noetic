@@ -33,11 +33,24 @@ export type DecisionsClient = Pick<OpenRouter, 'alpha' | 'models'>;
 /** @internal */
 export interface DecideCallerDeps {
   client?: DecisionsClient;
+  /**
+   * Where native decisions are sent, when not to OpenRouter: the client's own base
+   * URL (see `decisionsServerUrl`). The SDK sends them to openrouter.ai whatever the
+   * client was built with, so without this a credential for another route would go there.
+   */
+  serverUrl?: string;
   callModel: (request: CallModelRequest) => Promise<LLMResponse>;
   /** Per-harness cache: model id → whether it is a decision model (`undefined` while unknown). */
   nativeModels: Map<string, Promise<boolean | undefined>>;
   /** Records each native call before it is sent. Absent without durable storage. */
   spend?: Spend;
+}
+
+/** What a native call is sent through. */
+interface NativeRoute {
+  client: DecisionsClient;
+  serverUrl?: string;
+  spend: Spend | undefined;
 }
 
 type NativeQuestion = Parameters<
@@ -52,6 +65,25 @@ type NativeAnswer = NativeResponse['answers'][string];
 
 //#region Public API
 
+/** @internal TypeSafe's header for long-context mode, which raises its per-request and per-question limits. */
+export const LONG_CONTEXT_HEADER = 'TypeSafe-Danger-Zone-Long-Context';
+
+const OPENROUTER_BASE = /^https:\/\/openrouter\.ai(\/|$)/;
+
+/**
+ * The base URL native decisions are sent to, given the one the client was built
+ * with: that URL without trailing slashes, or undefined for OpenRouter's own (or
+ * none), whose decisions endpoint the SDK already knows.
+ *
+ * @internal
+ */
+export function decisionsServerUrl(clientServerUrl: string | undefined): string | undefined {
+  if (!clientServerUrl || OPENROUTER_BASE.test(clientServerUrl)) {
+    return undefined;
+  }
+  return clientServerUrl.replace(/\/+$/, '');
+}
+
 /**
  * Answer a decide request. Decision models (those whose OpenRouter output
  * modality is `decisions`) answer natively with their own distributions; any
@@ -64,7 +96,11 @@ export async function callDecide(
   deps: DecideCallerDeps,
 ): Promise<DecideResponse> {
   if (deps.client && (await isDecisionModel(request.model, deps))) {
-    return callNative(request, deps.client, deps.spend);
+    return callNative(request, {
+      client: deps.client,
+      serverUrl: deps.serverUrl,
+      spend: deps.spend,
+    });
   }
   return callEstimated(request, deps);
 }
@@ -115,11 +151,7 @@ async function lookupDecisionModel(
 
 //#region Native path
 
-async function callNative(
-  request: DecideRequest,
-  client: DecisionsClient,
-  spend: Spend | undefined,
-): Promise<DecideResponse> {
+async function callNative(request: DecideRequest, route: NativeRoute): Promise<DecideResponse> {
   const questions: Record<string, NativeQuestion> = {};
   for (const [id, question] of Object.entries(request.questions)) {
     questions[id] = toNativeQuestion(question);
@@ -130,10 +162,9 @@ async function callNative(
     questions,
   };
   const response = await sendNative({
-    client,
+    ...route,
     decisionsRequest,
     request,
-    spend,
   });
 
   const answers: Record<string, DecideAnswer> = {};
@@ -162,16 +193,15 @@ async function callNative(
  */
 async function sendNative({
   client,
+  serverUrl,
   decisionsRequest,
   request,
   spend,
-}: {
-  client: DecisionsClient;
+}: NativeRoute & {
   decisionsRequest: Parameters<
     DecisionsClient['alpha']['decisions']['create']
   >[0]['decisionsRequest'];
   request: DecideRequest;
-  spend: Spend | undefined;
 }): Promise<NativeResponse> {
   const dispatch = await spend?.open({
     ctx: request._billTo,
@@ -186,11 +216,12 @@ async function sendNative({
       },
       {
         signal: request.signal,
-        ...(dispatch
+        ...(serverUrl
           ? {
-              headers: dispatch.headers,
+              serverURL: serverUrl,
             }
           : {}),
+        ...nativeHeaders(dispatch?.headers, request),
       },
     );
     await dispatch?.settle();
@@ -203,6 +234,28 @@ async function sendNative({
   } finally {
     dispatch?.end();
   }
+}
+
+/** The request headers of a native call: the dispatch record's, and long-context mode. */
+function nativeHeaders(
+  dispatchHeaders: Record<string, string> | undefined,
+  request: DecideRequest,
+): {
+  headers?: Record<string, string>;
+} {
+  if (!dispatchHeaders && !request.longContext) {
+    return {};
+  }
+  return {
+    headers: {
+      ...dispatchHeaders,
+      ...(request.longContext
+        ? {
+            [LONG_CONTEXT_HEADER]: 'true',
+          }
+        : {}),
+    },
+  };
 }
 
 /**

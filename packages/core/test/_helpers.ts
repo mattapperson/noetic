@@ -868,13 +868,15 @@ export interface FakeOpenRouterRound {
  * killed mid-stream sees. Every
  * response carries the generation id `gen-<round>` in its `x-generation-id` header.
  *
- * A native decide call (`POST /api/alpha/decisions`, under `origin`) gets its headers,
- * with the id `gen-dec-<n>`, and then never its body.
+ * A native decide call (`POST …/api/alpha/decisions`, under `origin` or under
+ * `baseUrl`) gets its headers, with the id `gen-dec-<n>`, and then never its body.
+ * `decisionPaths` holds the path each one was sent to.
  */
 export interface FakeOpenRouter {
   readonly baseUrl: string;
   readonly origin: string;
   readonly rounds: FakeOpenRouterRound[];
+  readonly decisionPaths: string[];
   readonly dropAt: Set<number>;
   readonly cutAt: Map<number, number>;
   readonly incompleteAt: Set<number>;
@@ -888,7 +890,7 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
   const cutAt = new Map<number, number>();
   const incompleteAt = new Set<number>();
   const hangAt = new Set<number>();
-  let decisions = 0;
+  const decisionPaths: string[] = [];
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
@@ -898,8 +900,9 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
           status: 404,
         });
       }
-      if (new URL(request.url).pathname === '/api/alpha/decisions') {
-        decisions += 1;
+      const { pathname } = new URL(request.url);
+      if (pathname.endsWith('/api/alpha/decisions')) {
+        decisionPaths.push(pathname);
         return new Response(
           new ReadableStream({
             start(controller) {
@@ -909,7 +912,7 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
           {
             headers: {
               'content-type': 'application/json',
-              'x-generation-id': `gen-dec-${decisions}`,
+              'x-generation-id': `gen-dec-${decisionPaths.length}`,
             },
           },
         );
@@ -991,6 +994,7 @@ export function startFakeOpenRouter(reply: (input: unknown[]) => unknown[]): Fak
     stop: () => server.stop(true),
   };
 }
+    decisionPaths,
 
 /** The stream's events up to and including its `count`th finished output item. */
 function itemsOf(stream: string, count = 0): string {

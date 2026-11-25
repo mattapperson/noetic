@@ -158,6 +158,7 @@ decide<const Q extends DecideQuestions, TContext = ContextData, I = unknown>({
   context?: (ctx: Context<TContext>) => Record<string, unknown> | Promise<Record<string, unknown>>; // sent as one `context` entry
   projection?: ProjectionPolicy;                // default DECISION_PROJECTION
   samples?: number;                             // estimated path only; default 1
+  longContext?: boolean;                        // native path only: TypeSafe long-context limits; default false
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }): DecideStep<TContext, I, Q>                  // StepDecide<TContext, I, DecideAnswers<Q>> & { questions: Q }
 ```
@@ -232,7 +233,7 @@ Recall runs with `{ peek: true }` (see [RecallOptions.peek](#recalloptionspeek))
 
 **Asking again.** Within one execution, the same decide step id with the same input and the same conversation length returns its earlier answers with no model call. Two nested `routeSwitch`es over one decision pay once and cannot disagree; a loop that asks again after new items land gets a fresh decision.
 
-**Model paths.** A decision model (one whose OpenRouter output modalities include `decisions`, such as `'typesafe/jev-1.14'`) answers in one pass with calibrated probabilities (`source: 'native'`). Any chat model also works: the harness asks for probabilities as structured output and averages `samples` runs (`source: 'estimated'`). Estimated probabilities are not calibrated; use them for routing thresholds only.
+**Model paths.** A decision model (one whose OpenRouter output modalities include `decisions`, such as `'typesafe/jev-1.14'`) answers in one pass with calibrated probabilities (`source: 'native'`). Any chat model also works: the harness asks for probabilities as structured output and averages `samples` runs (`source: 'estimated'`). Estimated probabilities are not calibrated; use them for routing thresholds only. `longContext: true` sends `TypeSafe-Danger-Zone-Long-Context: true` on the native request. A native call follows the provider's base URL: when it is not OpenRouter's, decisions go to `<baseUrl>/api/alpha/decisions`, never to openrouter.ai.
 
 - Native: only an explicit provider refusal becomes a `Refusal`; a missing or mistyped answer is `model_parse_error`. `probabilities` always has every outcome (`0` when missing). A one-sided boolean `criteria` joins the instructions (`Yes means: …`). A failed model lookup (other than 404) is not cached; that call goes estimated and the next one asks again.
 - Estimated: samples that fail or do not parse are dropped; the step fails only when none parse, and still counts what the samples spent.
@@ -1873,6 +1874,7 @@ interface DecideRequest {
   signal?: AbortSignal;
 }
 
+  longContext?: boolean;     // native path only; default false
 interface DecideResponse {
   answers: Readonly<Record<string, DecideAnswer>>;
   source: 'native' | 'estimated';

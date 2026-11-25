@@ -220,6 +220,10 @@ Any model can answer. How it answers depends on the model.
 
 **Native.** Decision models such as `typesafe/jev-1.14` answer every question in one pass and return calibrated distributions rather than sampled text. A model is native when OpenRouter lists `decisions` among its output modalities; the harness looks this up once per model id and caches the result. A lookup that fails for any reason but a 404 is not cached: that call takes the estimated path, and the next call asks again. The native path needs an OpenRouter client, so configure the harness's `llm` provider (or set `OPENROUTER_API_KEY`). Without one, every model takes the estimated path.
 
+A native call goes where the harness's model calls go. When the provider's base URL is not OpenRouter's, the decision is sent to `<base URL>/api/alpha/decisions`, so a harness pointed at another OpenRouter-shaped route never sends its key to openrouter.ai.
+
+Set `longContext: true` to ask a decision model for its long-context limits, which raise how many tokens one request and one question may carry. The harness sends the header `TypeSafe-Danger-Zone-Long-Context: true` with the native request. The estimated path ignores it.
+
 On the native path, only an explicit refusal from the provider becomes a `Refusal`. A missing or mistyped answer fails the step with `model_parse_error`, rather than passing a provider fault off as the model declining. Every answer's `probabilities` has an entry for each outcome (`0` when the provider sent none). A boolean `criteria` with only one side cannot be sent as criteria, so it joins the instructions as `Yes means: …` (or `No means: …`).
 
 **Estimated.** Any other model, such as `openai/gpt-4o-mini`, answers through a structured-output call that asks for a probability per outcome. Choice and score probabilities are scaled to sum to 1, `confidence` is the top probability, and a score's `value` is the weighted level index. Set `samples` to run the call several times in parallel and average the results (the runs use `temperature: 0.7` when `samples > 1`, and `0` otherwise). `samples` is ignored on the native path.
@@ -282,6 +286,7 @@ const triage = decide({
 | `context` | `(ctx) => Record<string, unknown> \| Promise<Record<string, unknown>>` | No | Typed state read from context layers, sent as one JSON entry named `context`. Annotate `ctx` to type it |
 | `projection` | `ProjectionPolicy` | No | Budget for the decision's view. Default `DECISION_PROJECTION` |
 | `samples` | `number` | No | Runs to average on the estimated path. Positive integer. Default `1` |
+| `longContext` | `boolean` | No | Ask a decision model for its long-context limits. Native path only. Default `false` |
 | `emit` | `boolean \| (eventType, data) => boolean` | No | Controls framework event emission for this step |
 
 `decide()` returns a `DecideStep`, which keeps the literal question map so `routeSwitch` can infer the questions, choices, and levels.

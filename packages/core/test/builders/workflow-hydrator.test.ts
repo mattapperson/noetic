@@ -1773,6 +1773,21 @@ describe('hydrateNode — decide and routeSwitch', () => {
     ]);
   });
 
+  test('hydrates longContext on a decide node, and leaves it unset by default', () => {
+    const long = hydrateNode(
+      {
+        ...decideNode,
+        longContext: true,
+      },
+      makeHydrationContext(),
+    );
+    assert(long.kind === 'decide');
+    expect(long.longContext).toBe(true);
+    const plain = hydrateNode(decideNode, makeHydrationContext());
+    assert(plain.kind === 'decide');
+    expect(plain.longContext).toBeUndefined();
+  });
+
   test('hydrates a routeSwitch node whose route runs the decision and picks the case', async () => {
     const node: WorkflowNode = {
       kind: 'routeSwitch',

@@ -1,6 +1,6 @@
 import type { ItemSchemaRegistry, NoeticConfigError } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
-import { callDecide } from './decide-call';
+import { callDecide, decisionsServerUrl } from './decide-call';
 import { HTTPClient, OpenRouter, OpenRouterSdk } from './deps/adapters';
 import { someStep } from './deps/interpreter';
 import type {
@@ -211,8 +211,10 @@ function generationHook(spend: Spend): HTTPClient {
   });
 }
 
-function createSdkClient(config?: LlmProviderConfig, http?: HTTPClient): OpenRouterSdk | undefined {
-  const resolved = resolveLlmClient(config, readLlmEnv());
+function createSdkClient(
+  resolved: ResolvedLlmClient | undefined,
+  http?: HTTPClient,
+): OpenRouterSdk | undefined {
   if (!resolved) {
     return undefined;
   }
@@ -244,6 +246,8 @@ export class LlmGateway {
    * prices, and generation lookups.
    */
   readonly sdkClient?: OpenRouterSdk;
+  /** Where native decisions go when the provider's base URL is not OpenRouter's. */
+  private readonly decisionsServerUrl?: string;
   /** Model id → whether it answers natively as a decision model. */
   private readonly decisionModels = new Map<string, Promise<boolean>>();
 
@@ -253,9 +257,11 @@ export class LlmGateway {
     this.client = options.callModelOverride
       ? undefined
       : createClient(options.providerConfig, options.contextCache, http);
-    this.sdkClient = options.callModelOverride
+    const resolved = options.callModelOverride
       ? undefined
-      : createSdkClient(options.providerConfig, http);
+      : resolveLlmClient(options.providerConfig, readLlmEnv());
+    this.sdkClient = createSdkClient(resolved, http);
+    this.decisionsServerUrl = decisionsServerUrl(resolved?.serverURL);
   }
 
   callModel(request: CallModelRequest, host: ModelCallHost): Promise<LLMResponse> {
@@ -280,6 +286,7 @@ export class LlmGateway {
     }
     return callDecide(request, {
       client: this.sdkClient,
+      serverUrl: this.decisionsServerUrl,
       callModel,
       nativeModels: this.decisionModels,
       spend: this.#options.spend,

@@ -190,6 +190,11 @@ export interface DecideRequest {
   questions: DecideQuestions;
   /** Runs averaged on the estimated path. Ignored on the native path. Default 1. */
   samples?: number;
+  /**
+   * Ask a decision model for its long-context limits. Sent on the native path
+   * only, as the `TypeSafe-Danger-Zone-Long-Context` header. Default false.
+   */
+  longContext?: boolean;
   signal?: AbortSignal;
   /** @internal Parent span for the decide-call span. */
   parentSpan?: Span;
