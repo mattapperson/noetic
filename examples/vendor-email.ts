@@ -387,12 +387,26 @@ const roles: Record<string, Role> = {
 
   /** A new executor finds the cut-off turn and takes it as far as the approval. */
   resume: async (opts) => {
-    const { harness } = buildExecutor(opts);
+    const { harness, mail } = buildExecutor(opts);
     await harness.start();
     await harness.wake();
     const held = await heldOn(harness, 'mail:msg-1042');
+    // The provider never heard back from the executor that was killed, so it sends
+    // the email again. This is a new process: only storage knows it was seen.
+    const email = EMAILS.first;
+    assert(email);
+    await mail.emit({
+      type: 'received',
+      ...email,
+    });
+    await harness.waitForIdle();
     say({
       held,
+      stillHeld: (
+        await harness.pending({
+          threadId: 'mail:msg-1042',
+        })
+      ).length,
     });
     await harness.close();
   },
@@ -420,6 +434,8 @@ const roles: Record<string, Role> = {
     } catch (error) {
       refusal = isNoeticError(error) ? error.noeticError.kind : String(error);
     }
+    // Refused means untouched: the call is still waiting for the right answer.
+    const stillHeld = (await harness.pending(thread)).length;
 
     await harness.execute(
       {
@@ -434,6 +450,7 @@ const roles: Record<string, Role> = {
     const response = await paidOn(harness, thread.threadId);
     say({
       refusal,
+      stillHeld,
       text: response.text,
       parked: response.parked !== undefined,
     });
@@ -465,6 +482,14 @@ const roles: Record<string, Role> = {
     );
     await harness.wake(thread);
     const response = await paidOn(harness, thread.threadId);
+    // Long after it was handled, the first email turns up once more.
+    const old = EMAILS.first;
+    assert(old);
+    await mail.emit({
+      type: 'received',
+      ...old,
+    });
+    await harness.waitForIdle();
     say({
       proposed: held.args,
       text: response.text,
@@ -634,13 +659,14 @@ async function main(): Promise<void> {
 
     console.log('\n2. Another executor picks the turn up and stops at the approval');
     const second = executor('resume', 'executor-b');
-    const { held } = z
+    const { held, stillHeld } = z
       .object({
         held: z.object({
           name: z.string(),
           reason: z.string(),
           args: PaymentSchema,
         }),
+        stillHeld: z.number(),
       })
       .parse(await second.next());
     await second.exited;
@@ -650,12 +676,15 @@ async function main(): Promise<void> {
     );
     check('it proposes the v1 rule: pay in full', held.args.amount === 1200, held.args);
     check(
-      'the case was not opened again',
-      count(db, "SELECT COUNT(*) AS n FROM attempts WHERE system = 'cases'") === 1,
+      'the email sent again to the new executor opened no second case',
+      stillHeld === 1 &&
+        count(db, 'SELECT COUNT(*) AS n FROM cases') === 1 &&
+        count(db, "SELECT COUNT(*) AS n FROM attempts WHERE system = 'cases'") === 1,
     );
     check(
-      'no executor is running, and nothing was paid',
-      count(db, 'SELECT COUNT(*) AS n FROM payments') === 0,
+      'the bank was not asked, and nothing was paid, while it waits',
+      count(db, "SELECT COUNT(*) AS n FROM attempts WHERE system = 'bank'") === 0 &&
+        count(db, 'SELECT COUNT(*) AS n FROM payments') === 0,
     );
 
     console.log('\n3. The next day a reviewer approves the exact action');
@@ -665,15 +694,16 @@ async function main(): Promise<void> {
     const reviewed = z
       .object({
         refusal: z.string(),
+        stillHeld: z.number(),
         text: z.string(),
         parked: z.boolean(),
       })
       .parse(await third.next());
     await third.exited;
     check(
-      'an approval for a different action is refused',
-      reviewed.refusal === 'hold_refused',
-      reviewed.refusal,
+      "an approval that carries another action's hash is refused, and the call stays held",
+      reviewed.refusal === 'hold_refused' && reviewed.stillHeld === 1,
+      reviewed,
     );
     check('the turn finished on the third executor', !reviewed.parked, reviewed.text);
     check(
@@ -729,9 +759,18 @@ async function main(): Promise<void> {
       secondPay?.version === 'v2' && secondPay.receipt !== undefined,
       secondPay,
     );
+    const made = (system: string): number =>
+      count(db, `SELECT COUNT(*) AS n FROM attempts WHERE system = '${system}'`);
     check(
-      'two cases, two payments, each made once',
-      count(db, 'SELECT COUNT(*) AS n FROM attempts') === 4,
+      'two cases and two payments, each system asked once per email, the old email included',
+      count(db, 'SELECT COUNT(*) AS n FROM cases') === 2 &&
+        count(db, 'SELECT COUNT(*) AS n FROM payments') === 2 &&
+        made('cases') === 2 &&
+        made('bank') === 2,
+      {
+        cases: made('cases'),
+        bank: made('bank'),
+      },
     );
   } finally {
     db.close();
