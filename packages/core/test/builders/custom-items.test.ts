@@ -1022,3 +1022,161 @@ describe('typed results', () => {
 });
 
 //#endregion
+
+describe('customItem() with a union output (#143)', () => {
+  const Update = z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.literal('phase_started'),
+      phase: z.string(),
+    }),
+    z.object({
+      kind: z.literal('result'),
+      value: z.number(),
+    }),
+  ]);
+
+  it('accepts a discriminated union of objects as output, and validates each option', async () => {
+    const item = customItem({
+      type: 'myapp:update',
+      event: Update,
+      output: Update,
+    });
+    const ok = await item.output['~standard'].validate({
+      kind: 'result',
+      value: 3,
+    });
+    expect(ok.issues).toBeUndefined();
+    const bad = await item.output['~standard'].validate({
+      kind: 'result',
+      value: 'x',
+    });
+    expect(bad.issues).toBeDefined();
+  });
+
+  it('accepts a plain union and a JSON Schema oneOf of objects', () => {
+    expect(
+      customItem({
+        type: 'myapp:either',
+        output: z.union([
+          z.object({
+            a: z.string(),
+          }),
+          z.object({
+            b: z.number(),
+          }),
+        ]),
+      }).type,
+    ).toBe('myapp:either');
+    expect(
+      customItem({
+        type: 'myapp:json-either',
+        output: {
+          oneOf: [
+            {
+              type: 'object',
+              properties: {
+                a: {
+                  type: 'string',
+                },
+              },
+            },
+            {
+              type: 'object',
+              properties: {
+                b: {
+                  type: 'number',
+                },
+              },
+            },
+          ],
+        },
+      }).type,
+    ).toBe('myapp:json-either');
+  });
+
+  it('throws INVALID_CUSTOM_ITEM_SHAPE when an option is not an object or declares id or type', async () => {
+    await expectConfigError(
+      () =>
+        customItem({
+          type: 'myapp:bad',
+          output: z.union([
+            z.object({
+              a: z.string(),
+            }),
+            z.string(),
+          ]),
+        }),
+      'INVALID_CUSTOM_ITEM_SHAPE',
+    );
+    for (const key of [
+      'id',
+      'type',
+    ]) {
+      await expectConfigError(
+        () =>
+          customItem({
+            type: 'myapp:bad',
+            output: z.discriminatedUnion('kind', [
+              z.object({
+                kind: z.literal('a'),
+              }),
+              z.object({
+                kind: z.literal('b'),
+                [key]: z.string(),
+              }),
+            ]),
+          }),
+        'INVALID_CUSTOM_ITEM_SHAPE',
+      );
+    }
+  });
+
+  it('a step closing with one option emits { id, type, ...option } as its final item', async () => {
+    const update = customItem({
+      type: 'myapp:update',
+      event: Update,
+      output: Update,
+    });
+    const { events, response } = await runGraph(
+      runCode<ContextData, string, string>({
+        id: 'phase',
+        customItems: {
+          update,
+        },
+        emitItems: {
+          item: 'update',
+          onDone: () => ({
+            kind: 'result',
+            value: 7,
+          }),
+        },
+        async *execute() {
+          yield {
+            kind: 'phase_started',
+            phase: 'build',
+          };
+          return 'done';
+        },
+      }),
+    );
+    expect(rawEvents(events)).toEqual([
+      expect.objectContaining({
+        event: {
+          kind: 'phase_started',
+          phase: 'build',
+        },
+      }),
+    ]);
+    const finals = ofType(response.items, 'myapp:update');
+    expect(finals).toHaveLength(1);
+    const [final] = finals;
+    assert(final);
+    expect(final).toEqual({
+      id: expect.any(String),
+      type: 'myapp:update',
+      kind: 'result',
+      value: 7,
+    });
+    expect(final).not.toHaveProperty('update');
+  });
+});

@@ -25,7 +25,16 @@ const progress = customItem({
 
 - `type` is `prefix:name`, after the Open Responses convention for extension items. A type without a colon throws [`INVALID_CUSTOM_ITEM_TYPE`](/docs/framework/errors#invalid_custom_item_type).
 - `event` and `output` each take any Standard Schema (Zod, Valibot, …) or a plain JSON Schema object. A JSON Schema validates through `z.fromJSONSchema`, so no code is generated and it runs on Workers. Write it `as const` to get its static type.
-- `output` describes the item's own fields: it must be an object, and must not declare `id` or `type`, which the runtime adds.
+- `output` describes the item's own fields: it must be an object, or a union of objects, and must not declare `id` or `type`, which the runtime adds. With a union, the final item is `{ id, type, ...option }`, so a vocabulary of updates can serve as both `event` and `output`:
+
+```ts validate=none
+const Update = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('phase_started'), phase: z.string() }),
+  z.object({ kind: z.literal('result'), value: z.number() }),
+]);
+const update = customItem({ type: 'myapp:update', event: Update, output: Update });
+// final item: { id, type: 'myapp:update', kind: 'result', value: 7 }
+```
 - Without `event`, the item has no events: it arrives only as a final item.
 
 A final item is `{ id, type, ...output }`. Each event is the payload `event` describes.

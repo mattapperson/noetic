@@ -48,7 +48,7 @@ customItems?: { [name: string]: CustomItem };   // items only this step may emit
 **`customItem({ type, description?, event?, output })`** declares a custom item, shaped like `tool()`.
 - `type` is `prefix:name`, else `INVALID_CUSTOM_ITEM_TYPE`.
 - `event` and `output` take any Standard Schema or a JSON Schema object (validated via `z.fromJSONSchema`, typed via `FromJsonSchema` when written `as const`).
-- `output` must be an object without `id`/`type`, else `INVALID_CUSTOM_ITEM_SHAPE`.
+- `output` must be an object, or a union of objects (discriminated union, `z.union`, JSON Schema `oneOf`), none declaring `id`/`type`, else `INVALID_CUSTOM_ITEM_SHAPE`. A union's final item is `{ id, type, ...option }`, so one union can be both `event` and `output`.
 - JSON documents declare items in a root or node `customItems` map: `{ "<name>": { "type", "event"?, "output" } }`, in JSON Schema.
 - `workflow({ document, customItems })` adds TypeScript declarations. A name in both must share its `type` (`CUSTOM_ITEM_MISMATCH`), and the TypeScript schema wins.
 - `workflow()` returns a `TypedWorkflowStep` branded with every item it can emit (`'~customItems'`, including an `as const` document's), and `AgentHarness` infers `TItem` from `agentGraph`:

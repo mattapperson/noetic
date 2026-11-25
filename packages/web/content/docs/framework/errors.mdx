@@ -578,9 +578,9 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### INVALID_CUSTOM_ITEM_SHAPE
 
-**Cause:** A custom item's JSON Schema does not load, or its `output` does not describe an object, or declares `id` or `type`.
+**Cause:** A custom item's JSON Schema does not load, or its `output` does not describe an object or a union of objects, or one of those objects declares `id` or `type`.
 
-**Fix:** Give an object schema for `output` and leave out `id` and `type`: the runtime adds both to every final item.
+**Fix:** Give an object schema for `output`, or a union of object schemas (a discriminated union, or a JSON Schema `oneOf`), and leave out `id` and `type`: the runtime adds both to every final item.
 
 #### CUSTOM_ITEM_MISMATCH
 
