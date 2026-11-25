@@ -26,6 +26,8 @@ import { pendingEntryKey, runRootOf } from './connection-steps';
 const AcpSessionRecordSchema = z.object({
   sessionId: z.string(),
   agentId: z.string(),
+  /** How to reach the agent if it outlived the host that opened the session. */
+  reattach: z.record(z.string(), z.unknown()).optional(),
 });
 
 /** The agent session a step opened, as stored. */

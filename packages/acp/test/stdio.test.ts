@@ -109,7 +109,10 @@ describe.skipIf(!POSIX)('stdio transport lifetime', () => {
   });
 
   it('localMachine().close() stops every tree it launched', async () => {
-    const machine = await localMachine('tree')({});
+    // Direct children: the keeper's own shutdown is covered in keeper.test.ts.
+    const machine = await localMachine('tree', {
+      keeper: false,
+    })({});
     const transport = await machine.launch({
       command: process.execPath,
       args: [
@@ -306,5 +309,54 @@ describe.skipIf(!POSIX)('stopProcessTree edge cases', () => {
     await expectStopped([
       pid,
     ]);
+  });
+});
+
+describe.skipIf(!POSIX)('a host that exits without closing its agent', () => {
+  const host = fileURLToPath(new URL('./fixtures/exit-host.ts', import.meta.url));
+
+  async function pidsLeftBy(whenHostExits: 'keep' | 'stop'): Promise<number[]> {
+    const child = spawn(
+      process.execPath,
+      [
+        host,
+        whenHostExits,
+      ],
+      {
+        stdio: [
+          'ignore',
+          'pipe',
+          'inherit',
+        ],
+      },
+    );
+    let output = '';
+    for await (const chunk of child.stdout) {
+      output += String(chunk);
+    }
+    const pids = JSON.parse(output);
+    assert(Array.isArray(pids));
+    return pids.map(Number);
+  }
+
+  it("kills the agent's group on exit under whenHostExits: 'stop'", async () => {
+    const pids = await pidsLeftBy('stop');
+    expect(pids).toHaveLength(2);
+    await expectStopped(pids);
+  });
+
+  it("leaves it running under 'keep'", async () => {
+    const pids = await pidsLeftBy('keep');
+    try {
+      await Bun.sleep(200);
+      expect(pids.some(alive)).toBe(true);
+    } finally {
+      try {
+        process.kill(-(pids[0] ?? 0), 'SIGKILL');
+      } catch {
+        // Already gone.
+      }
+      await expectStopped(pids);
+    }
   });
 });

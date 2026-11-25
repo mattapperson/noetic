@@ -13,14 +13,17 @@ import type {
   AcpClientActivity,
   AcpClientCapabilityConfig,
   AcpClientHost,
+  AcpConnectOptions,
   AcpContentBlock,
   AcpKeepAlive,
   AcpLiveSession,
   AcpPermissionOutcome,
   AcpPermissionSteerer,
+  AcpReattachHandle,
   AcpSession,
   AcpSessionPolicy,
   AcpTurnResult,
+  AcpWhenHostExits,
   Context,
   ContextData,
   ContextLayer,
@@ -453,6 +456,12 @@ interface SessionResolution {
   fresh: boolean;
   /** True when this step reloaded the session an earlier attempt of it opened. */
   resumed: boolean;
+  /**
+   * True when it reattached to that session, still live in an agent that
+   * outlived the earlier host: the first turn collects the turn that host left
+   * running instead of prompting.
+   */
+  reattached: boolean;
 }
 
 /**
@@ -516,8 +525,11 @@ async function openSession<TContext, I, O>(opts: {
   tools?: AcpToolRunner;
   /** The session an earlier attempt of this step opened, to reload when the agent can. */
   resumeId?: string;
+  /** How to reach the agent that earlier attempt left running, when it can outlive its host. */
+  reattach?: AcpReattachHandle;
 }): Promise<SessionResolution> {
   let resumed = false;
+  let reattached = false;
   const store = sessionStore(opts.baseCtx);
   const keepAlive = keepAliveOf(opts.step.session);
   const reuseKey = opts.step.session?.reuse;
@@ -531,11 +543,30 @@ async function openSession<TContext, I, O>(opts: {
   const key = store.keyFor(parts);
 
   const { live, fresh } = await store.acquire(key, parts, async () => {
-    const connection = holdingConnections(
-      await opts.agent.connect({
+    const connectOptions = {
+      host: opts.host,
+      signal: abortSignalOf(opts.baseCtx),
+      whenHostExits: whenHostExitsOf(opts.baseCtx),
+    };
+    const kept = await reattachTo(opts.agent, connectOptions, {
+      reattach: opts.reattach,
+      sessionId: opts.resumeId,
+    });
+    if (kept) {
+      resumed = true;
+      reattached = true;
+      return {
+        connection: holdingConnections(kept.connection, opts.baseCtx, keepAlive),
+        session: kept.session,
         host: opts.host,
-        signal: abortSignalOf(opts.baseCtx),
-      }),
+        agentId: opts.agent.agentId,
+        keepAlive,
+        cwd: opts.cwd,
+        tools: opts.tools?.tools,
+      };
+    }
+    const connection = holdingConnections(
+      await opts.agent.connect(connectOptions),
       opts.baseCtx,
       keepAlive,
     );
@@ -587,6 +618,57 @@ async function openSession<TContext, I, O>(opts: {
     keepAlive,
     fresh,
     resumed,
+    reattached,
+  };
+}
+
+/** The harness's choice for agents its process leaves behind. */
+function whenHostExitsOf(ctx: Context<ContextData>): AcpWhenHostExits {
+  return ctx.harness.config.killAgentsOnExit === true ? 'stop' : 'keep';
+}
+
+/**
+ * The live session an earlier attempt of the step left in an agent that
+ * outlived its host, or undefined when there is none to reach — the agent is
+ * gone, or no longer has the session — so the step reloads or starts over.
+ */
+async function reattachTo(
+  agent: AcpAgent,
+  connectOptions: AcpConnectOptions,
+  {
+    reattach,
+    sessionId,
+  }: {
+    reattach: AcpReattachHandle | undefined;
+    sessionId: string | undefined;
+  },
+): Promise<
+  | {
+      connection: AcpAgentConnection;
+      session: AcpSession;
+    }
+  | undefined
+> {
+  if (!reattach || sessionId === undefined) {
+    return undefined;
+  }
+  const connection = await agent
+    .connect({
+      ...connectOptions,
+      reattach,
+    })
+    .catch(() => undefined);
+  if (!connection) {
+    return undefined;
+  }
+  const session = await connection.attachSession?.(sessionId).catch(() => undefined);
+  if (!session?.resumeTurn) {
+    await connection.close().catch(() => undefined);
+    return undefined;
+  }
+  return {
+    connection,
+    session,
   };
 }
 
@@ -771,6 +853,11 @@ async function runTurn<TContext, I, O>(params: {
   tools: AcpToolRunner | undefined;
   turnError: TurnError;
   content: AcpContentBlock[];
+  /**
+   * Collect the turn an earlier host left running on a reattached session
+   * before prompting; prompt only when no turn was running.
+   */
+  collect?: boolean;
 }): Promise<AcpTurnResult> {
   const { step, baseCtx, resolution, bridge, tools, turnError } = params;
   if (tools) {
@@ -779,12 +866,22 @@ async function runTurn<TContext, I, O>(params: {
   bridge.begin();
   let result: AcpTurnResult;
   try {
-    result = await resolution.live.session.prompt({
-      content: params.content,
-      // Per-turn signal, so a session reused across turns is cancelled by the
-      // context running the CURRENT turn rather than the one that opened it.
-      signal: abortSignalOf(baseCtx),
-    });
+    // Per-turn signal, so a session reused across turns is cancelled by the
+    // context running the CURRENT turn rather than the one that opened it.
+    const signal = abortSignalOf(baseCtx);
+    const session = resolution.live.session;
+    const collected =
+      params.collect && session.resumeTurn
+        ? await session.resumeTurn({
+            signal,
+          })
+        : undefined;
+    result =
+      collected ??
+      (await session.prompt({
+        content: params.content,
+        signal,
+      }));
   } catch (e) {
     await settle(tools);
     // Close the turn on the event surface before rethrowing. A consumer driving
@@ -886,7 +983,9 @@ export async function executeAcpAgent<TContext, I, O>(
   // An earlier attempt of this step may have left its session behind.
   const sessions = step.session?.load ? undefined : acpSessionRecords(baseCtx);
   const recorded = await sessions?.load();
-  const resumeId = recorded?.agentId === agent.agentId ? recorded.sessionId : undefined;
+  const sameAgent = recorded?.agentId === agent.agentId;
+  const resumeId = sameAgent ? recorded?.sessionId : undefined;
+  const reattach = sameAgent ? recorded?.reattach : undefined;
   // `session/load` replays the session's conversation as updates. They are the
   // agent's history, not this turn's work: they reach raw-event consumers
   // marked `replay: true`, and never the text, reasoning or item streams.
@@ -940,6 +1039,7 @@ export async function executeAcpAgent<TContext, I, O>(
     binding: bindingFor(bridge),
     tools,
     resumeId,
+    reattach,
   })
     .catch((cause: unknown) => {
       throw setupFailure(step, cause, baseCtx);
@@ -954,6 +1054,8 @@ export async function executeAcpAgent<TContext, I, O>(
     await sessions?.write({
       sessionId: resolution.live.session.sessionId,
       agentId: agent.agentId,
+      // How a resumed run reaches this agent if it outlives this host.
+      reattach: resolution.live.connection.reattach,
     });
   }
 
@@ -992,6 +1094,7 @@ export async function executeAcpAgent<TContext, I, O>(
       bridge,
       tools,
       turnError,
+      collect: retries === 0 && resolution.reattached,
       content: buildContent({
         text: [
           context,

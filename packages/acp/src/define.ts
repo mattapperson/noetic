@@ -14,15 +14,19 @@ import type {
   AcpConnectOptions,
   AcpMachine,
   AcpMachineFactory,
+  AcpReattachHandle,
   AcpToolRefusal,
   AcpTransport,
   AcpTransportFactory,
+  AcpWhenHostExits,
   SpawnCommand,
   ToolBridgeAddress,
 } from '@noetic-tools/types';
+import { AcpConnectError } from '@noetic-tools/types';
+import { z } from 'zod';
 import { openAcpConnection } from './connection';
 import { spawnOn } from './spawn';
-import type { AcpToolWiring, ToolBridge } from './tool-bridge';
+import type { AcpToolWiring, ToolBridge, ToolBridgeCredentials } from './tool-bridge';
 import { startToolBridge } from './tool-bridge';
 import { sessionToolWiring } from './tool-wiring';
 
@@ -78,10 +82,20 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
     spawn: def.command ? spawnOn(def.machine ?? lazyLocalMachine(def.agentId)) : undefined,
     async connect(opts: AcpConnectOptions): Promise<AcpAgentConnection> {
       const signal = opts.signal ?? opts.host.signal;
-      const opened = await openTarget(def, opts.host.cwd, signal);
+      const whenHostExits = opts.whenHostExits ?? 'keep';
+      if (opts.reattach) {
+        return await reattachTo(def, opts, opts.reattach);
+      }
+      const opened = await openTarget(def, {
+        cwd: opts.host.cwd,
+        signal,
+        whenHostExits,
+      });
       let bridge: ToolBridge | undefined;
       try {
-        bridge = await openBridge(def, opts, opened.reach);
+        bridge = await openBridge(def, opts, {
+          reach: opened.reach,
+        });
         const transport = await opened.open(bridge?.env ?? {});
         return await openAcpConnection({
           agentId: def.agentId,
@@ -89,6 +103,7 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
           host: opts.host,
           signal,
           tools: bridge,
+          reattach: reattachHandle(transport.reattach, bridge),
         });
       } catch (e) {
         await bridge?.close();
@@ -130,8 +145,15 @@ function attachedRefusal(wiring: AcpToolWiring): AcpToolRefusal {
 /** A command starts on its machine; a transport attaches as it is. */
 async function openTarget(
   def: DefineAcpAgentOptions,
-  cwd: string,
-  signal: AbortSignal | undefined,
+  {
+    cwd,
+    signal,
+    whenHostExits,
+  }: {
+    cwd: string;
+    signal: AbortSignal | undefined;
+    whenHostExits: AcpWhenHostExits;
+  },
 ): Promise<Opened> {
   const command = def.command;
   if (!command) {
@@ -148,6 +170,7 @@ async function openTarget(
             ...env,
           },
           signal,
+          whenHostExits,
         }),
       // Unreached: a step never gives an attached agent tools (`refusesTools`).
       reach: async () => {
@@ -160,6 +183,7 @@ async function openTarget(
   }
   const machine: AcpMachine = await (def.machine ?? lazyLocalMachine(def.agentId))({
     signal,
+    whenHostExits,
   });
   return {
     open: (env) =>
@@ -203,11 +227,100 @@ function closingWith(transport: AcpTransport, opened: Opened): AcpTransport {
   };
 }
 
+/**
+ * Reach the agent an earlier host started, through the machine that runs it:
+ * the stream from its keeper, and the bridge served again under the path and
+ * token the agent was given, at the address it already uses.
+ */
+async function reattachTo(
+  def: DefineAcpAgentOptions,
+  opts: AcpConnectOptions,
+  handle: AcpReattachHandle,
+): Promise<AcpAgentConnection> {
+  const signal = opts.signal ?? opts.host.signal;
+  const whenHostExits = opts.whenHostExits ?? 'keep';
+  if (!def.command) {
+    throw new AcpConnectError({
+      agentId: def.agentId,
+      message: `ACP agent '${def.agentId}' attaches through a transport and cannot be reattached.`,
+    });
+  }
+  const machine = await (def.machine ?? lazyLocalMachine(def.agentId))({
+    signal,
+    whenHostExits,
+  });
+  let bridge: ToolBridge | undefined;
+  try {
+    if (!machine.attach) {
+      throw new AcpConnectError({
+        agentId: def.agentId,
+        message: `The machine ACP agent '${def.agentId}' runs on cannot reattach to an agent.`,
+      });
+    }
+    const transport = await machine.attach(handle);
+    bridge = await openBridge(def, opts, {
+      reach: (address) => machine.reach(address),
+      reuse: bridgeOf(handle),
+    });
+    return await openAcpConnection({
+      agentId: def.agentId,
+      transport: closingWith(transport, {
+        open: async () => transport,
+        reach: (address) => machine.reach(address),
+        close: () => machine.close(),
+      }),
+      host: opts.host,
+      signal,
+      tools: bridge,
+      reattach: reattachHandle(transport.reattach ?? handle, bridge),
+      reattached: true,
+    });
+  } catch (e) {
+    await bridge?.close();
+    await machine.close().catch(() => undefined);
+    throw e;
+  }
+}
+
+const BridgeCredentialsSchema = z.object({
+  path: z.string().startsWith('/'),
+  token: z.string().min(1),
+});
+
+/** The bridge credentials a reattach handle carries, if any. */
+function bridgeOf(handle: AcpReattachHandle): ToolBridgeCredentials | undefined {
+  const parsed = BridgeCredentialsSchema.safeParse(handle.bridge);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** The handle a later host reattaches with: the machine's, plus the bridge it must serve again. */
+function reattachHandle(
+  machine: AcpReattachHandle | undefined,
+  bridge: ToolBridge | undefined,
+): AcpReattachHandle | undefined {
+  if (!machine) {
+    return undefined;
+  }
+  return bridge
+    ? {
+        ...machine,
+        bridge: bridge.credentials,
+      }
+    : machine;
+}
+
 /** Start the tool bridge when the step gave tools, before the agent starts. */
 async function openBridge(
   def: DefineAcpAgentOptions,
   opts: AcpConnectOptions,
-  reach: Opened['reach'],
+  {
+    reach,
+    reuse,
+  }: {
+    reach: Opened['reach'];
+    /** Serve under what an earlier host gave a reattached agent. */
+    reuse?: ToolBridgeCredentials;
+  },
 ): Promise<ToolBridge | undefined> {
   const host = opts.host.tools;
   if (!host) {
@@ -221,6 +334,7 @@ async function openBridge(
     mcpServers: opts.mcpServers ?? [],
     env: def.env,
     reach,
+    reuse,
   });
 }
 

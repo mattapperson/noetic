@@ -151,6 +151,47 @@ function killWindowsTree(pid: number): Promise<void> {
 
 //#endregion
 
+//#region Host exit
+
+/** Children to kill when this process exits, for hosts that asked to stop them. */
+const stopOnExit = new Set<ChildProcess>();
+let exitHookInstalled = false;
+
+function killOnExit(): void {
+  for (const child of stopOnExit) {
+    const pid = child.pid;
+    if (!pid || exited(child)) {
+      continue;
+    }
+    try {
+      // Synchronous on purpose: nothing asynchronous runs during 'exit'.
+      process.kill(process.platform === 'win32' ? pid : -pid, 'SIGKILL');
+    } catch {
+      // Already gone.
+    }
+  }
+}
+
+/**
+ * Kill `child`'s process group when this process exits normally (`exit`), for
+ * a host whose agents must not outlive it. A host killed by a signal cannot
+ * run this; a child it started directly then sees its stdin close. Returns a
+ * function that forgets the child.
+ */
+export function stopWithHost(child: ChildProcess): () => void {
+  if (!exitHookInstalled) {
+    exitHookInstalled = true;
+    process.on('exit', killOnExit);
+  }
+  stopOnExit.add(child);
+  child.once('exit', () => stopOnExit.delete(child));
+  return () => {
+    stopOnExit.delete(child);
+  };
+}
+
+//#endregion
+
 //#region Public API
 
 /** @public Options for {@link stopProcessTree}. */

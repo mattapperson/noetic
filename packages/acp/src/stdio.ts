@@ -15,11 +15,14 @@ import type {
   AcpMachineFactory,
   AcpTransport,
   AcpTransportFactory,
+  AcpWhenHostExits,
   SpawnCommand,
 } from '@noetic-tools/types';
 import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
+import type { KeeperLink } from './keeper/client';
+import { attachKeeper, keeperHandleOf, startKeeper } from './keeper/client';
 import { serverEnv } from './server-env';
-import { stopProcessTree } from './stdio-process';
+import { stopProcessTree, stopWithHost } from './stdio-process';
 
 export type { StopProcessTreeOptions } from './stdio-process';
 export { stopProcessTree, TERM_GRACE_MS } from './stdio-process';
@@ -58,20 +61,66 @@ export function stdioAcpTransport(spec: StdioAgentSpec): AcpTransportFactory {
         },
         cwd: opts.cwd,
       },
-      opts.signal,
+      {
+        signal: opts.signal,
+        whenHostExits: opts.whenHostExits,
+      },
     );
 }
 
+/** @public Options for {@link localMachine}. */
+export interface LocalMachineOptions {
+  /**
+   * Run the agent through a keeper, so it can outlive this host and a later
+   * host can reattach to it (`AcpTransport.reattach`). Default `true`. Without
+   * one — or where no keeper script is on disk, as in a single-file bundle —
+   * the agent is a child process that ends with its host.
+   */
+  keeper?: boolean;
+  /**
+   * How long a kept agent may run with no host attached before its keeper
+   * stops it. Default 24 hours; `0` keeps it until a host reattaches or it
+   * exits.
+   */
+  detachedTimeoutMs?: number;
+}
+
+/** A kept agent with no host for this long is stopped, unless the machine says otherwise. */
+const DEFAULT_DETACHED_TIMEOUT_MS = 24 * 60 * 60 * 1e3;
+
 /**
- * This machine: the bridge is reached on its own loopback address, and the
- * agent and any MCP server beside it run as child processes. The agent gets
- * this process's environment; an MCP server, as the MCP SDK starts one, only
- * `serverEnv`'s short list.
+ * This machine: the agent runs through a keeper (see
+ * {@link LocalMachineOptions.keeper}), which also serves the tool bridge to it
+ * on a port that outlives the host; an MCP server beside it is a child
+ * process. The agent gets this process's environment; an MCP server, as the
+ * MCP SDK starts one, only `serverEnv`'s short list.
  * @public
  */
-export function localMachine(agentId = 'local'): AcpMachineFactory {
-  return async ({ signal }): Promise<AcpMachine> => {
+export function localMachine(
+  agentId = 'local',
+  options: LocalMachineOptions = {},
+): AcpMachineFactory {
+  return async ({ signal, whenHostExits = 'keep' }): Promise<AcpMachine> => {
     const started = new Set<AcpTransport>();
+    const useKeeper = options.keeper !== false;
+    let keeper: Promise<KeeperLink | undefined> | undefined;
+    const keeperOptions = {
+      whenHostExits,
+      detachedTimeoutMs: options.detachedTimeoutMs ?? DEFAULT_DETACHED_TIMEOUT_MS,
+    };
+    const openKeeper = (): Promise<KeeperLink | undefined> => {
+      keeper ??= useKeeper ? startKeeper(agentId, keeperOptions) : Promise.resolve(undefined);
+      return keeper;
+    };
+    signal?.addEventListener(
+      'abort',
+      () => {
+        void keeper?.then((link) => link?.stop());
+      },
+      {
+        once: true,
+      },
+    );
     const start = async (
       command: SpawnCommand,
       env: Record<string, string | undefined>,
@@ -82,18 +131,56 @@ export function localMachine(agentId = 'local'): AcpMachineFactory {
           ...command,
           env,
         },
-        signal,
+        {
+          signal,
+          whenHostExits,
+        },
       );
       started.add(transport);
       return transport;
     };
     return {
-      reach: async (bridge) => bridge,
-      launch: (command) =>
-        start(command, {
+      reach: async (bridge) => {
+        const link = await openKeeper();
+        if (!link) {
+          return bridge;
+        }
+        const url = await link.reach(new URL(bridge.url).pathname, bridge.url);
+        return {
+          ...bridge,
+          url,
+        };
+      },
+      launch: async (command) => {
+        const env = {
           ...process.env,
           ...command.env,
-        }),
+        };
+        const link = await openKeeper();
+        if (!link) {
+          return await start(command, env);
+        }
+        const transport = await link.launch({
+          ...command,
+          env,
+        });
+        started.add(transport);
+        return transport;
+      },
+      attach: async (handle) => {
+        const named = keeperHandleOf(handle);
+        if (!named) {
+          throw new AcpConnectError({
+            agentId,
+            message: `ACP agent '${agentId}' cannot be reattached: its handle names no keeper.`,
+          });
+        }
+        const link = attachKeeper(agentId, named, whenHostExits);
+        keeper = link;
+        const transport = (await link).transport();
+        started.add(transport);
+        return transport;
+      },
       spawn: (command) => start(command, serverEnv(command.env)),
       async close() {
         // In parallel: each stop may take its whole grace period.
@@ -101,6 +188,11 @@ export function localMachine(agentId = 'local'): AcpMachineFactory {
           ...started,
         ].map((transport) => transport.close().catch(() => undefined));
         started.clear();
+        closing.push(
+          (keeper ?? Promise.resolve(undefined))
+            .then((link) => link?.stop())
+            .catch(() => undefined),
+        );
         await Promise.all(closing);
       },
     };
@@ -117,7 +209,13 @@ export function localMachine(agentId = 'local'): AcpMachineFactory {
 async function spawnStdio(
   agentId: string,
   command: SpawnCommand,
-  signal: AbortSignal | undefined,
+  {
+    signal,
+    whenHostExits = 'keep',
+  }: {
+    signal: AbortSignal | undefined;
+    whenHostExits?: AcpWhenHostExits;
+  },
 ): Promise<AcpTransport> {
   const fail = (message: string, cause: unknown): AcpConnectError =>
     new AcpConnectError({
@@ -148,9 +246,11 @@ async function spawnStdio(
     },
   );
 
+  const forgetOnExit = whenHostExits === 'stop' ? stopWithHost(child) : () => undefined;
   let closing: Promise<void> | undefined;
   const close = (): Promise<void> => {
     signal?.removeEventListener('abort', onAbort);
+    forgetOnExit();
     closing ??= stopProcessTree(child).catch((error: unknown) => {
       throw fail('could not be stopped', error);
     });

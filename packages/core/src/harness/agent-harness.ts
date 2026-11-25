@@ -559,6 +559,7 @@ export class AgentHarness<
       emitItemsOnReplay: opts.emitItemsOnReplay,
       approveToolCall: opts.approveToolCall,
       now: opts.now,
+      killAgentsOnExit: opts.killAgentsOnExit,
     };
     this.outputStorage = this.config.storage ?? createInMemoryStorage();
     const adapters = resolveEnvironmentAdapters(environment);

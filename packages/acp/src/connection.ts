@@ -24,13 +24,17 @@ import type {
   AcpLoadSessionOptions,
   AcpNewSessionOptions,
   AcpPromptOptions,
+  AcpReattachHandle,
+  AcpResumeTurnOptions,
   AcpSession,
   AcpSessionNotification,
   AcpTransport,
   AcpTurnResult,
 } from '@noetic-tools/types';
 import { AcpCapabilityError, AcpConnectError } from '@noetic-tools/types';
+import { z } from 'zod';
 import { clientCapabilitiesFor, NoeticAcpClient } from './client';
+import { KEEPER_METHODS } from './keeper/relay';
 import type { WatchedTransport } from './liveness';
 import { watchTransport } from './liveness';
 import type { ToolBridge } from './tool-bridge';
@@ -47,6 +51,10 @@ export interface OpenAcpConnectionOptions {
   signal?: AbortSignal;
   /** The tool bridge serving `host.tools`, closed with the connection. */
   tools?: ToolBridge;
+  /** How a later host reaches this agent, when it can outlive this one. */
+  reattach?: AcpReattachHandle;
+  /** The transport reaches an agent an earlier host started (through its keeper). */
+  reattached?: boolean;
 }
 
 /** Routes a session's notifications to whichever turn is currently running. */
@@ -87,6 +95,39 @@ export function assertPromptContentSupported(
       });
     }
   }
+}
+
+/** What the keeper says about a session (`_noetic/keeper/session`). */
+const KeeperSessionSchema = z.object({
+  known: z.boolean(),
+  modes: z.custom<acp.SessionModeState>((value) => isRecord(value)).optional(),
+  configOptions: z.custom<acp.SessionConfigOption[]>((value) => Array.isArray(value)).optional(),
+});
+
+const StopReasonSchema = z.enum([
+  'end_turn',
+  'max_tokens',
+  'max_turn_requests',
+  'refusal',
+  'cancelled',
+]);
+
+/** How the keeper answers `_noetic/keeper/turn`. */
+const KeeperTurnSchema = z.discriminatedUnion('state', [
+  z.object({
+    state: z.literal('idle'),
+  }),
+  z.object({
+    state: z.literal('finished'),
+    response: z.object({
+      stopReason: StopReasonSchema,
+      usage: z.custom<acp.Usage>((value) => isRecord(value)).nullish(),
+    }),
+  }),
+]);
+
+function isRecord(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** JSON-RPC's "method not found". */
@@ -192,8 +233,65 @@ class AcpSessionImpl implements AcpSession {
   }
 
   private async runTurn(opts: AcpPromptOptions): Promise<AcpTurnResult> {
+    const result = await this.collectTurn(opts.signal, async () =>
+      this.agent.prompt({
+        sessionId: this.sessionId,
+        prompt: [
+          ...opts.content,
+        ],
+      }),
+    );
+    if (!result) {
+      throw new Error('session/prompt returned no answer.');
+    }
+    return result;
+  }
+
+  /**
+   * Make this a reattached session: {@link resumeTurn} collects the turn the
+   * previous host left running through the keeper.
+   */
+  enableResume(): void {
+    this.resumeTurn = async (opts: AcpResumeTurnOptions) => {
+      const ours = this.queue.then(
+        () => this.collectTurn(opts.signal, () => this.keeperTurn()),
+        () => this.collectTurn(opts.signal, () => this.keeperTurn()),
+      );
+      this.queue = ours.catch(() => undefined);
+      return await ours;
+    };
+  }
+
+  /** Set on a reattached session; see `AcpSession.resumeTurn`. */
+  resumeTurn?: (opts: AcpResumeTurnOptions) => Promise<AcpTurnResult | undefined>;
+
+  /** Ask the keeper for the turn in flight: its updates arrive, then its answer. */
+  private async keeperTurn(): Promise<acp.PromptResponse | undefined> {
+    const request = this.agent.extMethod?.bind(this.agent);
+    if (!request) {
+      return undefined;
+    }
+    const answer = KeeperTurnSchema.parse(
+      await request(KEEPER_METHODS.turn, {
+        sessionId: this.sessionId,
+      }),
+    );
+    return answer.state === 'finished' ? answer.response : undefined;
+  }
+
+  /**
+   * Run one turn: updates go to a fresh accumulator while `send` waits for
+   * the agent's answer. Undefined when there was no turn to collect.
+   */
+  private async collectTurn(
+    signal: AbortSignal | undefined,
+    send: () => Promise<acp.PromptResponse | undefined>,
+  ): Promise<AcpTurnResult | undefined> {
     const accumulator = new AcpTurnAccumulator();
     this.activeTurn = accumulator;
+    const opts = {
+      signal,
+    };
     const onAbort = () => {
       // Fire-and-forget: the specification says the agent still answers the
       // original `session/prompt` with the `cancelled` stop reason.
@@ -204,14 +302,12 @@ class AcpSessionImpl implements AcpSession {
     });
     try {
       const response = await Promise.race([
-        this.agent.prompt({
-          sessionId: this.sessionId,
-          prompt: [
-            ...opts.content,
-          ],
-        }),
+        send(),
         this.death,
       ]);
+      if (!response) {
+        return undefined;
+      }
       return accumulator.result({
         stopReason: response.stopReason,
         reportedUsage: response.usage ?? undefined,
@@ -324,7 +420,49 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     readonly protocolVersion: number,
     private readonly watch: WatchedTransport,
     private readonly tools: ToolBridge | undefined,
-  ) {}
+    readonly reattach: AcpReattachHandle | undefined,
+    reattached: boolean,
+  ) {
+    if (reattached) {
+      this.attachSession = (sessionId) => this.attachTo(sessionId);
+    }
+  }
+
+  /** Set on a reattached connection; see `AcpAgentConnection.attachSession`. */
+  attachSession?: (sessionId: string) => Promise<AcpSession>;
+
+  /** The live session `sessionId`, as the keeper last saw it. */
+  private async attachTo(sessionId: string): Promise<AcpSession> {
+    const request = this.agent.extMethod?.bind(this.agent);
+    const info = request
+      ? KeeperSessionSchema.parse(
+          await Promise.race([
+            request(KEEPER_METHODS.session, {
+              sessionId,
+            }),
+            this.watch.death,
+          ]),
+        )
+      : undefined;
+    if (!info?.known) {
+      throw new AcpConnectError({
+        agentId: this.agentId,
+        message: `ACP agent '${this.agentId}' no longer has session ${sessionId}.`,
+      });
+    }
+    const session = new AcpSessionImpl(
+      this.agentId,
+      this.agent,
+      sessionId,
+      info.modes,
+      info.configOptions,
+      [],
+      this.watch.death,
+      this.agentCapabilities.promptCapabilities,
+    );
+    session.enableResume();
+    return this.track(session);
+  }
 
   /** The sink the client hands every `session/update` notification. */
   get sink(): NotificationSink {
@@ -534,6 +672,8 @@ export async function openAcpConnection(
     initialized.protocolVersion,
     watch,
     opts.tools,
+    opts.reattach,
+    opts.reattached === true,
   );
   sink = connection.sink;
   return connection;

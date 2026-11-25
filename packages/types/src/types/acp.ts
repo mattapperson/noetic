@@ -50,7 +50,31 @@ export const ACP_AGENT_STEP_KIND = 'acp-agent';
  * and {@link ShellAdapter} is one-shot. ACP needs a long-lived duplex pipe.
  * @public
  */
-export type AcpTransport = ByteStream;
+export type AcpTransport = ByteStream & {
+  /**
+   * Set when the agent behind this stream outlives the host and can be
+   * reattached (a local agent run by its keeper). JSON, opaque outside the
+   * package that made it.
+   */
+  readonly reattach?: AcpReattachHandle;
+};
+
+/**
+ * How to reach an agent that outlived its host: JSON a durable run stores with
+ * the step and hands back to {@link AcpConnectOptions.reattach} on resume.
+ * Opaque to everything but the package that made it.
+ * @public
+ */
+export type AcpReattachHandle = Readonly<Record<string, unknown>>;
+
+/**
+ * What happens to an agent when its host goes away without closing it — a
+ * crash, Ctrl-C, a killed process. `'keep'` (the default) keeps the agent
+ * working and holds everything it sends until a host reattaches; `'stop'`
+ * stops its whole process tree as soon as the host is gone.
+ * @public
+ */
+export type AcpWhenHostExits = 'keep' | 'stop';
 
 /** @public Options a transport factory receives when a step opens a connection. */
 export interface AcpTransportOptions {
@@ -60,6 +84,8 @@ export interface AcpTransportOptions {
   env?: Record<string, string | undefined>;
   /** Aborting this signal closes the transport. */
   signal?: AbortSignal;
+  /** See {@link AcpWhenHostExits}. */
+  whenHostExits?: AcpWhenHostExits;
 }
 
 /**
@@ -106,12 +132,23 @@ export interface AcpMachine {
    * local server does, not the agent's.
    */
   spawn: Spawn;
+  /**
+   * The stream to an agent this machine launched for an earlier host, which
+   * outlived it ({@link AcpTransport.reattach}). Rejects with
+   * {@link AcpConnectError} when that agent is gone. Absent on a machine whose
+   * agents never outlive their host.
+   */
+  attach?(handle: AcpReattachHandle): Promise<AcpTransport>;
   /** Release the machine and everything started on it. */
   close(): Promise<void>;
 }
 
 /** @public Opens an {@link AcpMachine} for one connection. */
-export type AcpMachineFactory = (opts: { signal?: AbortSignal }) => Promise<AcpMachine>;
+export type AcpMachineFactory = (opts: {
+  signal?: AbortSignal;
+  /** See {@link AcpWhenHostExits}. */
+  whenHostExits?: AcpWhenHostExits;
+}) => Promise<AcpMachine>;
 
 //#endregion
 
@@ -577,6 +614,15 @@ export interface AcpSession {
    */
   setMode(modeId: string): Promise<void>;
   /**
+   * On a reattached session ({@link AcpAgentConnection.attachSession}): collect
+   * the turn that was running when the previous host went away. Every update
+   * of that turn — those the previous host saw and those sent while no host
+   * was attached — arrives again as this turn's output, and any request the
+   * agent is still waiting on is asked again. Resolves with the turn's result,
+   * or `undefined` when no turn was running, so the caller prompts instead.
+   */
+  resumeTurn?(opts: AcpResumeTurnOptions): Promise<AcpTurnResult | undefined>;
+  /**
    * Select a model through the `model` config option
    * (`session/set_config_option`). Throws when the agent advertised none.
    */
@@ -604,8 +650,26 @@ export interface AcpAgentConnection {
    * the agent did not advertise `loadSession`.
    */
   loadSession(opts: AcpLoadSessionOptions): Promise<AcpSession>;
+  /**
+   * Set when the agent can outlive this host and be reattached: store it, and
+   * pass it as {@link AcpConnectOptions.reattach} to reach the same agent.
+   */
+  readonly reattach?: AcpReattachHandle;
+  /**
+   * The live session `sessionId` on a reattached connection, with the modes
+   * and config options the agent last advertised — no `session/new` or
+   * `session/load`. Rejects with {@link AcpConnectError} when the agent has no
+   * such session. Present only on a reattached connection.
+   */
+  attachSession?(sessionId: string): Promise<AcpSession>;
   /** Close the connection and release the transport. */
   close(): Promise<void>;
+}
+
+/** @public Options for {@link AcpSession.resumeTurn}. */
+export interface AcpResumeTurnOptions {
+  /** Aborting it cancels the turn, as for {@link AcpSession.prompt}. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -645,6 +709,14 @@ export interface AcpConnectOptions {
    * agent receives them in `session/new` as usual.
    */
   mcpServers?: ReadonlyArray<acp.McpServer>;
+  /**
+   * Reach the agent an earlier host started, from its
+   * {@link AcpAgentConnection.reattach}, instead of starting one. Rejects with
+   * {@link AcpConnectError} when that agent is gone.
+   */
+  reattach?: AcpReattachHandle;
+  /** See {@link AcpWhenHostExits}. Default `'keep'`. */
+  whenHostExits?: AcpWhenHostExits;
 }
 
 /**

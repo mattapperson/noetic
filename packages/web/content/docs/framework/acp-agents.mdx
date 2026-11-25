@@ -64,6 +64,23 @@ Every preset accepts `command`, `args`, and `env` overrides, a `machine` to run 
 
 `claudeCode()` and `codex()` run the maintained `@agentclientprotocol` bridges; the retired `@zed-industries/claude-code-acp` and `@zed-industries/codex-acp` packages are never started. `args` are appended after the bridge's own, `env` is layered onto your environment (for Codex, `CODEX_PATH` picks the backend binary the bridge runs), and the session's `cwd` is the process's working directory. A preset never changes the model you or your environment selected.
 
+### When your host process dies
+
+A local agent does not die with your host. Each one runs through a small *keeper* process that holds its stdio, so if your host crashes, is killed, or gets Ctrl-C mid-turn, the agent keeps working. Its updates, the requests it is waiting on (a permission prompt, a file read), and its tool calls are held until a host reattaches.
+
+On a [durable](/docs/framework/durability) run, resuming the run reattaches. The resumed step reaches the same agent, gets its live session back (modes and config options included), and collects the turn that was running. Every update of that turn streams again as the step's output, from the first, and requests the agent is still waiting on are answered by the new host's policy and handlers. The step's result is that turn's result. It only prompts again (behind a short "you were cut off" notice) if no turn was running. If the agent is gone, the step falls back to `session/load` or a new session, as before.
+
+```ts
+import { AgentHarness } from '@noetic-tools/core';
+
+// Stop every agent when this process goes away instead of keeping it.
+const harness = new AgentHarness({ name: 'coder', params: {}, killAgentsOnExit: true });
+```
+
+With `killAgentsOnExit: true`, a kept agent stops as soon as its host's connection drops, whatever ended the host. A kept agent that no host reattaches to is stopped after 24 hours; `localMachine(agentId, { detachedTimeoutMs })` changes that, and `localMachine(agentId, { keeper: false })` starts the agent as a plain child process that ends with your host. Closing a session, or a step whose session closes with it, always stops the agent.
+
+To reach a kept agent yourself, outside a durable run, store `connection.reattach` and pass it back as `agent.connect({ host, reattach })`. Then call `connection.attachSession(sessionId)` and `session.resumeTurn()`.
+
 ### Stopping the agent's processes
 
 Bridges usually start through a wrapper — `npx`, or a Node launcher that runs a native binary as its child — so the process noetic spawns is rarely the agent itself. A local agent therefore runs as the leader of its own process group, and closing the connection (or aborting the step) stops the whole group: stdin is closed, then `SIGTERM`, a two-second grace period, then `SIGKILL`; on Windows, `taskkill /T /F` on its tree. No agent process or inherited pipe outlives the connection to keep your host running. A missing binary fails when the connection opens, with `AcpConnectError`. If you spawn the agent yourself in a custom `transport`, spawn it with `detached: true` and call `stopProcessTree(child)` from `@noetic-tools/acp/stdio` in its `close()` for the same shutdown.

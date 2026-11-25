@@ -139,6 +139,8 @@ export interface ContextHarness extends HarnessPlatform {
     readonly emitItemsOnReplay?: boolean;
     /** The clock deadlines are read from. Default `Date.now`. */
     readonly now?: () => number;
+    /** Stop ACP agents when the host goes away without closing them. */
+    readonly killAgentsOnExit?: boolean;
   };
   callModel(request: ContextCallModelRequest): Promise<LLMResponse>;
   decide(request: DecideRequest): Promise<DecideResponse>;

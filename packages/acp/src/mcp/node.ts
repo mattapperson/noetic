@@ -74,6 +74,12 @@ function refusal(
 
 //#endregion
 
+/** The path and token a bridge serves under, kept so a later host can serve the same. */
+export interface BridgeCredentials {
+  readonly path: string;
+  readonly token: string;
+}
+
 //#region Public API
 
 /**
@@ -82,9 +88,11 @@ function refusal(
  */
 export async function serveToolsOverHttp(
   getHost: () => AcpToolHost | undefined,
+  reuse?: BridgeCredentials,
 ): Promise<HttpToolServer> {
-  const token = randomUUID();
-  const path = `/mcp/${randomUUID()}`;
+  // A reattached agent keeps the path and token an earlier host gave it.
+  const token = reuse?.token ?? randomUUID();
+  const path = reuse?.path ?? `/mcp/${randomUUID()}`;
   const sessions = new Map<string, NodeStreamableHTTPServerTransport>();
 
   const open = async (): Promise<NodeStreamableHTTPServerTransport> => {
