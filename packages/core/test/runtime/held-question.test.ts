@@ -538,6 +538,97 @@ describe('naming who asks on storage without compare-and-set', () => {
     expect(record?.resolution?.action).toBe('deny');
   });
 
+  it('an answer retried after a renaming never lands on a question that replaced it meanwhile', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const swap = storage.swap?.bind(storage);
+    const get = storage.get.bind(storage);
+    let raced = false;
+    let readsAfterRace = 0;
+    const holds = new HeldCalls(
+      {
+        ...storage,
+        async get<T>(key: string): Promise<T | null> {
+          if (raced) {
+            readsAfterRace += 1;
+            // The reread sees only the renaming; before the retry reads,
+            // another host replaces the question.
+            if (readsAfterRace === 2) {
+              await storage.set(key, {
+                ...question('q7'),
+                args: {
+                  message: 'something else',
+                },
+              });
+            }
+          }
+          return await get<T>(key);
+        },
+        async swap<T>(key: string, prev: T | null, next: T): Promise<boolean> {
+          if (!raced) {
+            raced = true;
+            await storage.set(key, {
+              ...question('q7'),
+              scope: {
+                id: 'other-host',
+              },
+            });
+          }
+          return (await swap?.(key, prev, next)) ?? false;
+        },
+      },
+      () => 0,
+    );
+    await holds.open('exec', question('q7'));
+    const error = await holds
+      .resolve('exec', {
+        callId: 'q7',
+        resolution: {
+          action: 'deny',
+        },
+      })
+      .catch((e: unknown) => e);
+    assert(isNoeticError(error));
+    expect(error.message).toContain('replaced');
+    const record = await holds.load('exec', 'q7');
+    expect(record?.resolution).toBeUndefined();
+  });
+
+  it('a renaming still running when the hold is dropped never writes it back', async () => {
+    const storage = createInMemoryStorage();
+    const set = storage.set.bind(storage);
+    let release: () => void = () => undefined;
+    let paused = false;
+    const holds = new HeldCalls(
+      {
+        ...storage,
+        async set<T>(key: string, value: T): Promise<void> {
+          if (!paused && JSON.stringify(value).includes('late-scope')) {
+            paused = true;
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+          }
+          await set(key, value);
+        },
+      },
+      () => 0,
+    );
+    await holds.open('exec', question('q8'));
+    const renaming = holds.rescope('exec', 'q8', {
+      id: 'late-scope',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const closing = holds.close('exec', 'q8');
+    release();
+    await Promise.all([
+      renaming,
+      closing,
+    ]);
+    expect(await holds.load('exec', 'q8')).toBeUndefined();
+  });
+
   it('an answer racing a replacement with other arguments is refused, never applied to it', async () => {
     const storage = createInMemoryStorage({
       swap: true,

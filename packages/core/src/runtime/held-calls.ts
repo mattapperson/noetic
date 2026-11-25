@@ -210,6 +210,13 @@ function wrongAnswerKind(
     : 'the call waits for an approval, not a result';
 }
 
+/** The same question: everything but who asks and any answer is unchanged. */
+function sameQuestion(before: HeldRecord, after: HeldRecord): boolean {
+  const { resolution: _before, ...questionBefore } = before;
+  const { resolution: _after, ...questionAfter } = after;
+  return onlyScopeChanged(questionBefore, questionAfter);
+}
+
 /** Whether two records of one call differ in nothing but who they name as asking. */
 function onlyScopeChanged(before: HeldRecord, after: HeldRecord): boolean {
   const { scope: _before, ...restBefore } = before;
@@ -363,14 +370,19 @@ export class HeldCalls {
    * (its approval, since given) and is replaced: a call is held for one thing at a
    * time, and an old answer must not pass for the new question.
    */
-  async open(executionId: string, record: HeldRecord): Promise<HeldRecord> {
+  open(executionId: string, record: HeldRecord): Promise<HeldRecord> {
+    // In line with this process's renamings and answers of the call.
+    return this.exclusive(executionId, record.callId, () => this.openOne(executionId, record));
+  }
+
+  private async openOne(executionId: string, record: HeldRecord): Promise<HeldRecord> {
     const existing = await this.load(executionId, record.callId);
     const same =
       existing !== undefined &&
       existing.argsHash === record.argsHash &&
       existing.reason === record.reason;
     if (same) {
-      return (await this.rescope(executionId, record.callId, record.scope)) ?? existing;
+      return (await this.rescopeOne(executionId, record.callId, record.scope)) ?? existing;
     }
     await this.storage.set(`${heldPrefix(executionId)}${record.callId}`, record);
     return record;
@@ -446,7 +458,13 @@ export class HeldCalls {
       intentPrefix(executionId),
     ]) {
       for (const key of await this.storage.list(prefix)) {
-        await this.storage.delete(key);
+        // A held record goes in line with renamings of it, so none writes it back.
+        const callId = key.startsWith(heldPrefix(executionId))
+          ? key.slice(heldPrefix(executionId).length)
+          : undefined;
+        await (callId === undefined
+          ? this.storage.delete(key)
+          : this.exclusive(executionId, callId, () => this.storage.delete(key)));
       }
     }
   }
@@ -489,7 +507,10 @@ export class HeldCalls {
         watched && by === undefined
           ? settledByOf(await this.load(executionId, callId), this.now())
           : by;
-      await this.storage.delete(`${heldPrefix(executionId)}${callId}`);
+      // In line with renamings of the call: none still running writes it back.
+      await this.exclusive(executionId, callId, () =>
+        this.storage.delete(`${heldPrefix(executionId)}${callId}`),
+      );
       if (settledBy !== undefined) {
         this.settleWatch(key, settledBy);
       }
@@ -639,11 +660,16 @@ export class HeldCalls {
       resolution: HeldResolution;
     },
     retries = RESCOPE_ATTEMPTS,
+    question?: HeldRecord,
   ): Promise<void> {
     const { callId } = answer;
     const record = await this.load(executionId, callId);
     if (!record) {
       throw refused(callId, 'no call with this id is held');
+    }
+    // A retry answers the question it first read, never one that replaced it.
+    if (question && !sameQuestion(question, record)) {
+      throw refused(callId, 'the call was replaced while it was being answered');
     }
     if (answer.argsHash !== undefined && answer.argsHash !== record.argsHash) {
       throw refused(callId, 'the answer is for a call with different arguments');
@@ -677,7 +703,7 @@ export class HeldCalls {
       // Only who it names as asking changed (another host restated it): answer again.
       if (now && now.resolution === undefined && onlyScopeChanged(record, now)) {
         if (retries > 0) {
-          return await this.resolveOne(executionId, answer, retries - 1);
+          return await this.resolveOne(executionId, answer, retries - 1, question ?? record);
         }
         throw refused(callId, 'the call kept changing while it was being answered; try again');
       }

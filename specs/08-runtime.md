@@ -760,11 +760,15 @@ show one.
   its held event unscoped, naming the subagent in `scope` — the subagent known
   when the hold opens, and a hold opened before its subagent was known is
   renamed once it is. When another host asks a still-unanswered hold again,
-  the hold keeps its id and its answer and takes that host's `scope`. Renaming
-  and answering one call take turns in a process, and across processes
-  renaming is a compare-and-set, so it never writes over an answer; an answer
-  that loses to a renaming is given again, and one whose call was replaced by
-  a new question (other arguments, another reason) is refused. Its file and terminal calls
+  the hold keeps its id and its answer and takes that host's `scope`. Opening,
+  renaming, answering and dropping one call take turns in a process, so a
+  renaming never writes back a hold already dropped; across processes
+  renaming is a compare-and-set, so it never writes over an answer. An answer
+  that loses to a renaming is given again — to the question it was given for
+  only: one whose call was replaced meanwhile by a new question (other
+  arguments, another reason) is refused. A nested agent's place in the turn is
+  learnt before its announcement renames anything, so a subagent's first word
+  can be the announcement itself. Its file and terminal calls
   are reported on its scope.
 - **Its questions are the run's to answer.** A permission request or a
   question a nested agent raises is held like any other (§ Held tool calls),

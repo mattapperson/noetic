@@ -21,6 +21,7 @@ import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { AcpEventBridge } from '../../src/interpreter/acp-events';
 import { execute } from '../../src/interpreter/execute';
+import { heldCallsOf, heldScopeOf } from '../../src/runtime/held-calls';
 import { makeMessage } from '../_helpers';
 
 interface Captured {
@@ -333,6 +334,8 @@ interface ChildCallOptions {
   slowApprover?: boolean;
   /** After the first call, the step announces and makes a call of its own. */
   stepCallAfter?: boolean;
+  /** The person takes a while to approve; who the hold names is read meanwhile. */
+  slowPerson?: boolean;
 }
 
 async function runChildCall(opts: ChildCallOptions): Promise<{
@@ -340,15 +343,23 @@ async function runChildCall(opts: ChildCallOptions): Promise<{
   events: Captured[];
   held: HeldCall[];
   runs: number;
+  /** Who the open hold named while the slow person decided. */
+  askers: (string | undefined)[];
 }> {
   let runs = 0;
   {
     const held: HeldCall[] = [];
+    const askers: (string | undefined)[] = [];
     const harness = new AgentHarness({
       name: 'h',
       params: {},
-      onHeld: (call) => {
+      onHeld: async (call) => {
         held.push(call);
+        if (opts.slowPerson) {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          const records = await heldCallsOf(harness).list(heldScopeOf(ctx));
+          askers.push(...records.map((record) => record.scope?.title));
+        }
         return {
           action: 'allow',
         };
@@ -510,6 +521,7 @@ async function runChildCall(opts: ChildCallOptions): Promise<{
       events,
       held,
       runs,
+      askers,
     };
   }
 }
@@ -592,6 +604,20 @@ describe("a subagent's bridged tool call", () => {
       'step',
     ]);
   }, 10e3);
+
+  it('a held call a subagent first speaks to announce is renamed to it while the person decides', async () => {
+    // The announcement is the turn's first word from the subagent: its
+    // lineage is learnt from that same update.
+    const { askers } = await runChildCall({
+      announce: 'during',
+      subagent: false,
+      approval: true,
+      slowPerson: true,
+    });
+    expect(askers).toEqual([
+      'Explore',
+    ]);
+  });
 
   it('a failed turn still publishes what its finished calls returned', async () => {
     const { events } = await runChildCall({

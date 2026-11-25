@@ -1201,8 +1201,10 @@ async function runAcpStep<TContext, I, O>(params: {
       if (reloading) {
         return;
       }
-      tools?.observeChild(update.sessionId, update.update);
+      // Its lineage first: a hold the announcement renames names the nested
+      // agent only once the turn knows where it sits.
       events.forwardChild(update);
+      tools?.observeChild(update.sessionId, update.update);
     },
     onActivity: (activity: AcpClientActivity) => {
       events.forwardActivity(activity);
