@@ -13,6 +13,93 @@ export function tableName(table: string | undefined, factory: string): string {
   return name;
 }
 
+/** @internal Keys read per statement: D1 and Durable Object SQL bind at most 100 parameters, one of them the scope. */
+export const KEYS_PER_STATEMENT = 90;
+
+/**
+ * @internal
+ * The statements of one storage table, and the scope they are bound to. Without a
+ * scope the table is `(key, value)`; with one it is `(scope, key, value)` and every
+ * statement is bound to the scope first, so two scopes never see each other's rows.
+ */
+export interface StorageTable {
+  create: string;
+  select: string;
+  upsert: string;
+  remove: string;
+  list: string;
+  /** Insert a key only when it is missing. */
+  insertNew: string;
+  /** Replace a value only when the key holds the value given last. */
+  replace: string;
+  /** Select `count` keys' rows. */
+  selectMany(count: number): string;
+  /** The bindings that lead every statement: the scope, or none. */
+  scope: string[];
+}
+
+/** @internal The statements for `table`, scoped when `scope` is given. @throws Error for an empty scope. */
+export function storageTable(
+  table: string,
+  scope: string | undefined,
+  factory: string,
+): StorageTable {
+  if (scope === '') {
+    throw new Error(`${factory}: scope must not be empty.`);
+  }
+  const scoped = scope !== undefined;
+  const columns = scoped ? 'scope, key' : 'key';
+  const places = scoped ? '?, ?' : '?';
+  const at = scoped ? 'scope = ? AND key = ?' : 'key = ?';
+  const within = scoped ? 'scope = ? AND ' : '';
+  return {
+    create: scoped
+      ? `CREATE TABLE IF NOT EXISTS ${table} (scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (scope, key))`
+      : `CREATE TABLE IF NOT EXISTS ${table} (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+    select: `SELECT value FROM ${table} WHERE ${at}`,
+    upsert: `INSERT INTO ${table} (${columns}, value) VALUES (${places}, ?) ON CONFLICT(${columns}) DO UPDATE SET value = excluded.value`,
+    remove: `DELETE FROM ${table} WHERE ${at}`,
+    list: `SELECT key FROM ${table} WHERE ${within}key >= ? AND key < ? AND substr(key, 1, length(?)) = ?`,
+    insertNew: `INSERT INTO ${table} (${columns}, value) VALUES (${places}, ?) ON CONFLICT(${columns}) DO NOTHING`,
+    replace: `UPDATE ${table} SET value = ? WHERE ${at} AND value = ?`,
+    selectMany: (count) =>
+      `SELECT key, value FROM ${table} WHERE ${within}key IN (${Array.from(
+        {
+          length: count,
+        },
+        () => '?',
+      ).join(', ')})`,
+    scope: scoped
+      ? [
+          scope,
+        ]
+      : [],
+  };
+}
+
+/** @internal `keys` without repeats, in groups one statement can bind. */
+export function keyGroups(keys: string[]): string[][] {
+  const unique = [
+    ...new Set(keys),
+  ];
+  const groups: string[][] = [];
+  for (let start = 0; start < unique.length; start += KEYS_PER_STATEMENT) {
+    groups.push(unique.slice(start, start + KEYS_PER_STATEMENT));
+  }
+  return groups;
+}
+
+/** @internal Add each `{ key, value }` row of `rows` to `found`, decoded. */
+export function collectRows<T>(rows: unknown[], found: Map<string, T>): void {
+  for (const row of rows) {
+    const key = storedKey(row);
+    const value = storedValue(row);
+    if (key !== undefined && value !== undefined) {
+      found.set(key, decoded<T>(value));
+    }
+  }
+}
+
 /**
  * @internal
  * The upper end of the key range a prefix covers, so a `list` reads that range from

@@ -13,6 +13,7 @@ import { z } from 'zod';
 import type { AlarmStorageLike } from '../src/alarm-wake';
 import type { D1DatabaseLike, D1StatementLike } from '../src/d1-storage';
 import type { DurableObjectSqlLike } from '../src/durable-object-storage';
+import type { BlobStoreLike } from '../src/spill-storage';
 import type {
   TurnParams,
   WorkflowBindingLike,
@@ -72,6 +73,39 @@ export function fakeObjectSql(db: Database = new Database(':memory:')): DurableO
       };
     },
   };
+}
+
+/** An R2 bucket in memory. `failing` makes every `put` reject. */
+export interface FakeBlobs extends BlobStoreLike {
+  /** The objects it holds, by key. */
+  objects: Map<string, string>;
+  failing: boolean;
+}
+
+export function fakeBlobs(): FakeBlobs {
+  const objects = new Map<string, string>();
+  const blobs: FakeBlobs = {
+    objects,
+    failing: false,
+    get: async (key) => {
+      const text = objects.get(key);
+      return text === undefined
+        ? null
+        : {
+            text: async () => text,
+          };
+    },
+    put: async (key, value) => {
+      if (blobs.failing) {
+        throw new Error('R2_ERROR: bucket is unavailable');
+      }
+      objects.set(key, value);
+    },
+    delete: async (key) => {
+      objects.delete(key);
+    },
+  };
+  return blobs;
 }
 
 /** A Durable Object's alarm: the one time it is set to, or undefined. */

@@ -109,7 +109,7 @@ export { alarmWake };                                            // wake preset:
 export { runTurn, startTurn, wakeTurn, turnInstanceId, TURN_WAKE_EVENT }; // wake preset: Cloudflare Workflows
 ```
 
-Peer dependencies: none. It imports neither `cloudflare:workers` nor a Cloudflare types package: every helper takes a structural type naming the part of a binding it calls (`D1DatabaseLike`, `DurableObjectSqlLike`, `AlarmStorageLike`, `WorkflowStepLike`, `WorkflowBindingLike`), so the real bindings fit and a test passes its own. No `node:*` imports. See § Cloudflare Workers.
+Peer dependencies: none. It imports neither `cloudflare:workers` nor a Cloudflare types package: every helper takes a structural type naming the part of a binding it calls (`D1DatabaseLike`, `DurableObjectSqlLike`, `BlobStoreLike`, `AlarmStorageLike`, `WorkflowStepLike`, `WorkflowBindingLike`), so the real bindings fit and a test passes its own. No `node:*` imports. See § Cloudflare Workers.
 
 ### Migrating `@noetic-tools/core/adapters/node`
 
@@ -240,10 +240,81 @@ A Worker has no process between requests, no filesystem and no timers that outli
 
 ### Storage
 
-Both adapters implement `StorageAdapter.swap`, store each value as its JSON encoding in one table (default `noetic_storage`, created when missing) and throw when a write fails.
+Both adapters implement `StorageAdapter.swap` and `getMany`, store each value as its JSON encoding in one table (default `noetic_storage`, created when missing) and throw when a write fails.
 
-- **`createD1Storage({ database, table? })`** — one row per key in a D1 database. Every Worker bound to the database shares the storage. `swap` is a single conditional statement (`INSERT … ON CONFLICT DO NOTHING` for a missing key, `UPDATE … WHERE key = ? AND value = ?` otherwise) and wins when it changed one row. The table is made on first use.
-- **`createDurableObjectStorage({ sql, table? })`** — one row per key in a Durable Object's SQLite storage (`ctx.storage.sql`). One object is one storage. `swap` reads, compares and writes with no `await` between, which an object runs as one atomic step.
+- **`createD1Storage({ database, table?, scope?, spill? })`** — one row per key in a D1 database. Every Worker bound to the database shares the storage. `swap` is a single conditional statement (`INSERT … ON CONFLICT DO NOTHING` for a missing key, `UPDATE … WHERE key = ? AND value = ?` otherwise) and wins when it changed one row. The table is made on first use.
+- **`createDurableObjectStorage({ sql, table?, scope?, spill? })`** — one row per key in a Durable Object's SQLite storage (`ctx.storage.sql`). One object is one storage. `swap` reads, compares and writes with no `await` between, which an object runs as one atomic step.
+
+`getMany` reads up to 90 keys a statement, since both databases bind at most 100 parameters.
+
+#### Scopes
+
+`scope` lets many storages share one table: one per tenant, user or environment. A scoped adapter reads and writes only the rows of its scope, and `list` returns only its keys.
+
+| | Table | Primary key |
+|---|---|---|
+| no `scope` | `(key TEXT, value TEXT NOT NULL)` | `key` |
+| `scope` | `(scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL)` | `(scope, key)` |
+
+A table has one shape: every adapter on it is scoped, or none is. A scoped adapter on a table made without the column fails on its first statement, as does the reverse. `scope` is any non-empty string. It is bound as a parameter, never written into a statement. Dropping a tenant is one statement the host runs: `DELETE FROM noetic_storage WHERE scope = ?`.
+
+#### Values larger than a row
+
+A D1 row and a Durable Object SQLite row hold about 2 MB, and core keeps a thread's whole history in one value. A value that does not fit cannot be written, and under a turn lease a record that cannot be written stops the turn (`ledger_write_failed`, `23-durable-execution` § Fail-stop). `spill` moves such values out of the row:
+
+```typescript
+interface SpillOptions {
+  /** Where large values go: an R2 bucket binding (`env.BUCKET`), or anything with its `get`, `put` and `delete`. */
+  blobs: BlobStoreLike;
+  /** A value whose JSON is over this many UTF-8 bytes is spilled. Default 1 MiB (`DEFAULT_SPILL_BYTES`). */
+  maxBytes?: number;
+  /** Leads every object key. Default `noetic-storage`. */
+  prefix?: string;
+}
+
+interface BlobStoreLike {
+  get(key: string): Promise<{ text(): Promise<string> } | null>;
+  put(key: string, value: string): Promise<unknown>;
+  delete(key: string): Promise<unknown>;
+}
+
+function spillStorage(storage: StorageAdapter, options: SpillOptions): StorageAdapter;
+```
+
+`spill` on either factory is `spillStorage` around that adapter, with the scope added to the prefix. `spillStorage` is exported for any other `StorageAdapter`.
+
+- **Writing.** A value whose JSON is over `maxBytes` is written to the blob store, and the row holds a pointer to it: the value `{ "noetic:spilled": "<object key>" }`. Smaller values are stored as before.
+- **One object per write.** Each spilled write makes a new object, `<prefix>[/<scope>]/<key, cut to 200 characters>/<uuid>`, and never overwrites one. So a pointer names one value for as long as it exists, and two writers never share an object. The write that replaces or deletes a pointer deletes the object it pointed at.
+- **Reading.** `get` and `getMany` follow a pointer and return the value. A writer may delete an object between a reader's row read and its object read, so a missing object means the row is read again, up to three times. An object still missing behind an unchanged pointer is an error, not an absent key: reading it as absent would restart a turn from nothing.
+- **`swap`.** The storage underneath decides the winner, in one compare-and-set, as it does without `spill`. For a spilled `prev` the adapter first reads the row and its object, and returns `false` unless the object's text is `prev`'s JSON. It then swaps on the pointer. Since an object is written once, the same pointer is the same value. The loser's new object is deleted, as is the winner's old one.
+- **A write that fails** deletes the object it made, unless the row turns out to point at it. A swap that throws after it landed is reported as won, so a lease holder is not told it was replaced.
+- **`spillStorage` needs `swap` underneath to offer `swap`.** Over an adapter without it, the result has none.
+- **Changing `maxBytes`** is safe. Rows written under the old limit still read, and `swap` matches a stored value whichever side of the new limit it is on.
+
+Two plain `set`s that race on one key can leave an object nothing points at. Core's contended keys are written with `swap` under a lease, where one writer wins. A value shaped exactly like a pointer cannot be stored through a spilling adapter.
+
+#### Moving rows from another table
+
+An app that already keeps harness storage in a table of its own copies it across once, with the Workers that write to it stopped: one `INSERT … SELECT` that yields `key`, the `value` as JSON text, and `scope` when the target is scoped.
+
+```sql
+INSERT INTO noetic_storage (scope, key, value)
+SELECT scope, key, value FROM old_table;
+```
+
+Rows that point at spilled objects in another format are rewritten to this package's pointer in the same statement; the objects stay where they are, because a pointer holds the whole object key. For a table whose spilled rows hold `<marker><object key>` as text:
+
+```sql
+INSERT INTO noetic_storage (scope, key, value)
+SELECT scope, key,
+  CASE WHEN substr(value, 1, length(:marker)) = :marker
+    THEN json_object('noetic:spilled', substr(value, length(:marker) + 1))
+    ELSE value
+  END
+FROM old_table;
+```
+
+To keep the old table instead, pass its name as `table`. It then needs exactly the columns above under those names; a further column must be nullable or have a default, since the adapters do not write it.
 
 ### Event endpoint
 
