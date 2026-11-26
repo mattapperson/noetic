@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.14 (2026-11-26)
+
+* Refactor harness turns and model execution (#177) ([0f0ea34](https://github.com/mattapperson/noetic/commit/0f0ea34)), closes [#177](https://github.com/mattapperson/noetic/issues/177)
+
 ## @noetic-tools/core-v5.22.0-next.13 (2026-11-26)
 
 * feat(acp): what a host that starts its own agents reads from noetic (#174) ([e21dfed](https://github.com/mattapperson/noetic/commit/e21dfed)), closes [#174](https://github.com/mattapperson/noetic/issues/174) [#171](https://github.com/mattapperson/noetic/issues/171)
