@@ -20,7 +20,7 @@ bun install        # installs workspace deps (postinstall patches the SDK)
 bun test           # run the package test suites
 ```
 
-Useful commands (see [`CLAUDE.md`](CLAUDE.md) for the full reference):
+Useful commands (see [`AGENTS.md`](AGENTS.md) for the full reference):
 
 ```bash
 bun test                      # all package suites (sequential)

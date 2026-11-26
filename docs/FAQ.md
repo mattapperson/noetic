@@ -37,7 +37,7 @@ plugins → cli → code-agent → core ← eval
 - `@noetic-tools/eval` — evaluation and optimization.
 - `@noetic-tools/cli` / `code-agent` — the TUI harness and tool implementations.
 
-See [`CLAUDE.md`](../CLAUDE.md) and [`specs/00-overview.md`](../specs/00-overview.md)
+See [`AGENTS.md`](../AGENTS.md) and [`specs/00-overview.md`](../specs/00-overview.md)
 for the full architecture.
 
 ## What runtime do I need?
@@ -55,7 +55,7 @@ bun test                     # all package suites
 cd packages/core && bun test # a single package
 ```
 
-More commands are in [`CLAUDE.md`](../CLAUDE.md).
+More commands are in [`AGENTS.md`](../AGENTS.md).
 
 ## How do I contribute?
 

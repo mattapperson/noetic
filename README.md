@@ -9,6 +9,8 @@ A TypeScript agent framework that decomposes AI agent patterns into eight compos
 - **Primitives compose freely** — a loop can contain a conditional, which can contain parallel spawned agents
 - **Context is pluggable** — agents pay only for the features they use
 
+See the [guiding design principles](AGENTS.md#guiding-design-principles) for the full set.
+
 ## Packages
 
 | Package | Description |
