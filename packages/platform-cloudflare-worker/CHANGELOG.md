@@ -1,3 +1,13 @@
+## @noetic-tools/platform-cloudflare-worker-v1.0.0-next.2 (2026-11-26)
+
+* feat: Durable Object hosting — cut turns, turnOptions, per-turn tools, shared alarm (#166) ([2a3a0cd](https://github.com/mattapperson/noetic/commit/2a3a0cd)), closes [#166](https://github.com/mattapperson/noetic/issues/166)
+* feat(core): forget a thread or an execution, and list what is stored (#163) ([b025b02](https://github.com/mattapperson/noetic/commit/b025b02)), closes [#163](https://github.com/mattapperson/noetic/issues/163)
+* feat(core): store a JSON workflow with each turn and resume on it (#184) ([3a8b17a](https://github.com/mattapperson/noetic/commit/3a8b17a)), closes [#184](https://github.com/mattapperson/noetic/issues/184)
+* feat!: one subprocess adapter concept, and named fs, shell and subprocess adapters (#182) ([096c64d](https://github.com/mattapperson/noetic/commit/096c64d)), closes [#182](https://github.com/mattapperson/noetic/issues/182)
+* Run Cloudflare cron work on durable Noetic harnesses (#183) ([0e97b35](https://github.com/mattapperson/noetic/commit/0e97b35)), closes [#183](https://github.com/mattapperson/noetic/issues/183)
+* fix: preserve queued events and clean up displaced spills ([f72b5f4](https://github.com/mattapperson/noetic/commit/f72b5f4))
+* fix(platform-cloudflare-worker): handle deeply nested D1 rows ([e7e6785](https://github.com/mattapperson/noetic/commit/e7e6785))
+
 ## @noetic-tools/platform-cloudflare-worker-v1.0.0-next.1 (2026-11-25)
 
 * feat(core): cron() works on a host with no process between events ([f79a72f](https://github.com/mattapperson/noetic/commit/f79a72f))
