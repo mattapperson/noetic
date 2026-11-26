@@ -375,12 +375,16 @@ export type { Channel, ChannelHandle, ExternalChannel } from '@noetic-tools/type
 /** @public */
 /** @public */
 export type {
+  AgentPlan,
   InferSchemaInput,
   InferSchemaOutput,
   InputSchemaConfig,
   LLMResponse,
   LlmProviderConfig,
   ModelParams,
+  PlanEntry,
+  PlanEntryPriority,
+  PlanEntryStatus,
   RetryPolicy,
   RoundUsage,
   SchemaValidationFailure,
@@ -392,9 +396,18 @@ export type {
   StepMeta,
   TokenUsage,
   Tool,
+  ToolCallPresentation,
+  ToolCallProgress,
+  ToolCallStatus,
   ToolChoice,
+  ToolContent,
   ToolContextDeclaration,
+  ToolIdentity,
+  ToolKind,
+  ToolLocation,
   ToolModelOutput,
+  ToolPresentationDeclaration,
+  ToolTitleFn,
   UsageCharge,
 } from '@noetic-tools/types';
 /** @public */
@@ -855,6 +868,7 @@ export type {
   AcpStopReason,
   AcpToolCallContent,
   AcpToolCallStatus,
+  AcpToolCallUpdate,
   AcpToolKind,
   AcpToolRefusal,
   AcpTransport,

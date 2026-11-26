@@ -74,3 +74,34 @@ describe('AcpTurnAccumulator item order', () => {
     ).toBe('');
   });
 });
+
+describe('AcpTurnAccumulator images', () => {
+  it('keeps an image in the message as an image item, never as text', () => {
+    const turn = new AcpTurnAccumulator();
+    turn.push(text('Here it is.'));
+    turn.push({
+      sessionId: 's',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: {
+          type: 'image',
+          mimeType: 'image/png',
+          data: 'AAAA',
+        },
+      },
+    });
+    const result = turn.result({
+      stopReason: 'end_turn',
+    });
+    expect(result.items.map((item) => item.type)).toEqual([
+      'message',
+      'image_generation_call',
+    ]);
+    expect(result.items[1]).toMatchObject({
+      status: 'completed',
+      result: 'data:image/png;base64,AAAA',
+    });
+    // The answer is the text it ends with, before the image.
+    expect(result.text).toBe('Here it is.');
+  });
+});

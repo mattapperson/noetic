@@ -1,4 +1,5 @@
 import type {
+  AgentPlan,
   ContextLayer,
   ContextScope,
   ExecutionContext,
@@ -117,6 +118,11 @@ export interface PlanConfig {
   onEnterSession?: PlanEnterSessionCallback;
   /** Called when `exitPlanMode` is requested with `action: 'execute'`. */
   onExit?: PlanExitCallback;
+  /**
+   * The layer's `plan_updated` / `plan_removed` events: `false` silences them,
+   * a filter decides per event. Defaults to `true` (see `ContextLayer.emit`).
+   */
+  emit?: ContextLayer['emit'];
   /**
    * With no `onExit`, ask the harness's approval seam before a plan executes
    * (Noetic spec 08 § Held tool calls): its `approveToolCall` approver decides, and
@@ -817,6 +823,25 @@ function buildPlanHooks(options: PlanLayerOptions): ContextLayer<PlanState>['hoo
   };
 }
 
+/**
+ * The plan the layer holds, as an agent's plan: its PRD, written as markdown,
+ * from the moment one is written until the layer goes back to idle. The plan
+ * session's slug is its id when the host gave one.
+ */
+function planOf(state: PlanState): AgentPlan | null {
+  if (state.phase === PlanPhase.Idle || !state.prd) {
+    return null;
+  }
+  return {
+    ...(state.planSlug
+      ? {
+          id: state.planSlug,
+        }
+      : {}),
+    markdown: state.prd,
+  };
+}
+
 //#endregion
 
 //#region Public API
@@ -842,6 +867,12 @@ export function plan(config?: PlanConfig): ContextLayer<PlanState> {
     name: 'Plan',
     slot: PLAN_SLOT,
     scope,
+    plan: planOf,
+    ...(config?.emit === undefined
+      ? {}
+      : {
+          emit: config.emit,
+        }),
     budget: {
       min: 100,
       max: 3e3,

@@ -882,11 +882,44 @@ step's. The `AcpEventBridge` translates each variant into the same
 | SessionUpdate | Mapped `sdk` events |
 |---|---|
 | `agent_message_chunk` | `response.output_item.added` (message, once) + `response.output_text.delta` |
+| `agent_message_chunk` with an image | `response.output_item.added`/`.done` of an `image_generation_call` item whose `result` is the image as a data URL — as a model's generated image; never text |
 | `agent_thought_chunk` | `response.reasoning.delta` |
 | `tool_call` | `response.output_item.added` (function_call) + `response.function_call_arguments.delta`/`.done` + `response.output_item.done` |
-| `tool_call` of the agent's own tool | also the framework `tool_call_started` `{ name, callId }`, as the `callModel` tool loop emits it |
-| `tool_call` / `tool_call_update` that reports the call `completed` or `failed` | the framework `tool_call_completed` `{ name, callId, error, output? }`, once per call; `output` is the text its content carries |
-| every other variant — `user_message_chunk`, `plan`, `available_commands_update`, `current_mode_update`, `config_option_update`, `session_info_update`, `usage_update`, … | nothing: session state the runtime tracks on the live session, not output |
+| `tool_call` of the agent's own tool | also the framework `tool_call_started` `{ name, callId, title, kind?, locations?, status? }`, as the `callModel` tool loop emits it; `status` when the agent said `pending` or `in_progress` |
+| `tool_call` / `tool_call_update` of a call still running | the framework `tool_progress` `{ name, callId, … }` with what the update changed: `status`, `title`, `kind`, `locations`, `progress`, `content` |
+| `tool_call` / `tool_call_update` that reports the call `completed` or `failed` | the framework `tool_call_completed` `{ name, callId, error, output?, content?, result? }`, once per call; `content` is the call's latest content as structure, `output` the text it carries, `result` its raw output |
+| `plan`, draft `plan_update` | the framework `plan_updated` `{ stepId, plan }`: entries, or a markdown or file plan, with its `id` |
+| draft `plan_removed` | the framework `plan_removed` `{ stepId, id }` |
+| `current_mode_update` | the framework `agent_config_updated` `{ stepId, mode }` |
+| `config_option_update` that changes the `model` option | the framework `agent_config_updated` `{ stepId, model }` |
+| every other variant — `user_message_chunk`, `available_commands_update`, `session_info_update`, `usage_update`, … | nothing: session state the runtime tracks on the live session, not output |
+
+**What a call's events carry.** The fields are the harness's own (`08-runtime`
+§ Tool calls, plans and agent settings), read from the agent's update. Which
+tool a call is to, `toolId` and `toolServer`, is the agent's own business, so
+its adapter reads it: `AcpAgent.toolIdOf(update)` (`defineAcpAgent({ toolIdOf
+})`). `claudeCode()` reads `_meta.claudeCode.toolName` — `Read`, or an MCP
+tool's `mcp__<server>__<tool>` as `toolId: <tool>`, `toolServer: <server>`;
+`codex()` reads an MCP call's `rawInput` `{ server, tool }` (or its
+`mcp.<server>.<tool>` title). A call the adapter cannot place, or one whose
+reader throws, goes by its `kind` — so the calls an agent names by title alone
+("Run ls", "Run pwd") group as one tool — and, with no kind but `other`, by
+its title. A step tool's call the bridge runs is
+identified by the tool's own `name`. `title`
+and `kind` as given, `locations` as `{ path, line? }`, `progress` from the
+update's `_meta.progress` or its raw output's `progress` (a value above 1 is a
+percentage), and `content` mapped entry by entry — a `diff` keeps `path`,
+`oldText` (null for a new file) and `newText`; a `terminal` its `terminalId`;
+text becomes `input_text`, an image `input_image` and audio `input_file`,
+each as a data URL, and a `resource_link` or `resource` the entry of the same
+name. An update that leaves `content` out keeps
+the call's content as it was, so a final update that only says `completed`
+still completes the call with everything it produced. A final update that also
+renames or relocates the call reports that as a `tool_progress` first. An
+update that changes nothing emits nothing. A step tool's call an agent makes
+through the tool bridge presents as the tool declares (`02-step-variants`
+§ Presentation), exactly as in a `callModel` step; a call announced to one that
+never reached it presents as the agent announced it.
 
 As a result `getTextStream()`, `getReasoningStream()`, `getItemStream()`, and
 `getFullStream()` all surface ACP output, and a host sees exactly the events a

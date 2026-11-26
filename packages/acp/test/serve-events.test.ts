@@ -6,7 +6,8 @@
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { StreamEvent } from '@noetic-tools/types';
+import type { AcpContentBlock, StreamEvent } from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
 import type { ServeSessionUpdate } from '../src/serve-events';
 import { pumpTurnEvents } from '../src/serve-events';
 
@@ -433,5 +434,526 @@ describe('remaining translation rows', () => {
     assert(call && call.sessionUpdate === 'tool_call');
     expect(call.toolCallId).toBe('c1');
     expect(call.rawInput).toBeUndefined();
+  });
+});
+
+describe('pumpTurnEvents — a call presents as its events say', () => {
+  const END = fw('turn_completed', {
+    turnId: 't1',
+  });
+
+  it("shows a call's own title, kind, locations and pending status over the serve options' fallback", async () => {
+    const { updates } = await pump([
+      START,
+      fw('tool_call_started', {
+        name: 'write_file',
+        callId: 'c1',
+        title: 'Write a.ts',
+        kind: 'edit',
+        status: 'pending',
+        locations: [
+          {
+            path: 'a.ts',
+            line: 3,
+          },
+        ],
+      }),
+      END,
+    ]);
+    expect(updates[0]).toEqual({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'c1',
+      title: 'Write a.ts',
+      kind: 'edit',
+      status: 'pending',
+      locations: [
+        {
+          path: 'a.ts',
+          line: 3,
+        },
+      ],
+      rawInput: undefined,
+    });
+  });
+
+  it("forwards a running call's report as an update of the call, and only for a call it started", async () => {
+    const { updates } = await pump([
+      START,
+      fw('tool_progress', {
+        name: 'bash',
+        callId: 'never-started',
+        progress: 0.1,
+      }),
+      fw('tool_call_started', {
+        name: 'bash',
+        callId: 'c1',
+      }),
+      fw('tool_progress', {
+        name: 'bash',
+        callId: 'c1',
+        status: 'in_progress',
+        title: 'Run tests',
+        kind: 'execute',
+        locations: [
+          {
+            path: 'test',
+          },
+        ],
+        progress: 0.5,
+        content: [
+          {
+            type: 'input_text',
+            text: '3 passed',
+          },
+        ],
+      }),
+      END,
+    ]);
+    const reports = updates.filter((update) => update.sessionUpdate === 'tool_call_update');
+    expect(reports[0]).toEqual({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'c1',
+      status: 'in_progress',
+      title: 'Run tests',
+      kind: 'execute',
+      locations: [
+        {
+          path: 'test',
+        },
+      ],
+      content: [
+        {
+          type: 'content',
+          content: {
+            type: 'text',
+            text: '3 passed',
+          },
+        },
+      ],
+      _meta: {
+        progress: 0.5,
+      },
+    });
+  });
+
+  it('completes a call with its structured content in place of its output text', async () => {
+    const { updates } = await pump([
+      START,
+      fw('tool_call_started', {
+        name: 'write_file',
+        callId: 'c1',
+      }),
+      fw('tool_call_completed', {
+        name: 'write_file',
+        callId: 'c1',
+        error: false,
+        output: '{"ok":true}',
+        content: [
+          {
+            type: 'diff',
+            path: 'a.ts',
+            oldText: null,
+            newText: 'x',
+          },
+          {
+            type: 'input_image',
+            imageUrl: 'data:image/png;base64,AA',
+          },
+          {
+            type: 'input_image',
+            imageUrl: 'https://example.test/b.png',
+          },
+          {
+            type: 'input_file',
+            fileData: 'data:audio/wav;base64,BB',
+          },
+          {
+            type: 'input_file',
+            fileData: 'data:application/pdf;base64,CC',
+            filename: 'r.pdf',
+          },
+          {
+            type: 'input_file',
+            fileUrl: 'https://example.test/r.pdf',
+          },
+          {
+            type: 'resource',
+            uri: 'file:///t',
+            text: 'body',
+          },
+          {
+            type: 'resource',
+            uri: 'file:///b',
+            blob: 'DD',
+          },
+          {
+            type: 'resource_link',
+            uri: 'file:///l',
+            name: 'l',
+          },
+          {
+            type: 'input_video',
+            videoUrl: 'data:video/mp4;base64,EE',
+          },
+          {
+            type: 'input_video',
+            videoUrl: 'https://example.test/v.mp4',
+          },
+          {
+            type: 'input_text',
+            text: 'done',
+          },
+        ],
+      }),
+      END,
+    ]);
+    const completed = updates.find((update) => update.sessionUpdate === 'tool_call_update');
+    assert(completed && completed.sessionUpdate === 'tool_call_update');
+    expect(completed.content).toEqual([
+      {
+        type: 'diff',
+        path: 'a.ts',
+        oldText: null,
+        newText: 'x',
+      },
+      ...[
+        {
+          type: 'image',
+          mimeType: 'image/png',
+          data: 'AA',
+        },
+        {
+          type: 'resource_link',
+          uri: 'https://example.test/b.png',
+          name: 'b.png',
+        },
+        {
+          type: 'audio',
+          mimeType: 'audio/wav',
+          data: 'BB',
+        },
+        {
+          type: 'resource',
+          resource: {
+            uri: 'r.pdf',
+            mimeType: 'application/pdf',
+            blob: 'CC',
+          },
+        },
+        {
+          type: 'resource_link',
+          uri: 'https://example.test/r.pdf',
+          name: 'file',
+        },
+        {
+          type: 'resource',
+          resource: {
+            uri: 'file:///t',
+            mimeType: undefined,
+            text: 'body',
+          },
+        },
+        {
+          type: 'resource',
+          resource: {
+            uri: 'file:///b',
+            mimeType: undefined,
+            blob: 'DD',
+          },
+        },
+        {
+          type: 'resource_link',
+          uri: 'file:///l',
+          name: 'l',
+        },
+        {
+          type: 'resource',
+          resource: {
+            uri: 'video',
+            mimeType: 'video/mp4',
+            blob: 'EE',
+          },
+        },
+        {
+          type: 'resource_link',
+          uri: 'https://example.test/v.mp4',
+          name: 'v.mp4',
+        },
+        {
+          type: 'text',
+          text: 'done',
+        },
+      ]
+        .map((content) => frameworkCast<AcpContentBlock>(content))
+        .map((content) => ({
+          type: 'content' as const,
+          content,
+        })),
+    ]);
+  });
+
+  it("shows the answering agent's plan, its removal, and nothing for a plan without entries", async () => {
+    const { updates } = await pump([
+      START,
+      fw('plan_updated', {
+        stepId: 's',
+        plan: {
+          entries: [
+            {
+              content: 'a',
+              priority: 'high',
+              status: 'pending',
+            },
+          ],
+        },
+      }),
+      fw('plan_updated', {
+        stepId: 's',
+        plan: {
+          markdown: '# plan',
+        },
+      }),
+      {
+        ...fw('plan_updated', {
+          stepId: 's',
+          plan: {
+            entries: [],
+          },
+        }),
+        scope: {
+          id: 'nested',
+        },
+      },
+      fw('plan_removed', {
+        stepId: 's',
+      }),
+      END,
+    ]);
+    expect(updates).toEqual([
+      {
+        sessionUpdate: 'plan',
+        entries: [
+          {
+            content: 'a',
+            priority: 'high',
+            status: 'pending',
+          },
+        ],
+      },
+      {
+        sessionUpdate: 'plan',
+        entries: [],
+      },
+    ]);
+  });
+});
+
+describe('pumpTurnEvents — what an editor cannot show', () => {
+  const END = fw('turn_completed', {
+    turnId: 't1',
+  });
+
+  it("leaves out a terminal (it is the delegate's host's) and a part it does not know, rather than failing the turn", async () => {
+    const { outcome, updates } = await pump([
+      START,
+      fw('tool_call_started', {
+        name: 'bash',
+        callId: 'c1',
+      }),
+      fw('tool_call_completed', {
+        name: 'bash',
+        callId: 'c1',
+        error: false,
+        output: 'ok',
+        content: [
+          {
+            type: 'terminal',
+            terminalId: 'acp-term-0',
+          },
+          {
+            type: 'text',
+            text: 'an MCP-style block',
+          },
+          null,
+        ],
+      }),
+      END,
+    ]);
+    expect(outcome).toEqual({
+      kind: 'stop',
+      stopReason: 'end_turn',
+    });
+    const completed = updates.find((update) => update.sessionUpdate === 'tool_call_update');
+    assert(completed && completed.sessionUpdate === 'tool_call_update');
+    // Nothing it can show: the output text instead.
+    expect(completed.content).toEqual([
+      {
+        type: 'content',
+        content: {
+          type: 'text',
+          text: 'ok',
+        },
+      },
+    ]);
+  });
+
+  it('keeps the fields it can show when one it cannot is beside them, and sends nothing for an empty report', async () => {
+    const { updates } = await pump([
+      START,
+      fw('tool_call_started', {
+        name: 'gen',
+        callId: 'c1',
+      }),
+      fw('tool_progress', {
+        name: 'gen',
+        callId: 'c1',
+        event: 1,
+      }),
+      fw('tool_progress', {
+        name: 'gen',
+        callId: 'c1',
+        title: 'Renamed',
+        progress: 0.5,
+        status: 'completed',
+      }),
+      END,
+    ]);
+    const reports = updates.filter((update) => update.sessionUpdate === 'tool_call_update');
+    expect(reports[0]).toEqual({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'c1',
+      title: 'Renamed',
+      _meta: {
+        progress: 0.5,
+      },
+    });
+    // The second is the boundary's flush.
+    expect(reports).toHaveLength(2);
+  });
+
+  it('shows one plan at a time: another plan replaces it, only its own removal clears it', async () => {
+    const plan = (id: string | undefined, content: string) =>
+      fw('plan_updated', {
+        stepId: 's',
+        plan: {
+          ...(id
+            ? {
+                id,
+              }
+            : {}),
+          entries: [
+            {
+              content,
+              priority: 'high',
+              status: 'pending',
+            },
+          ],
+        },
+      });
+    const { updates } = await pump([
+      START,
+      plan('A', 'a'),
+      fw('plan_removed', {
+        stepId: 's',
+        id: 'B',
+      }),
+      plan('B', 'b'),
+      fw('plan_removed', {
+        stepId: 's',
+        id: 'A',
+      }),
+      fw('plan_updated', {
+        stepId: 's',
+        plan: {
+          entries: [
+            {
+              content: 'bad',
+              priority: 'urgent',
+              status: 'pending',
+            },
+          ],
+        },
+      }),
+      fw('plan_removed', {
+        stepId: 's',
+        id: 'B',
+      }),
+      plan(undefined, 'only'),
+      fw('plan_removed', {
+        stepId: 's',
+      }),
+      END,
+    ]);
+    expect(
+      updates.map((update) =>
+        update.sessionUpdate === 'plan'
+          ? update.entries.map((entry) => entry.content)
+          : update.sessionUpdate,
+      ),
+    ).toEqual([
+      [
+        'a',
+      ],
+      [
+        'b',
+      ],
+      [],
+      [
+        'only',
+      ],
+      [],
+    ]);
+  });
+
+  it('shows an image the agent answered with as an image in its message', async () => {
+    const { updates } = await pump([
+      START,
+      sdk('response.output_item.done', {
+        item: {
+          type: 'image_generation_call',
+          result: 'data:image/jpeg;base64,AAAA',
+        },
+      }),
+      sdk('response.output_item.done', {
+        item: {
+          type: 'image_generation_call',
+          result: 'BBBB',
+        },
+      }),
+      sdk('response.output_item.done', {
+        item: {
+          type: 'image_generation_call',
+          result: '',
+        },
+      }),
+      sdk('response.output_item.done', {
+        item: 'not an item',
+      }),
+      sdk('response.output_item.added', {
+        item: {
+          type: 'image_generation_call',
+          result: 'CCCC',
+        },
+      }),
+      END,
+    ]);
+    expect(updates).toEqual([
+      {
+        sessionUpdate: 'agent_message_chunk',
+        content: {
+          type: 'image',
+          mimeType: 'image/jpeg',
+          data: 'AAAA',
+        },
+      },
+      {
+        sessionUpdate: 'agent_message_chunk',
+        content: {
+          type: 'image',
+          mimeType: 'image/png',
+          data: 'BBBB',
+        },
+      },
+    ]);
   });
 });

@@ -50,6 +50,7 @@ import type { AcpLiveSession, AcpSessionStore } from '../runtime/acp-session-sto
 import { acpSessionsOf } from '../runtime/acp-session-store';
 import { awaitApproval } from '../runtime/tool-approval';
 import { isRpcError, RpcFailure } from '../util/error-message';
+import { modelOf } from './acp-activity';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
 import { renderLayerContext } from './acp-layers';
@@ -159,11 +160,7 @@ function toLlmResponse(result: AcpTurnResult): LLMResponse {
  * model the step selected.
  */
 function currentModel(session: AcpSession, selected: string | undefined): string | undefined {
-  const selects = (session.configOptions ?? []).filter((option) => option.type === 'select');
-  const option =
-    selects.find((candidate) => candidate.category === 'model') ??
-    selects.find((candidate) => candidate.id === 'model');
-  return option?.type === 'select' ? option.currentValue : selected;
+  return modelOf(session.configOptions) ?? selected;
 }
 
 /** Record a turn's items and charge its spend: every attempt, as every model call is. */
@@ -1056,7 +1053,10 @@ async function runTurn<TContext, I, O>(params: {
 }): Promise<AcpTurnResult> {
   const { step, baseCtx, resolution, bridge, tools, turnError } = params;
   if (tools) {
-    bridge.nameToolCalls((title: string) => tools.wireNameOf(title));
+    bridge.nameToolCalls(
+      (title: string) => tools.wireNameOf(title),
+      (wireName, input) => tools.identityOf(wireName, input),
+    );
   }
   bridge.begin();
   let result: AcpTurnResult;
@@ -1224,6 +1224,7 @@ async function runAcpStep<TContext, I, O>(params: {
   let reloading = false;
 
   let bridge = new AcpEventBridge(step, baseCtx);
+  bridge.identifyToolCalls(agent.toolIdOf?.bind(agent));
   // A tool pipeline error fails the step, as it does in `callModel`: it is
   // kept, the agent's turn is cancelled, and the error is thrown once the
   // turn has unwound.
@@ -1385,6 +1386,7 @@ async function runAcpStep<TContext, I, O>(params: {
       turnBlocks = undefined;
       retries += 1;
       bridge = new AcpEventBridge(step, baseCtx);
+      bridge.identifyToolCalls(agent.toolIdOf?.bind(agent));
       bindHostToStep(resolution.live.host, bindingFor(bridge));
       continue;
     }

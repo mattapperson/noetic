@@ -23,7 +23,12 @@ import type {
   StreamEvent,
   StreamingItem,
 } from '@noetic-tools/types';
-import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
+import {
+  frameworkCast,
+  NoeticConfigError,
+  presentToolCall,
+  sameToolName,
+} from '@noetic-tools/types';
 import { clientFsAdapter, clientShellAdapter } from './client-adapters';
 import { contentBlockText } from './items';
 import { isAbsolutePath } from './paths';
@@ -88,50 +93,19 @@ function assertKindRulesResolvable(options: AcpServeOptions): void {
 }
 
 function buildPresenter(options: AcpServeOptions): Presenter {
-  const declarations = new Map(
-    options.tools?.map((tool) => [
-      tool.name,
-      tool.acp,
-    ]),
-  );
+  const declared = options.tools ?? [];
+  // A call is reported by its wire name, a tool declared by its own: either spelling finds it.
+  const presentationOf = (toolName: string, args: unknown) =>
+    presentToolCall(
+      declared.find((tool) => sameToolName(tool.name, toolName)),
+      args,
+    );
 
-  const kindOf = (toolName: string): AcpToolKind | undefined => declarations.get(toolName)?.kind;
+  const kindOf = (toolName: string): AcpToolKind | undefined =>
+    presentationOf(toolName, undefined).kind;
 
-  const titleOf = (toolName: string, args: unknown): string => {
-    const title = declarations.get(toolName)?.title;
-    if (typeof title === 'string') {
-      return title;
-    }
-    if (typeof title === 'function' && args !== undefined) {
-      try {
-        return title(args);
-      } catch {
-        return toolName;
-      }
-    }
-    return toolName;
-  };
-
-  const locationsOf = (
-    toolName: string,
-    args: unknown,
-  ):
-    | Array<{
-        path: string;
-      }>
-    | undefined => {
-    const locations = declarations.get(toolName)?.locations;
-    if (!locations || args === undefined) {
-      return undefined;
-    }
-    try {
-      return locations(args).map((path) => ({
-        path,
-      }));
-    } catch {
-      return undefined;
-    }
-  };
+  const titleOf = (toolName: string, args: unknown): string =>
+    presentationOf(toolName, args).title ?? toolName;
 
   const statusOf = (toolName: string): 'pending' | 'in_progress' => {
     if (!options.permissions) {
@@ -148,12 +122,15 @@ function buildPresenter(options: AcpServeOptions): Presenter {
   return {
     kindOf,
     titleOf,
-    present: (toolName, _callId, args) => ({
-      title: titleOf(toolName, args),
-      kind: kindOf(toolName),
-      locations: locationsOf(toolName, args),
-      status: statusOf(toolName),
-    }),
+    present: (toolName, _callId, args) => {
+      const presentation = presentationOf(toolName, args);
+      return {
+        title: presentation.title ?? toolName,
+        kind: presentation.kind,
+        locations: presentation.locations,
+        status: statusOf(toolName),
+      };
+    },
   };
 }
 

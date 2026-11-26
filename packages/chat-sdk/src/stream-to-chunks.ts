@@ -1,4 +1,5 @@
 import type { FrameworkStreamEvent, StreamEvent } from '@noetic-tools/types';
+import { parseDataUrl } from '@noetic-tools/types';
 import type { ChatStreamChunk } from './chat-types';
 
 export interface StreamToChatChunksOptions {
@@ -125,6 +126,15 @@ export async function* streamToChatChunks(
       // would otherwise concatenate onto the previous one without a break.
       if (event.type === 'response.output_item.added' && isMessageItem(event.data.item)) {
         pendingSeparator = emittedText;
+      }
+      // An image an agent answered with: a chat message names it, as it did
+      // before images were their own items.
+      const image =
+        event.type === 'response.output_item.done' ? imageMediaType(event.data.item) : undefined;
+      if (image !== undefined) {
+        // Its own line, after any text before it.
+        yield emittedText ? `\n\n[image: ${image}]` : `[image: ${image}]`;
+        emittedText = true;
       }
       continue;
     }
@@ -286,4 +296,18 @@ function readToolCall(event: FrameworkStreamEvent): {
 
 function isMessageItem(item: unknown): boolean {
   return typeof item === 'object' && item !== null && 'type' in item && item.type === 'message';
+}
+
+/** An agent's image item's media type, from its data-URL result; undefined for anything else. */
+function imageMediaType(item: unknown): string | undefined {
+  if (
+    typeof item !== 'object' ||
+    item === null ||
+    !('type' in item) ||
+    item.type !== 'image_generation_call'
+  ) {
+    return undefined;
+  }
+  const result = 'result' in item ? item.result : undefined;
+  return typeof result === 'string' ? parseDataUrl(result)?.mimeType : undefined;
 }

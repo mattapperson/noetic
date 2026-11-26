@@ -96,6 +96,10 @@ export class AcpTurnAccumulator {
     | {
         toolCallId: string;
       }
+    | {
+        /** An image the agent put in its message, as a data URL. */
+        image: string;
+      }
   > = [];
   private plan?: AcpPlanEntry[];
   private availableCommands?: AcpAvailableCommand[];
@@ -127,6 +131,16 @@ export class AcpTurnAccumulator {
     for (const entry of this.order) {
       if ('text' in entry) {
         items.push(assistantMessageItem(entry.text));
+        continue;
+      }
+      if ('image' in entry) {
+        // As a model's generated image is: an image item, never text.
+        items.push({
+          id: `acp-img-${crypto.randomUUID()}`,
+          type: 'image_generation_call',
+          status: 'completed',
+          result: entry.image,
+        });
         continue;
       }
       const call = this.toolCalls.get(entry.toolCallId);
@@ -174,7 +188,8 @@ export class AcpTurnAccumulator {
    * `callModel` step returns its final message rather than every message.
    */
   private finalText(): string {
-    const last = this.order[this.order.length - 1];
+    // An image is not text: the answer is the text before any it ends with.
+    const last = this.order.findLast((entry) => !('image' in entry));
     return last && 'text' in last ? last.text : '';
   }
 
@@ -193,7 +208,14 @@ export class AcpTurnAccumulator {
 
   private apply(update: SessionUpdate): void {
     if (update.sessionUpdate === 'agent_message_chunk') {
-      this.appendText(contentBlockText(update.content));
+      const content = update.content;
+      if (content.type === 'image') {
+        this.order.push({
+          image: `data:${content.mimeType};base64,${content.data}`,
+        });
+        return;
+      }
+      this.appendText(contentBlockText(content));
       return;
     }
     if (update.sessionUpdate === 'agent_thought_chunk') {

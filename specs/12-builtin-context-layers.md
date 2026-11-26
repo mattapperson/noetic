@@ -463,7 +463,7 @@ interface Episode {
 
 ## `plan()`
 
-Manages the full plan lifecycle: entering plan mode, authoring a PRD, structuring the plan as a JSON workflow document, and tracking execution outcomes. A plan's tree IS a `WorkflowDocument` (spec 26); plans additionally store NAMED workflows referenced from the tree via `subflow` nodes, keeping the human-reviewed tree small while detailed mechanics live in separately-authored workflows.
+Manages the full plan lifecycle: entering plan mode, authoring a PRD, structuring the plan as a JSON workflow document, and tracking execution outcomes. Its `plan` is the PRD, as a markdown `AgentPlan` (its id the plan session's slug when the host gave one), from the moment one is written until the layer is idle again, so a host sees a `callModel` step's plan on `plan_updated` / `plan_removed` as it sees an agent step's (spec 08 § Tool calls, plans and agent settings). `PlanConfig.emit` controls those events, as a step's `emit` does. A plan's tree IS a `WorkflowDocument` (spec 26); plans additionally store NAMED workflows referenced from the tree via `subflow` nodes, keeping the human-reviewed tree small while detailed mechanics live in separately-authored workflows.
 
 ```typescript
 interface PlanConfig {

@@ -15,6 +15,7 @@ import {
   isAssistantMessage,
   isZodSchema,
   NoeticConfigError,
+  parseDataUrl,
 } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import type { ZodTypeAny } from 'zod';
@@ -216,9 +217,35 @@ function itemToInputItem(item: Item): OpenRouterInputItem | null {
     } satisfies OpenRouterAgent.FunctionCallOutputItem;
   }
 
+  // An image an agent answered with (spec 08 § Tool calls, plans and agent
+  // settings) was never the provider's: the model reads it as it always did.
+  const agentImage = agentImageText(item);
+  if (agentImage !== undefined) {
+    return {
+      role: 'assistant',
+      content: agentImage,
+    } satisfies OpenRouterAgent.EasyInputMessage;
+  }
+
   // Reasoning, web_search_call, file_search_call, image_generation_call,
   // server tool outputs — pass through directly for round-tripping
   return frameworkCast<ProviderOutputItem>(item);
+}
+
+/**
+ * An agent's image item as the text a model is given in its place, or
+ * undefined for any other item. A provider's own image item carries raw
+ * base64; an agent's carries a data URL, which names its media type.
+ */
+function agentImageText(item: Item): string | undefined {
+  if (item.type !== 'image_generation_call') {
+    return undefined;
+  }
+  const result = frameworkCast<{
+    result?: unknown;
+  }>(item).result;
+  const media = typeof result === 'string' ? parseDataUrl(result) : undefined;
+  return media ? `[image: ${media.mimeType}]` : undefined;
 }
 
 /** @internal Converts Noetic Items to OpenRouter SDK input format. */

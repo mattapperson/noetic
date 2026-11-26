@@ -1,5 +1,4 @@
 import type { StandardSchemaV1 } from '@standard-schema/spec';
-import type { AcpToolKind } from './acp';
 import type {
   FunctionCallItem,
   FunctionCallOutputItem,
@@ -11,6 +10,13 @@ import type {
   ToolResultExtensionItem,
 } from './items';
 import type { InferSchemaOutput } from './schema';
+import type {
+  ToolCallProgress,
+  ToolContent,
+  ToolIdentity,
+  ToolKind,
+  ToolLocation,
+} from './tool-activity';
 
 type ToolExecutionResult<O extends StandardSchemaV1> =
   | Promise<InferSchemaOutput<O>>
@@ -72,33 +78,83 @@ export interface ToolUiDeclaration<
 }
 
 /**
- * How a tool call presents in an ACP client's UI when the harness is served
- * as an ACP agent (`toAcpAgent`/`serveAcp` in `@noetic-tools/acp`).
+ * How a call to a tool presents to a host: a human title, its kind, the files
+ * it touches, what it reports while it runs, and what it produced as
+ * structure (a diff, an image). The runtime puts these on the call's events
+ * (`tool_call_started`, `tool_progress`, `tool_call_completed`; spec 08), the
+ * same fields an agent's own calls carry, so a host shows a tool's calls and
+ * an agent's alike; a served harness shows them in its client's editor.
  *
- * Presentation only — it never gates anything. An undeclared tool falls back
- * to kind `other` with its name as the title. Declared as methods (bivariant
- * params) for the same reason as `ToolUiDeclaration`.
+ * Presentation only — it never gates anything. An undeclared tool presents by
+ * its name alone. Declared as methods (bivariant params) for the same reason
+ * as `ToolUiDeclaration`. A method that throws presents nothing for that point.
  * @public
  */
-export interface ToolAcpDeclaration<I extends StandardSchemaV1 = StandardSchemaV1> {
-  /** ACP tool kind (`read`, `edit`, `execute`, …) for editor rendering. */
-  kind?: AcpToolKind;
+export interface ToolPresentationDeclaration<
+  I extends StandardSchemaV1 = StandardSchemaV1,
+  O extends StandardSchemaV1 = StandardSchemaV1,
+  E = unknown,
+> {
+  /**
+   * Which tool a call is to, when it is not the tool's own `name`: an MCP
+   * tool's name on its server, and the server — what an agent calling the same
+   * MCP tool reports — so a host grouping calls by tool sees one tool. A
+   * function receives the call's parsed args (a tool that reaches one of
+   * several servers). Defaults to `{ id: name }`.
+   */
+  identity?: ToolIdentity | ToolIdentityFn<I>;
+  /** What kind of work a call does (`read`, `edit`, `execute`, …). */
+  kind?: ToolKind;
   /** Human-readable title; a function receives the call's parsed args. */
-  title?: string | ToolAcpTitleFn<I>;
-  /** File paths the call affects, surfaced as ACP `locations`. */
-  locations?(args: InferSchemaOutput<I>): string[];
+  title?: string | ToolTitleFn<I>;
+  /** The files a call works on: paths, or paths with a line. */
+  locations?(args: InferSchemaOutput<I>): Array<string | ToolLocation>;
+  /**
+   * What a running call reports, on each event an AsyncGenerator `execute`
+   * yields. Receives all events so far; null reports nothing for this one.
+   */
+  progress?(events: E[]): ToolCallProgress | null;
+  /** What a call that did not fail produced, as structure: diffs, images, resources. */
+  content?(output: InferSchemaOutput<O>, args: InferSchemaOutput<I>): ToolContent[];
 }
 
 /**
- * Bivariant function type for `ToolAcpDeclaration.title` — a union member
- * cannot use method syntax, so the method-bearing object type is indexed to
- * recover the same bivariance `ToolUiDeclaration`'s methods get, keeping a
- * concretely-typed tool assignable to the erased `Tool` form.
+ * Bivariant function type for `ToolPresentationDeclaration.identity`; see
+ * {@link ToolTitleFn}.
  * @public
  */
-export type ToolAcpTitleFn<I extends StandardSchemaV1 = StandardSchemaV1> = {
+export type ToolIdentityFn<I extends StandardSchemaV1 = StandardSchemaV1> = {
+  bivariant(args: InferSchemaOutput<I>): ToolIdentity;
+}['bivariant'];
+
+/**
+ * Bivariant function type for `ToolPresentationDeclaration.title` — a union
+ * member cannot use method syntax, so the method-bearing object type is
+ * indexed to recover the same bivariance `ToolUiDeclaration`'s methods get,
+ * keeping a concretely-typed tool assignable to the erased `Tool` form.
+ * @public
+ */
+export type ToolTitleFn<I extends StandardSchemaV1 = StandardSchemaV1> = {
   bivariant(args: InferSchemaOutput<I>): string;
 }['bivariant'];
+
+/**
+ * @public
+ * @deprecated Use {@link ToolPresentationDeclaration} (`Tool.presentation`),
+ * which every host reads, not only a served ACP client.
+ */
+export type ToolAcpDeclaration<I extends StandardSchemaV1 = StandardSchemaV1> = Pick<
+  ToolPresentationDeclaration<I>,
+  'kind' | 'title'
+> & {
+  locations?(args: InferSchemaOutput<I>): string[];
+};
+
+/**
+ * @public
+ * @deprecated Use {@link ToolTitleFn}.
+ */
+export type ToolAcpTitleFn<I extends StandardSchemaV1 = StandardSchemaV1> = ToolTitleFn<I>;
 
 /**
  * @public What `Tool.toModelOutput` returns: the text, or the content parts, the
@@ -196,6 +252,8 @@ export interface Tool<
   context?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O>;
-  /** Optional ACP presentation — how the call renders in an ACP client when the harness is served as an agent. */
+  /** How a call presents to a host: title, kind, files, progress, structured results. */
+  presentation?: ToolPresentationDeclaration<I, O>;
+  /** @deprecated Use `presentation`, read in its place when `presentation` is absent. */
   acp?: ToolAcpDeclaration<I>;
 }

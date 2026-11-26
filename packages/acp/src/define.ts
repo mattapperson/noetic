@@ -68,6 +68,11 @@ export interface DefineAcpAgentOptions {
    * here, never on a step.
    */
   sessionMeta?: Readonly<Record<string, unknown>>;
+  /**
+   * Which of this agent's own tools a call is to, from its update: becomes
+   * the call's `toolId` / `toolServer`. Without one, a call goes by its title.
+   */
+  toolIdOf?: AcpAgent['toolIdOf'];
 }
 
 /** How one connection reaches its agent: the stream, and the bridge's way there. */
@@ -93,6 +98,11 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
     agentId: def.agentId,
     refusesTools: def.command ? undefined : attachedRefusal(def.tools ?? sessionToolWiring),
     spawn: def.command ? spawnOn(def.machine ?? lazyLocalMachine(def.agentId)) : undefined,
+    ...(def.toolIdOf
+      ? {
+          toolIdOf: def.toolIdOf,
+        }
+      : {}),
     async connect(opts: AcpConnectOptions): Promise<AcpAgentConnection> {
       const signal = opts.signal ?? opts.host.signal;
       const whenHostExits = opts.whenHostExits ?? 'keep';

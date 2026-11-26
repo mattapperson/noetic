@@ -434,3 +434,32 @@ describe('createOpenRouterEmbed', () => {
     }
   });
 });
+
+describe("itemsToInput — an agent's image", () => {
+  it("gives the model a named placeholder for an agent's image, and passes a provider's own through", () => {
+    const agentImage = frameworkCast<Item>({
+      id: 'acp-img-1',
+      type: 'image_generation_call',
+      status: 'completed',
+      result: 'data:image/jpeg;base64,AAAA',
+    });
+    const providerImage = frameworkCast<Item>({
+      id: 'ig_1',
+      type: 'image_generation_call',
+      status: 'completed',
+      result: 'AAAA',
+    });
+    expect(
+      itemsToInput([
+        agentImage,
+        providerImage,
+      ]),
+    ).toEqual([
+      {
+        role: 'assistant',
+        content: '[image: image/jpeg]',
+      },
+      frameworkCast<ReturnType<typeof itemsToInput>[number]>(providerImage),
+    ]);
+  });
+});

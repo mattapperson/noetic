@@ -5,9 +5,11 @@
  * A coding agent's text, reasoning, and tool calls are translated into the same
  * events the model-call path emits, so they flow through `getTextStream()` /
  * `getReasoningStream()` / `getItemStream()` / `getFullStream()` exactly like an
- * LLM step's output. Nothing on the stream names the protocol: session state
- * (modes, commands, config options, plans, context occupancy) is tracked on the
- * live session, never emitted.
+ * LLM step's output. Nothing on the stream names the protocol: a call's
+ * presentation, progress and structured content, the agent's plan and its
+ * mode and model reach the host in the harness's own activity vocabulary
+ * (`acp-activity`); the rest of the session's state (commands, context
+ * occupancy) is tracked on the live session, never emitted.
  *
  * `finalize()` guarantees a turn always emits its output: if an agent returns a
  * stop reason without streaming any text or tool calls, the result's content is
@@ -20,7 +22,6 @@ import type {
   AcpClientActivity,
   AcpClientMethod,
   AcpSessionNotification,
-  AcpToolCallContent,
   AcpTurnResult,
   AgentScope,
   Context,
@@ -29,12 +30,27 @@ import type {
   FunctionCallOutputItem,
   Item,
   StepAcpAgent,
+  ToolCallPresentation,
+  ToolContent,
+  ToolIdentity,
 } from '@noetic-tools/types';
+import { frameworkCast, toolIdentityData } from '@noetic-tools/types';
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import { errorMessage } from '../util/error-message';
+import type { ToolCallUpdate } from './acp-activity';
+import {
+  contentText,
+  dataUrl,
+  modelOf,
+  planOf,
+  presentationOf,
+  progressOf,
+  progressReport,
+  toolContentOf,
+} from './acp-activity';
 import { isFunctionCall } from './typeguards';
 
 /** A subagent's status, as the harness's agent events name it. */
@@ -141,6 +157,8 @@ const NEVER_RAN_OUTPUT = 'The call never reached the tool.';
  */
 interface TurnCall {
   readonly name: string;
+  /** Which tool it is to: its `toolId` and `toolServer` on every event of it. */
+  readonly identity: ToolIdentity;
   readonly via: 'own' | 'bridged';
   /** The stream that carries it: the step's, or a nested agent's. */
   readonly bridge: AcpEventBridge;
@@ -151,6 +169,10 @@ interface TurnCall {
   state: 'announced' | 'open' | 'closed';
   /** What the announcement gave as the call's input. */
   readonly input?: unknown;
+  /** How the announcement presented the call. */
+  readonly presentation?: ToolCallPresentation;
+  /** What the call has produced so far: the agent's latest content for it. */
+  content?: ToolContent[];
 }
 
 /** Every tool call of one turn, shared by the step's agent and its nested agents. */
@@ -169,20 +191,6 @@ function inputKey(input: unknown): string {
     return input;
   }
   return JSON.stringify(input ?? {});
-}
-
-/** The text a tool call's content carries, when it carries any. */
-function contentText(
-  content: ReadonlyArray<AcpToolCallContent> | null | undefined,
-): string | undefined {
-  const texts = (content ?? []).flatMap((entry) =>
-    entry.type === 'content' && entry.content.type === 'text'
-      ? [
-          entry.content.text,
-        ]
-      : [],
-  );
-  return texts.length > 0 ? texts.join('\n') : undefined;
 }
 
 /** What a step did through the host's fs or shell adapters, as `workspace_access` names it. */
@@ -230,8 +238,16 @@ export class AcpEventBridge {
   private messageId = '';
   private messageText = '';
   private sawText = false;
+  /** The model the agent last reported, so a change is told once. */
+  private model: string | undefined;
   /** Maps an agent's title for a bridged tool call to the tool's wire name. */
   toolNameOf: (title: string) => string | undefined = () => undefined;
+  /** Which tool a call to one of the step's tools is to, from its wire name and input. */
+  bridgedIdentityOf: (wireName: string, input: unknown) => ToolIdentity = (wireName) => ({
+    id: wireName,
+  });
+  /** Which of the agent's own tools a call is to, as its adapter reads it. */
+  toolIdOf: (update: ToolCallUpdate) => ToolIdentity | undefined = () => undefined;
   /** The turn's subagents by child session id (spec 08 § Nested agents). */
   private readonly children = new Map<string, ChildAgent>();
   /** Set when the turn ended: no nested agent opens after that. */
@@ -359,6 +375,8 @@ export class AcpEventBridge {
       bridge: new AcpEventBridge(this.step, this.ctx, scope, this.calls),
     };
     agent.bridge.toolNameOf = this.toolNameOf;
+    agent.bridge.toolIdOf = this.toolIdOf;
+    agent.bridge.bridgedIdentityOf = this.bridgedIdentityOf;
     this.children.set(info.sessionId, agent);
     agent.bridge.begin();
     agent.bridge.framework('agent_started', {
@@ -446,8 +464,48 @@ export class AcpEventBridge {
    * Name bridged tool calls by their wire name on the stream, as the
    * `callModel` stream names calls, rather than by the agent's display title.
    */
-  nameToolCalls(nameOf: (title: string) => string | undefined): void {
+  nameToolCalls(
+    nameOf: (title: string) => string | undefined,
+    identityOf?: (wireName: string, input: unknown) => ToolIdentity,
+  ): void {
     this.toolNameOf = nameOf;
+    if (identityOf) {
+      this.bridgedIdentityOf = identityOf;
+    }
+  }
+
+  /**
+   * Identify the agent's own calls by the tool they are to, as its adapter
+   * reads it from the agent's update; a call it cannot place goes by its title.
+   */
+  identifyToolCalls(
+    identify: ((update: ToolCallUpdate) => ToolIdentity | undefined) | undefined,
+  ): void {
+    if (identify) {
+      this.toolIdOf = identify;
+    }
+  }
+
+  /**
+   * Which tool an announced call of the agent's own is to: as its adapter
+   * reads it; else its kind, so calls an agent names by title alone ("Run
+   * ls", "Run pwd") still group as one tool; else, with no kind to go by, its
+   * title.
+   */
+  private identityOf(update: ToolCallUpdate): ToolIdentity {
+    let read: ToolIdentity | undefined;
+    try {
+      read = this.toolIdOf(update);
+    } catch {
+      read = undefined;
+    }
+    if (read) {
+      return read;
+    }
+    const kind = update.kind ?? undefined;
+    return {
+      id: kind !== undefined && kind !== 'other' ? kind : (update.title ?? update.toolCallId),
+    };
   }
 
   /**
@@ -455,7 +513,15 @@ export class AcpEventBridge {
    * with the arguments it runs with — then `tool_call_started`, under the id
    * the bridge runs it under. An announcement of the same id is this call.
    */
-  bridgedCallStarted(callId: string, name: string, args: unknown): void {
+  bridgedCallStarted(
+    callId: string,
+    name: string,
+    args: unknown,
+    presentation: ToolCallPresentation = {},
+    identity: ToolIdentity = {
+      id: name,
+    },
+  ): void {
     const announced = this.calls.byId.get(callId);
     if (announced?.state !== 'announced') {
       this.calls.unannounced.push({
@@ -465,15 +531,19 @@ export class AcpEventBridge {
     }
     this.calls.byId.set(callId, {
       name,
+      identity,
       via: 'bridged',
       bridge: this,
       state: 'open',
     });
     this.closeMessage();
     this.emitToolCall(callId, name, args ?? announced?.input);
+    // As the tool presents itself, exactly as in a `callModel` step: never by
+    // the agent's own name for the call.
     this.toolEvent('tool_call_started', {
       name,
       callId,
+      ...presentation,
     });
   }
 
@@ -494,14 +564,22 @@ export class AcpEventBridge {
    * `callModel` tool loop emits, filtered by the step's `emit` option.
    */
   toolEvent(eventType: string, data: Record<string, unknown>): void {
-    if (!this.broadcaster || !shouldEmit(this.emitOption, eventType, data)) {
+    // Every event of a call names the tool it is to (spec 08 § Tool calls).
+    const call = typeof data.callId === 'string' ? this.calls.byId.get(data.callId) : undefined;
+    const payload = call
+      ? {
+          ...data,
+          ...toolIdentityData(call.identity),
+        }
+      : data;
+    if (!this.broadcaster || !shouldEmit(this.emitOption, eventType, payload)) {
       return;
     }
     emitFrameworkEvent({
       broadcaster: this.broadcaster,
       agentName: this.agentName,
       eventType,
-      data,
+      data: payload,
       scope: this.scope,
     });
   }
@@ -588,27 +666,33 @@ export class AcpEventBridge {
   }
 
   /**
-   * One of the agent's own tool calls that finished, as the generic tool
-   * event: its own tools are not bridged, so nothing else reports it.
+   * One update about one of the agent's own tool calls, as the generic tool
+   * events: its own tools are not bridged, so nothing else reports them. A
+   * running call's changes are `tool_progress`; a finished one is
+   * `tool_call_completed`, carrying everything it produced as structure.
+   * `announced`: the update is the call's announcement, whose presentation
+   * and status `tool_call_started` already carried.
    */
-  private ownToolSettled(
-    update: Extract<
-      SessionUpdate,
-      {
-        sessionUpdate: 'tool_call' | 'tool_call_update';
-      }
-    >,
-  ): void {
-    if (update.status !== 'completed' && update.status !== 'failed') {
-      return;
-    }
+  private ownToolUpdated(update: ToolCallUpdate, announced: boolean): void {
     const call = this.calls.byId.get(update.toolCallId);
     // Only an own call still open: a bridged one is the bridge's to report.
     if (call?.via !== 'own' || call.state !== 'open') {
       return;
     }
+    if (update.content) {
+      call.content = toolContentOf(update.content);
+    }
+    const final = update.status === 'completed' || update.status === 'failed';
+    this.reportOwnProgress(update, call, {
+      announced,
+      final,
+    });
+    if (!final) {
+      return;
+    }
     call.state = 'closed';
-    const output = contentText(update.content);
+    const content = call.content ?? [];
+    const output = contentText(content);
     this.toolEvent('tool_call_completed', {
       name: call.name,
       callId: update.toolCallId,
@@ -618,6 +702,59 @@ export class AcpEventBridge {
         : {
             output,
           }),
+      ...(content.length > 0
+        ? {
+            content,
+          }
+        : {}),
+      ...(update.rawOutput === undefined || update.rawOutput === null
+        ? {}
+        : {
+            result: update.rawOutput,
+          }),
+    });
+  }
+
+  /**
+   * A running own call's `tool_progress`: what this update changed. An
+   * announcement reports only what `tool_call_started` did not carry (its
+   * content, its progress); a final update leaves its content to the
+   * completion.
+   */
+  private reportOwnProgress(
+    update: ToolCallUpdate,
+    call: TurnCall,
+    at: {
+      announced: boolean;
+      final: boolean;
+    },
+  ): void {
+    const report = at.announced
+      ? {
+          ...(update.content && !at.final
+            ? {
+                content: call.content,
+              }
+            : {}),
+          ...(progressOf(update) === undefined
+            ? {}
+            : {
+                progress: progressOf(update),
+              }),
+        }
+      : progressReport(update, at.final ? undefined : (update.status ?? undefined));
+    if (!report) {
+      return;
+    }
+    const { content, ...changes } = report;
+    const data = at.final || content === undefined ? changes : report;
+    if (Object.keys(data).length === 0) {
+      return;
+    }
+    this.toolEvent('tool_progress', {
+      name: call.name,
+      callId: update.toolCallId,
+      ...data,
     });
   }
 
@@ -697,6 +834,7 @@ export class AcpEventBridge {
     this.toolEvent('tool_call_started', {
       name: call.name,
       callId,
+      ...call.presentation,
     });
     this.toolEvent('tool_call_completed', {
       name: call.name,
@@ -711,8 +849,23 @@ export class AcpEventBridge {
    * lifecycle the stream never saw, with the output the result recorded.
    */
   private synthesizeToolCall(item: FunctionCallItem, items: ReadonlyArray<Item>): void {
+    // Identified as its announcement would have been: by the agent's reader,
+    // else its kind, else its title.
+    const kind = frameworkCast<{
+      acpToolKind?: ToolCallUpdate['kind'];
+    }>(item).acpToolKind;
     this.calls.byId.set(item.callId, {
       name: item.name,
+      identity: this.identityOf({
+        sessionUpdate: 'tool_call',
+        toolCallId: item.callId,
+        title: item.name,
+        ...(kind
+          ? {
+              kind,
+            }
+          : {}),
+      }),
       via: 'own',
       bridge: this,
       state: 'closed',
@@ -742,42 +895,51 @@ export class AcpEventBridge {
    * known is the same call again.
    */
   private toolCallAnnounced(
-    update: Extract<
-      SessionUpdate,
-      {
-        sessionUpdate: 'tool_call';
-      }
-    >,
+    update: ToolCallUpdate & {
+      sessionUpdate: 'tool_call';
+    },
   ): void {
     const callId = update.toolCallId;
     if (this.calls.byId.has(callId)) {
       return;
     }
+    const presentation = presentationOf(update);
     const wireName = this.toolNameOf(update.title);
     if (wireName) {
       this.calls.byId.set(callId, {
         name: wireName,
+        identity: this.bridgedIdentityOf(wireName, update.rawInput),
         via: 'bridged',
         bridge: this,
         state: 'announced',
         input: update.rawInput,
+        presentation,
       });
       return;
     }
     this.calls.byId.set(callId, {
       name: update.title,
+      identity: this.identityOf(update),
       via: 'own',
       bridge: this,
       state: 'open',
     });
     this.closeMessage();
     this.emitToolCall(callId, update.title, update.rawInput);
+    const status =
+      update.status === 'pending' || update.status === 'in_progress' ? update.status : undefined;
     this.toolEvent('tool_call_started', {
       name: update.title,
       callId,
+      ...presentation,
+      ...(status === undefined
+        ? {}
+        : {
+            status,
+          }),
     });
-    // A call reported already finished is settled at once.
-    this.ownToolSettled(update);
+    // Content it came with, and a call reported already finished, at once.
+    this.ownToolUpdated(update, true);
   }
 
   //#region internals
@@ -966,11 +1128,11 @@ export class AcpEventBridge {
 
   private translate(update: SessionUpdate): void {
     if (update.sessionUpdate === 'tool_call_update') {
-      this.ownToolSettled(update);
+      this.ownToolUpdated(update, false);
       return;
     }
     if (update.sessionUpdate === 'agent_message_chunk') {
-      this.messageDelta(blockText(update.content));
+      this.messageChunk(update.content);
       return;
     }
     if (update.sessionUpdate === 'agent_thought_chunk') {
@@ -984,8 +1146,84 @@ export class AcpEventBridge {
       this.toolCallAnnounced(update);
       return;
     }
-    // Every other update is session state (modes, commands, config options,
-    // plans, context occupancy) or replayed history: not output.
+    this.sessionState(update);
+  }
+
+  /**
+   * An update about the session rather than its output: the agent's plan, its
+   * mode and its model reach the host as generic events; everything else
+   * (commands, context occupancy, replayed history) is not shown.
+   */
+  private sessionState(update: SessionUpdate): void {
+    if (update.sessionUpdate === 'plan' || update.sessionUpdate === 'plan_update') {
+      this.framework('plan_updated', {
+        plan: planOf(update),
+      });
+      return;
+    }
+    if (update.sessionUpdate === 'plan_removed') {
+      this.framework(
+        'plan_removed',
+        update.planId
+          ? {
+              id: update.planId,
+            }
+          : {},
+      );
+      return;
+    }
+    if (update.sessionUpdate === 'current_mode_update') {
+      this.framework('agent_config_updated', {
+        mode: update.currentModeId,
+      });
+      return;
+    }
+    if (update.sessionUpdate !== 'config_option_update') {
+      return;
+    }
+    const model = modelOf(update.configOptions);
+    if (model === undefined || model === this.model) {
+      return;
+    }
+    this.model = model;
+    this.framework('agent_config_updated', {
+      model,
+    });
+  }
+
+  /**
+   * One chunk of the agent's message. An image is an image output item, as a
+   * model's generated image is — never text; everything else is text.
+   */
+  private messageChunk(content: Parameters<typeof blockText>[0]): void {
+    if (content.type !== 'image') {
+      this.messageDelta(blockText(content));
+      return;
+    }
+    this.closeMessage();
+    this.start();
+    const index = this.nextOutputIndex++;
+    const item = {
+      id: `acp-img-${crypto.randomUUID()}`,
+      type: 'image_generation_call',
+      status: 'completed',
+      // A data URL, so the image carries its media type.
+      result: dataUrl(content.mimeType, content.data),
+    };
+    this.sdk(
+      'response.output_item.added',
+      {
+        item,
+      },
+      index,
+    );
+    this.sdk(
+      'response.output_item.done',
+      {
+        item,
+      },
+      index,
+    );
   }
 
   //#endregion

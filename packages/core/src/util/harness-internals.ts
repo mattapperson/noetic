@@ -18,6 +18,8 @@ export interface HarnessInternalSlots {
   verifier: unknown;
   /** The harness's `environment.secrets` resolver (spec 35 § Secrets). */
   secrets: unknown;
+  /** The reporter that tells the plans context layers keep (spec 08 § Tool calls, plans and agent settings). */
+  layerPlans: unknown;
 }
 
 type HarnessInternalKey = keyof HarnessInternalSlots;

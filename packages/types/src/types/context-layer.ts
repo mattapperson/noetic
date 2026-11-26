@@ -12,6 +12,7 @@ import type {
   OnSteerParams,
   OnSteerResult,
 } from './steering';
+import type { AgentPlan } from './tool-activity';
 
 /** @public Isolation scope controlling how a context layer's state is keyed and shared. */
 export type BudgetConfig =
@@ -557,6 +558,22 @@ export interface ContextLayer<TState = unknown> {
    * whether it is pinned for the prompt cache. Defaults to `'auto'`.
    */
   placement?: LayerPlacement;
+  /**
+   * The plan this layer's state holds, for a layer that keeps the agent's plan
+   * (the `plan()` layer, a task list), or null when it holds none. The harness
+   * reads it as the step runs and emits `plan_updated` when it changes and
+   * `plan_removed` when it goes — the events an agent step's agent reports its
+   * plan with (spec 08 § Tool calls, plans and agent settings). Declared as a
+   * method (bivariant params) so a concretely-typed layer assigns to the
+   * erased `ContextLayer`.
+   */
+  plan?(state: TState): AgentPlan | null;
+  /**
+   * Controls the framework events this layer emits (its `plan_updated` /
+   * `plan_removed`), as a step's `emit` controls a step's: `false` silences
+   * them, a filter decides per event. Defaults to `true`.
+   */
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 
 /** @public Configuration for how the runtime projects conversation items into the model's context window. */

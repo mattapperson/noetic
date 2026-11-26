@@ -26,6 +26,7 @@ import type { FsAdapter } from './fs-adapter';
 import type { Item } from './items';
 import type { ShellAdapter } from './shell-adapter';
 import type { ByteStream, Spawn, SpawnCommand } from './spawn';
+import type { ToolIdentity } from './tool-activity';
 
 //#region Step-kind discriminator
 
@@ -817,7 +818,26 @@ export interface AcpAgent {
    * for an agent attached through a transport, which names no machine.
    */
   readonly spawn?: Spawn;
+  /**
+   * Which of this agent's tools a call of its own is to, read from the
+   * agent's update for it (Claude Code's `_meta.claudeCode.toolName`, an MCP
+   * call's server and tool). Undefined when the update does not say; the
+   * call is then identified by its title. Becomes the call's `toolId` and
+   * `toolServer` on its events (spec 08 § Tool calls, plans and agent settings).
+   */
+  toolIdOf?(update: AcpToolCallUpdate): ToolIdentity | undefined;
 }
+
+/**
+ * A `tool_call` or `tool_call_update` notification's update.
+ * @public
+ */
+export type AcpToolCallUpdate = Extract<
+  acp.SessionUpdate,
+  {
+    sessionUpdate: 'tool_call' | 'tool_call_update';
+  }
+>;
 
 /**
  * Why an agent cannot take tools, and the fix it is missing.

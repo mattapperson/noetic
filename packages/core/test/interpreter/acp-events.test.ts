@@ -178,24 +178,10 @@ describe('AcpEventBridge', () => {
 
   it.each([
     [
-      'plan',
-      {
-        sessionUpdate: 'plan' as const,
-        entries: [],
-      },
-    ],
-    [
       'available_commands_update',
       {
         sessionUpdate: 'available_commands_update' as const,
         availableCommands: [],
-      },
-    ],
-    [
-      'current_mode_update',
-      {
-        sessionUpdate: 'current_mode_update' as const,
-        currentModeId: 'plan',
       },
     ],
   ])('emits nothing for the %s update: session state, not output', (_name, update) => {
@@ -330,8 +316,15 @@ describe('AcpEventBridge', () => {
     expect(completed?.data).toEqual({
       name: 'Read',
       callId: 'c3',
+      toolId: 'Read',
       error: false,
       output: 'file body',
+      content: [
+        {
+          type: 'input_text',
+          text: 'file body',
+        },
+      ],
     });
   });
 

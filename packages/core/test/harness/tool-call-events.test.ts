@@ -16,8 +16,10 @@ import assert from 'node:assert';
 import type { Context, ContextLayer, LLMResponse } from '@noetic-tools/types';
 import { frameworkCast, SteeringAction } from '@noetic-tools/types';
 import { z } from 'zod';
-import { tool } from '../../src/builders/tool-builder';
+import { invokeTool } from '../../src/builders/step-builders';
+import { tool, toolWithGenerator } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import { execute } from '../../src/interpreter/execute';
 import { makeMessage } from '../_helpers';
 
 //#region Fakes
@@ -326,6 +328,248 @@ describe('tool-less callModel still streams', () => {
     expect(deltas.map((e) => e.data.delta)).toEqual([
       'Par',
       'is',
+    ]);
+  });
+});
+
+describe('model-path tool calls carry the tool presentation', () => {
+  function presentingTool(fail: boolean) {
+    return toolWithGenerator({
+      name: 'write',
+      description: 'Write a file',
+      input: z.object({
+        path: z.string(),
+      }),
+      event: z.number(),
+      output: z.object({
+        path: z.string(),
+      }),
+      presentation: {
+        kind: 'edit',
+        title: ({ path }) => `Write ${path}`,
+        locations: ({ path }) => [
+          path,
+        ],
+        progress: (events) => ({
+          progress: events.length,
+          status: 'in_progress',
+        }),
+        content: ({ path }) => [
+          {
+            type: 'diff',
+            path,
+            oldText: null,
+            newText: 'x',
+          },
+        ],
+      },
+      async *execute({ path }) {
+        yield 1;
+        if (fail) {
+          throw new Error('disk full');
+        }
+        return {
+          path,
+        };
+      },
+    });
+  }
+
+  async function run(fail: boolean, args: Record<string, unknown>): Promise<EmittedEvent[]> {
+    const harness = new AgentHarness({
+      name: 'evt',
+      params: {},
+    });
+    installClient(harness, new ToolCallThenDoneClient('write', args));
+    const events: EmittedEvent[] = [];
+    const ctx = attachBroadcaster(harness.createContext(), events);
+    await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'write'),
+      ],
+      tools: [
+        presentingTool(fail),
+      ],
+      ctx,
+    });
+    return events;
+  }
+
+  function data(events: EmittedEvent[], name: string): Array<Record<string, unknown>> {
+    return events.filter((e) => e.type === `evt:${name}`).map((e) => e.data);
+  }
+
+  it('starts a call with its title, kind and locations, reports progress, and completes with content', async () => {
+    const events = await run(false, {
+      path: 'a.ts',
+    });
+    expect(data(events, 'tool_call_started')).toEqual([
+      {
+        name: 'write',
+        callId: 'call-1',
+        toolId: 'write',
+        kind: 'edit',
+        title: 'Write a.ts',
+        locations: [
+          {
+            path: 'a.ts',
+          },
+        ],
+      },
+    ]);
+    expect(data(events, 'tool_progress')).toEqual([
+      {
+        name: 'write',
+        callId: 'call-1',
+        toolId: 'write',
+        event: 1,
+        progress: 1,
+        status: 'in_progress',
+      },
+    ]);
+    expect(data(events, 'tool_call_completed')[0]?.content).toEqual([
+      {
+        type: 'diff',
+        path: 'a.ts',
+        oldText: null,
+        newText: 'x',
+      },
+    ]);
+  });
+
+  it('gives a failed call no content, and a call whose arguments do not parse its kind only', async () => {
+    const failed = await run(true, {
+      path: 'a.ts',
+    });
+    const completed = data(failed, 'tool_call_completed')[0];
+    expect(completed?.error).toBe(true);
+    expect(completed).not.toHaveProperty('content');
+
+    const harness = new AgentHarness({
+      name: 'evt',
+      params: {},
+    });
+    installClient(
+      harness,
+      frameworkCast<unknown>({
+        calls: 0,
+        callModel() {
+          const client = frameworkCast<{
+            calls: number;
+          }>(this);
+          return {
+            async *getFullResponsesStream() {},
+            getResponse: async () => {
+              client.calls += 1;
+              return client.calls === 1
+                ? frameworkCast<MockModelResponse>({
+                    id: 'r',
+                    status: 'completed',
+                    output: [
+                      {
+                        id: 'fc',
+                        status: 'completed',
+                        type: 'function_call',
+                        callId: 'call-bad',
+                        name: 'write',
+                        arguments: '{not json',
+                      },
+                    ],
+                    items: [],
+                    usage: {
+                      inputTokens: 1,
+                      outputTokens: 1,
+                    },
+                  })
+                : finalMessageResponse('done');
+            },
+          };
+        },
+      }),
+    );
+    const events: EmittedEvent[] = [];
+    const ctx = attachBroadcaster(harness.createContext(), events);
+    await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'write'),
+      ],
+      tools: [
+        presentingTool(false),
+      ],
+      ctx,
+    });
+    expect(data(events, 'tool_call_started')).toEqual([
+      {
+        name: 'write',
+        callId: 'call-bad',
+        toolId: 'write',
+        kind: 'edit',
+      },
+    ]);
+  });
+});
+
+describe('invokeTool calls carry the tool presentation', () => {
+  it('starts with the declared title, kind and locations, and completes with content', async () => {
+    const harness = new AgentHarness({
+      name: 'evt',
+      params: {},
+    });
+    const events: EmittedEvent[] = [];
+    const ctx = attachBroadcaster(harness.createContext(), events);
+    const write = tool({
+      name: 'write',
+      description: 'Write a file',
+      input: z.object({
+        path: z.string(),
+      }),
+      output: z.object({
+        path: z.string(),
+      }),
+      presentation: {
+        kind: 'edit',
+        title: ({ path }) => `Write ${path}`,
+        content: ({ path }) => [
+          {
+            type: 'diff',
+            path,
+            oldText: null,
+            newText: 'x',
+          },
+        ],
+      },
+      execute: async ({ path }) => ({
+        path,
+      }),
+    });
+    await execute(
+      invokeTool({
+        id: 'write-step',
+        tool: write,
+      }),
+      {
+        path: 'a.ts',
+      },
+      ctx,
+    );
+    const started = events.find((e) => e.type === 'evt:tool_call_started');
+    expect(started?.data).toEqual({
+      name: 'write',
+      callId: 'write-step',
+      toolId: 'write',
+      kind: 'edit',
+      title: 'Write a.ts',
+    });
+    const completed = events.find((e) => e.type === 'evt:tool_call_completed');
+    expect(completed?.data.content).toEqual([
+      {
+        type: 'diff',
+        path: 'a.ts',
+        oldText: null,
+        newText: 'x',
+      },
     ]);
   });
 });

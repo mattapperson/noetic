@@ -41,6 +41,7 @@ export type { AcpAgentRegistry } from './registry';
 export { createAcpAgentRegistry } from './registry';
 /** @public */
 export type { AcpToolWiring, ToolBridgeAddress, ToolBridgeLaunch } from './tool-bridge';
+export { claudeToolId, codexToolId } from './tool-ids';
 /** @public */
 export type { BridgedPermissionCheck } from './tool-permissions';
 /** @public */

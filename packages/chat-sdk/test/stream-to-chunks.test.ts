@@ -536,3 +536,43 @@ describe('streamToChatChunks', () => {
     ]);
   });
 });
+
+describe('streamToChatChunks — images', () => {
+  test("names an agent's image in the reply, and nothing for a provider's own image item", async () => {
+    const chunks = await collect(
+      streamToChatChunks(
+        asStream([
+          fwEvent('turn_started', TURN),
+          delta('Here:'),
+          sdkEvent('response.output_item.done', {
+            item: {
+              id: 'img',
+              type: 'image_generation_call',
+              result: 'data:image/png;base64,AAAA',
+            },
+          }),
+          sdkEvent('response.output_item.done', {
+            item: {
+              id: 'gen',
+              type: 'image_generation_call',
+              result: 'AAAA',
+            },
+          }),
+          sdkEvent('response.output_item.done', {
+            item: null,
+          }),
+          fwEvent('turn_completed', {
+            turnId: 'turn-1',
+          }),
+        ]),
+        {
+          messageId: MESSAGE_ID,
+        },
+      ),
+    );
+    expect(chunks).toEqual([
+      'Here:',
+      '\n\n[image: image/png]',
+    ]);
+  });
+});

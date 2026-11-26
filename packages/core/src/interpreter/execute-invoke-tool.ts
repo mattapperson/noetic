@@ -4,7 +4,16 @@
  */
 
 import type { Span, SteeringDecision } from '@noetic-tools/types';
-import { frameworkCast, NoeticErrorImpl, validateSchema } from '@noetic-tools/types';
+import {
+  frameworkCast,
+  identifyToolCall,
+  NoeticErrorImpl,
+  presentToolCall,
+  presentToolContent,
+  presentToolProgress,
+  toolIdentityData,
+  validateSchema,
+} from '@noetic-tools/types';
 import { orderedCallId } from '../connections/durability';
 import { ToolAttr } from '../observability/genai-attributes';
 import { ContextImpl } from '../runtime/context-impl';
@@ -65,8 +74,12 @@ async function consumeToolGenerator(params: {
       eventType: 'tool_progress',
       data: {
         stepId: params.stepId,
+        name: params.tool.name,
+        callId: params.stepId,
+        ...toolIdentityData(identifyToolCall(params.tool, params.args)),
         toolName: params.tool.name,
         event: next.value,
+        ...presentToolProgress(params.tool, events),
       },
     });
     // A direct `invokeTool` has no model call id — the step id keys its region.
@@ -133,6 +146,7 @@ async function runInvokeTool<TContext, I, O>(
   // until approved — the same ordering the model-driven path guarantees.
   const broadcaster = getBroadcaster(baseCtx);
   const agentName = baseCtx.harness.config.name;
+  const identity = identifyToolCall(step.tool, parsedArgs);
   emitFrameworkEvent({
     broadcaster,
     agentName,
@@ -140,9 +154,14 @@ async function runInvokeTool<TContext, I, O>(
     data: {
       name: step.tool.name,
       callId: step.id,
+      ...toolIdentityData(identity),
+      ...presentToolCall(step.tool, parsedArgs),
     },
   });
-  const emitCompleted = (error: boolean, output?: string): void => {
+  // A call that returned carries what it produced as structure, as the
+  // `callModel` loop's calls do (spec 02 § Presentation).
+  const emitCompleted = (error: boolean, output?: string, result?: unknown): void => {
+    const content = error ? undefined : presentToolContent(step.tool, result, parsedArgs);
     emitFrameworkEvent({
       broadcaster,
       agentName,
@@ -150,8 +169,14 @@ async function runInvokeTool<TContext, I, O>(
       data: {
         name: step.tool.name,
         callId: step.id,
+        ...toolIdentityData(identity),
         error,
         output,
+        ...(content
+          ? {
+              content,
+            }
+          : {}),
       },
     });
   };
@@ -215,7 +240,7 @@ async function runInvokeTool<TContext, I, O>(
       args: parsedArgs,
       output: result,
     });
-    emitCompleted(false, typeof result === 'string' ? result : JSON.stringify(result));
+    emitCompleted(false, typeof result === 'string' ? result : JSON.stringify(result), result);
     return frameworkCast<O>(result);
   }
 
@@ -261,7 +286,7 @@ async function runInvokeTool<TContext, I, O>(
       },
     });
     if (answer.resolution?.hasOutput) {
-      emitCompleted(false, JSON.stringify(answer.resolution.output));
+      emitCompleted(false, JSON.stringify(answer.resolution.output), answer.resolution.output);
       return frameworkCast<O>(answer.resolution.output);
     }
     const action = answer.resolution?.action ?? SteeringAction.Deny;
@@ -347,7 +372,7 @@ async function runInvokeTool<TContext, I, O>(
       args: parsedArgs,
       output: result,
     });
-    emitCompleted(false, typeof result === 'string' ? result : JSON.stringify(result));
+    emitCompleted(false, typeof result === 'string' ? result : JSON.stringify(result), result);
     return frameworkCast<O>(result);
   } catch (e) {
     emitToolUi({

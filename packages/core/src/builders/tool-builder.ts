@@ -12,6 +12,7 @@ import type {
   ToolExecutionContext,
   ToolHold,
   ToolModelOutput,
+  ToolPresentationDeclaration,
   ToolResultExtensionItem,
   ToolUiDeclaration,
 } from '@noetic-tools/types';
@@ -46,7 +47,9 @@ type ToolConfig<I extends StandardSchemaV1, O extends StandardSchemaV1> = {
   context?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O>;
-  /** Optional ACP presentation — how the call renders in an ACP client when the harness is served as an agent. */
+  /** See `Tool.presentation`: how a call presents to a host — title, kind, files, progress, structured results. */
+  presentation?: ToolPresentationDeclaration<I, O>;
+  /** @deprecated Use `presentation`. */
   acp?: ToolAcpDeclaration<I>;
 } & InputSchemaConfig<I>;
 
@@ -82,7 +85,9 @@ type GeneratorToolConfig<
   context?: ToolContextDeclaration;
   /** Optional UI declaration — the runtime emits the rendered fragments at call/progress/result points. */
   ui?: ToolUiDeclaration<I, O, InferSchemaOutput<E>>;
-  /** Optional ACP presentation — how the call renders in an ACP client when the harness is served as an agent. */
+  /** See `Tool.presentation`; `progress` receives the events the generator yielded. */
+  presentation?: ToolPresentationDeclaration<I, O, InferSchemaOutput<E>>;
+  /** @deprecated Use `presentation`. */
   acp?: ToolAcpDeclaration<I>;
 } & InputSchemaConfig<I>;
 
@@ -139,6 +144,7 @@ export function tool<I extends StandardSchemaV1, O extends StandardSchemaV1>(
     durable: config.durable,
     context: config.context,
     ui: config.ui,
+    presentation: config.presentation,
     acp: config.acp,
   };
 }
@@ -170,6 +176,7 @@ export function toolWithGenerator<
     durable: config.durable,
     context: config.context,
     ui: config.ui,
+    presentation: config.presentation,
     acp: config.acp,
   };
 }
