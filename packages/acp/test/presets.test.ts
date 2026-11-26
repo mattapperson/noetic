@@ -107,6 +107,59 @@ describe('maintained bridge presets', () => {
       15e3,
     );
 
+    it(`${id} charges each turn its own usage, unless told another reader or none`, async () => {
+      const turnOf = async (usageOf?: false | (() => undefined)) => {
+        const agent = make({
+          ...(usageOf === undefined
+            ? {}
+            : {
+                usageOf,
+              }),
+          transport: loopbackTransport(() => ({
+            initialize: async () => ({
+              protocolVersion: 1,
+              agentCapabilities: {},
+            }),
+            authenticate: async () => ({}),
+            newSession: async () => ({
+              sessionId: 's',
+            }),
+            prompt: async () => ({
+              stopReason: 'end_turn',
+              usage: {
+                inputTokens: 10,
+                outputTokens: 5,
+                totalTokens: 15,
+              },
+            }),
+            cancel: async () => undefined,
+          })),
+        });
+        const connection = await agent.connect({
+          host: host('/workspace'),
+        });
+        const session = await connection.newSession({
+          cwd: '/workspace',
+        });
+        const result = await session.prompt({
+          content: [
+            {
+              type: 'text',
+              text: 'hi',
+            },
+          ],
+        });
+        await connection.close();
+        return result.usage;
+      };
+      expect(await turnOf()).toEqual({
+        inputTokens: 10,
+        outputTokens: 5,
+      });
+      expect(await turnOf(false)).toBeUndefined();
+      expect(await turnOf(() => undefined)).toBeUndefined();
+    });
+
     it(`${id} uses a custom transport in place of its command`, async () => {
       const controller = new AbortController();
       const transport = loopbackTransport(() => ({

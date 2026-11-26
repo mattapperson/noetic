@@ -136,6 +136,14 @@ export interface AcpPresetOptions {
    * (Claude Code's `{ claudeCode: { options } }`).
    */
   sessionMeta?: Readonly<Record<string, unknown>>;
+  /**
+   * How a turn's tokens are read from the agent's answer, in place of the
+   * preset's own reader; `false` charges no turn. The presets read each
+   * turn's own figures, as the bridge versions they were checked against
+   * report them; a bridge that reports the session's running total instead
+   * needs `false` or a reader of its own.
+   */
+  usageOf?: TurnUsageOf | false;
 }
 
 function preset({
@@ -184,7 +192,7 @@ function preset({
     instructionsMeta,
     sessionMeta: opts.sessionMeta,
     toolIdOf,
-    usageOf,
+    usageOf: opts.usageOf === false ? undefined : (opts.usageOf ?? usageOf),
   });
 }
 

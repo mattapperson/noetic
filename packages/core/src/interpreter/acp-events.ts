@@ -21,6 +21,7 @@ import type {
   AcpChildUpdate,
   AcpClientActivity,
   AcpClientMethod,
+  AcpContentBlock,
   AcpSession,
   AcpSessionNotification,
   AcpTurnResult,
@@ -29,6 +30,8 @@ import type {
   ContextData,
   FunctionCallItem,
   FunctionCallOutputItem,
+  InputContentPart,
+  InputMessageItem,
   Item,
   StepAcpAgent,
   ToolCallPresentation,
@@ -44,6 +47,7 @@ import { offerStop } from '../runtime/nested-agents';
 import { errorMessage } from '../util/error-message';
 import type { ToolCallUpdate } from './acp-activity';
 import {
+  blockContent,
   contentText,
   dataUrl,
   effortOf,
@@ -66,6 +70,38 @@ type AgentEnd = 'completed' | 'failed' | 'cancelled';
 interface ChildAgent {
   readonly scope: AgentScope;
   readonly bridge: AcpEventBridge;
+}
+
+/** A message of a child's session, as its upserts and chunks left it. */
+interface ChildMessage {
+  readonly id: string;
+  readonly sender?: string;
+  readonly recipient?: string;
+  readonly content: ReadonlyArray<AcpContentBlock>;
+  /** Shown as the child's input already. */
+  shown: boolean;
+}
+
+/**
+ * A message's content as a user message: text and media as the parts a model
+ * is given, a resource as the text that names it.
+ */
+function inputMessage(content: ReadonlyArray<AcpContentBlock>): InputMessageItem {
+  return {
+    ...createMessage('', 'user'),
+    content: content.map((block): InputContentPart => {
+      const part = blockContent(block);
+      return part.type === 'input_text' ||
+        part.type === 'input_image' ||
+        part.type === 'input_file' ||
+        part.type === 'input_video'
+        ? part
+        : {
+            type: 'input_text',
+            text: blockText(block),
+          };
+    }),
+  };
 }
 
 /** What a child last announced of its work. */
@@ -191,12 +227,16 @@ class TurnCalls {
   }> = [];
 }
 
-/** A call's input as a comparable key. */
+/** A call's input as a comparable key: the same input whatever order its keys come in. */
 function inputKey(input: unknown): string {
   if (typeof input === 'string') {
     return input;
   }
-  return JSON.stringify(input ?? {});
+  return JSON.stringify(input ?? {}, (_key, value: unknown) =>
+    typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : value,
+  );
 }
 
 /** What a step did through the host's fs or shell adapters, as `workspace_access` names it. */
@@ -266,6 +306,8 @@ export class AcpEventBridge {
   private readonly statuses = new Map<string, ChildStatus>();
   /** The call of the turn that started each child, as its first message said. */
   private readonly launches = new Map<string, string>();
+  /** Each child's messages by id, as the agent last left them. */
+  private readonly messages = new Map<string, Map<string, ChildMessage>>();
   /** Stops one child session; set when the agent lets a client stop its subagents. */
   private stopChild: ((sessionId: string) => Promise<void>) | undefined;
   /** Takes back each nested agent's offer to be stopped, when the turn ends. */
@@ -312,18 +354,20 @@ export class AcpEventBridge {
       this.noteStatus(child);
       return;
     }
-    const input = this.inputOf(child);
-    if (input?.launch !== undefined && !this.children.has(child.sessionId)) {
-      this.launches.set(child.sessionId, input.launch);
+    const message = this.noteMessage(child);
+    if (message && !this.children.has(child.sessionId)) {
+      const launch = this.isInput(message, child.sessionId) ? message.id : undefined;
+      if (launch !== undefined && this.calls.byId.has(launch)) {
+        this.launches.set(child.sessionId, launch);
+      }
     }
     const agent = this.openChild(child.sessionId);
-    if (input) {
-      // Gated by the step's `emit`, as the nested agent's other events are:
-      // a host that filters them out never meets a scope it was not shown.
-      agent?.bridge.framework('item_appended', {
-        item: createMessage(input.text, 'user'),
-      });
+    if (message) {
+      // Shown once whole: when the child starts on it, or its turn ends.
       return;
+    }
+    if (agent) {
+      this.showInputs(child.sessionId, agent);
     }
     agent?.bridge.forward({
       sessionId: child.sessionId,
@@ -339,36 +383,79 @@ export class AcpEventBridge {
     this.stopChild = stop;
   }
 
+  /** The agent answered the turn: none of its nested agents can be stopped now. */
+  withdrawChildStops(): void {
+    for (const takeBack of this.offers.splice(0)) {
+      takeBack();
+    }
+  }
+
   /**
-   * A message another session sent the child — what the agent above asked of
-   * it — as its input; `launch` is the call of the turn whose id the message
-   * carries, the call that started it. Undefined for any other update.
+   * Take a `session_message` or `session_message_chunk` of the child into
+   * its message by that id, as the RFD keys them: an omitted or null sender
+   * or recipient keeps the one known, omitted content keeps it, null clears
+   * it, an array replaces it, and a chunk appends a block. Undefined for any
+   * other update.
    */
-  private inputOf(child: AcpChildUpdate):
-    | {
-        text: string;
-        launch?: string;
-      }
-    | undefined {
+  private noteMessage(child: AcpChildUpdate): ChildMessage | undefined {
     const update = child.update;
-    if (update.sessionUpdate !== 'session_message') {
+    if (
+      update.sessionUpdate !== 'session_message' &&
+      update.sessionUpdate !== 'session_message_chunk'
+    ) {
       return undefined;
     }
-    // Sent to the child, by another session: not one the child sends on.
-    const to = update.recipientSessionId;
-    const toAnother = to !== undefined && to !== null && to !== child.sessionId;
-    if (toAnother || update.senderSessionId === child.sessionId) {
-      return undefined;
-    }
-    const text = (update.content ?? []).map(blockText).join('');
-    return {
-      text,
-      ...(this.calls.byId.has(update.messageId)
-        ? {
-            launch: update.messageId,
-          }
-        : {}),
+    const messages = this.messages.get(child.sessionId) ?? new Map<string, ChildMessage>();
+    this.messages.set(child.sessionId, messages);
+    const known = messages.get(update.messageId);
+    const content =
+      update.sessionUpdate === 'session_message_chunk'
+        ? [
+            ...(known?.content ?? []),
+            update.content,
+          ]
+        : update.content === undefined
+          ? (known?.content ?? [])
+          : (update.content ?? []);
+    const message: ChildMessage = {
+      id: update.messageId,
+      sender: update.senderSessionId ?? known?.sender,
+      recipient: update.recipientSessionId ?? known?.recipient,
+      content,
+      shown: known?.shown ?? false,
     };
+    messages.set(update.messageId, message);
+    return message;
+  }
+
+  /** Whether a message is what another session asked of the child: sent to it, not by it. */
+  private isInput(message: ChildMessage, child: string): boolean {
+    if (message.sender === child) {
+      return false;
+    }
+    if (message.recipient !== undefined) {
+      return message.recipient === child;
+    }
+    return message.sender !== undefined;
+  }
+
+  /**
+   * The child's input messages not shown yet, each as a user message on its
+   * `item_appended`. Gated by the step's `emit`, as the nested agent's other
+   * events are, so a host that filters them out never meets a scope it was
+   * not shown. A message is shown as it stands then: a later edit of it
+   * shows nothing.
+   */
+  private showInputs(sessionId: string, agent: ChildAgent): void {
+    for (const message of this.messages.get(sessionId)?.values() ?? []) {
+      if (message.shown || !this.isInput(message, sessionId) || message.content.length === 0) {
+        continue;
+      }
+      message.shown = true;
+      agent.bridge.framework('item_appended', {
+        item: inputMessage(message.content),
+      });
+    }
   }
 
   /**
@@ -454,8 +541,11 @@ export class AcpEventBridge {
           if (this.statuses.get(info.sessionId)?.status === 'idle') {
             return false;
           }
-          await stop(info.sessionId);
-          return true;
+          // A refusal (the connection forgot it) or a connection gone: not stopped.
+          return await stop(info.sessionId).then(
+            () => true,
+            () => false,
+          );
         }),
       );
     }
@@ -488,10 +578,10 @@ export class AcpEventBridge {
   /** The turn is over: every subagent's bracket closes, and it is reported ended. */
   private closeChildren(fallback: AgentEnd): void {
     this.childrenClosed = true;
-    for (const takeBack of this.offers.splice(0)) {
-      takeBack();
-    }
+    this.withdrawChildStops();
     for (const [sessionId, agent] of this.children) {
+      // What it was asked, even when it never began on it.
+      this.showInputs(sessionId, agent);
       const stopReason = this.statuses.get(sessionId)?.stopReason;
       const end = stopReason === undefined ? fallback : endOf(stopReason);
       agent.bridge.end(stopReason ?? (end === 'completed' ? 'end_turn' : end));
@@ -808,7 +898,9 @@ export class AcpEventBridge {
     // An agent may announce a call before its input is written (Claude Code
     // streams it in later updates): each new input is part of its progress.
     const input =
-      update.rawInput !== undefined && inputKey(update.rawInput) !== inputKey(call.input)
+      update.rawInput !== undefined &&
+      update.rawInput !== null &&
+      inputKey(update.rawInput) !== inputKey(call.input)
         ? update.rawInput
         : undefined;
     if (input !== undefined) {

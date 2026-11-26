@@ -132,14 +132,7 @@ function buildContent(opts: {
  * session's running total, so without the adapter nothing is charged.
  */
 function turnUsage(result: AcpTurnResult): RoundUsage | undefined {
-  if (!result.usage) {
-    return undefined;
-  }
-  return {
-    inputTokens: result.usage.input,
-    outputTokens: result.usage.output,
-    cachedTokens: result.usage.cached,
-  };
+  return result.usage;
 }
 
 /** The turn as a model call's response, for usage accounting and `afterModelCall` layers. */
@@ -1083,6 +1076,7 @@ async function runTurn<TContext, I, O>(params: {
         signal,
       }));
   } catch (e) {
+    bridge.withdrawChildStops();
     await settle(tools);
     // What the turn's calls did still reaches the stream, settled to their owners.
     tools?.takeFinished();
@@ -1095,6 +1089,8 @@ async function runTurn<TContext, I, O>(params: {
     await discardIfFresh(resolution, baseCtx);
     throw failure;
   }
+  // The agent answered: its turn is over, whatever its bridged calls still do.
+  bridge.withdrawChildStops();
   await settle(tools);
   if (turnError.error !== undefined) {
     tools?.takeFinished();

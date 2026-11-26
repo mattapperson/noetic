@@ -788,16 +788,22 @@ show one.
   an earlier one. Once that turn has ended nothing more of it is shown: an
   update that arrives late opens no new nested agent.
 - **What started it, and what it was asked.** `callId` is the call of the
-  agent above it that started it — one of the turn's calls, whose id the
-  nested agent's first message carries, when that message is what opens it.
+  agent above it whose message opened it in this turn — one of the turn's
+  calls, whose id that first message carries: the call that started it, or,
+  for a subagent an earlier turn started, the call that spoke to it again.
   A message sent to it by another session — what the agent above asked of
   it — is its input: a user message on its `item_appended`, scoped, and like
-  the rest of its events subject to the step's `emit`.
+  the rest of its events subject to the step's `emit`. It is shown whole,
+  once, as it stands when the nested agent starts on it or when the turn
+  ends; a later edit of it shows nothing.
 - **Stopping one.** `cancellable` says its agent lets a client stop it alone.
   While its turn runs in this process, `harness.stopAgent(scope.id)` stops it
   and the turn goes on; the agent then reports how it ended with its
   `agent_status`. It answers false for any other id, for one whose last
-  status was `idle` (it already stopped), and once the turn ended.
+  status was `idle` (it already stopped), for one the session can no longer
+  stop (its connection forgot it, or is gone), and once the agent answered
+  the turn. It reaches only turns running in this process: a host that
+  drives a harness over IPC, or reads a stored event log, cannot stop one.
 - **Ids.** `scope.id` is the nested agent's identity — scoped events carry no
   adapter id. It is the step's dispatch path, the turn, and the subagent's own
   id (`<path>/turn:<turn>/agent:<id>`), so a steering retry or a later prompt

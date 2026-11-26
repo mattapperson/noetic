@@ -222,10 +222,10 @@ describe('current session updates (#96)', () => {
     });
 
     expect(result.usage).toEqual({
-      input: 420,
-      output: 30,
-      total: 450,
-      cached: 200,
+      inputTokens: 420,
+      outputTokens: 30,
+      cachedTokens: 200,
+      cacheWriteTokens: 100,
     });
 
     await rig.close();
@@ -253,10 +253,10 @@ describe('preset turn usage', () => {
       cachedWriteTokens: 100,
     };
     expect(turnUsage(answer(usage))).toEqual({
-      input: 1000,
-      output: 50,
-      total: 1050,
-      cached: 800,
+      inputTokens: 1000,
+      outputTokens: 50,
+      cachedTokens: 800,
+      cacheWriteTokens: 100,
     });
   });
 

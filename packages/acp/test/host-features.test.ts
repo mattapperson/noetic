@@ -514,9 +514,22 @@ describe("subagents' own sessions", () => {
               title: 'Explore',
             },
           });
+          // `cancel: null` grants nothing.
+          await conn.sessionUpdate({
+            sessionId: params.sessionId,
+            update: frameworkCast<acp.SessionNotification['update']>({
+              sessionUpdate: 'subagent_update',
+              sessionId: 'null-kid',
+              title: 'Explore',
+              capabilities: {
+                cancel: null,
+              },
+            }),
+          });
           await tryStop(params.sessionId);
           await tryStop('stranger');
           await tryStop('plain-kid');
+          await tryStop('null-kid');
           await conn.sessionUpdate(textChunk(params.sessionId, 'the answer'));
         },
       },
@@ -527,7 +540,7 @@ describe("subagents' own sessions", () => {
     const result = await session.prompt({
       content: PROMPT,
     });
-    expect(refusals).toHaveLength(3);
+    expect(refusals).toHaveLength(4);
     expect(refusals.every(isAcpCapabilityError)).toBe(true);
     expect(rig.calls.cancel).toEqual([]);
     expect(result.text).toBe('the answer');

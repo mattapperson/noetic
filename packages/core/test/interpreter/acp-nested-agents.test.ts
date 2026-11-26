@@ -1014,6 +1014,12 @@ describe('a nested agent: what started it, what it was asked, and stopping it', 
       callId: 'toolu_agent',
       cancellable: true,
     });
+    // Shown once the child starts on it.
+    expect(events.filter((e) => e.type === 'h:item_appended')).toEqual([]);
+    b.forwardChild({
+      ...work('kid'),
+      lineage: lineage(true),
+    });
     const input = events.find((e) => e.type === 'h:item_appended' && e.scope);
     expect(input?.scope).toEqual(start?.scope);
     expect(input?.data.item).toMatchObject({
@@ -1021,6 +1027,209 @@ describe('a nested agent: what started it, what it was asked, and stopping it', 
       role: 'user',
     });
     expect(JSON.stringify(input?.data.item)).toContain('Run ls and wc -l.');
+  });
+
+  /** A message update to the child, by its id. */
+  const message = (update: Record<string, unknown>): AcpChildUpdate => ({
+    sessionId: 'kid',
+    announcement: false,
+    lineage: lineage(true),
+    update: frameworkCast<AcpChildUpdate['update']>(update),
+  });
+  const inputs = (events: Captured[]): unknown[] =>
+    events.filter((e) => e.type === 'h:item_appended' && e.scope).map((e) => e.data.item);
+
+  it('keeps one message per id, as the agent last left it, and shows it once', () => {
+    const { events, bridge: b } = started();
+    b.begin();
+    b.forwardChild(
+      message({
+        sessionUpdate: 'session_message',
+        messageId: 'm1',
+        senderSessionId: 'root',
+        recipientSessionId: 'kid',
+        content: [
+          {
+            type: 'text',
+            text: 'first draft',
+          },
+        ],
+      }),
+    );
+    // An edit replaces it; a metadata-only upsert keeps it, sender and recipient too.
+    b.forwardChild(
+      message({
+        sessionUpdate: 'session_message',
+        messageId: 'm1',
+        content: [
+          {
+            type: 'text',
+            text: 'Do it. ',
+          },
+          {
+            type: 'image',
+            mimeType: 'image/png',
+            data: 'AAAA',
+          },
+        ],
+      }),
+    );
+    b.forwardChild(
+      message({
+        sessionUpdate: 'session_message',
+        messageId: 'm1',
+        _meta: {
+          seen: true,
+        },
+      }),
+    );
+    b.forwardChild({
+      ...work('kid'),
+      lineage: lineage(true),
+    });
+    b.finalize(RESULT);
+    expect(inputs(events)).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: 'Do it. ',
+          },
+          {
+            type: 'input_image',
+            imageUrl: 'data:image/png;base64,AAAA',
+          },
+        ],
+      }),
+    ]);
+  });
+
+  it('builds a streamed message from its chunks, naming the call its id is', () => {
+    const { events, bridge: b } = started();
+    b.begin();
+    b.forward({
+      sessionId: 'root',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'toolu_agent',
+        title: 'Agent',
+        status: 'pending',
+      },
+    });
+    for (const text of [
+      'Count ',
+      'the files.',
+    ]) {
+      b.forwardChild(
+        message({
+          sessionUpdate: 'session_message_chunk',
+          messageId: 'toolu_agent',
+          senderSessionId: 'root',
+          recipientSessionId: 'kid',
+          content: {
+            type: 'text',
+            text,
+          },
+        }),
+      );
+    }
+    b.finalize(RESULT);
+    expect(events.find((e) => e.type === 'h:agent_started')?.data.callId).toBe('toolu_agent');
+    expect(inputs(events)).toEqual([
+      expect.objectContaining({
+        content: [
+          {
+            type: 'input_text',
+            text: 'Count ',
+          },
+          {
+            type: 'input_text',
+            text: 'the files.',
+          },
+        ],
+      }),
+    ]);
+  });
+
+  it("never shows the child's own message, or an empty one, as its input", () => {
+    const { events, bridge: b } = started();
+    b.begin();
+    b.forwardChild(
+      message({
+        sessionUpdate: 'session_message',
+        messageId: 'out',
+        senderSessionId: 'kid',
+        recipientSessionId: 'root',
+        content: [
+          {
+            type: 'text',
+            text: 'my report',
+          },
+        ],
+      }),
+    );
+    // Its upsert with neither id still names the child as its sender.
+    b.forwardChild(
+      message({
+        sessionUpdate: 'session_message',
+        messageId: 'out',
+        content: [
+          {
+            type: 'text',
+            text: 'my report, edited',
+          },
+        ],
+      }),
+    );
+    b.forwardChild(
+      message({
+        sessionUpdate: 'session_message',
+        messageId: 'blank',
+        senderSessionId: 'root',
+        recipientSessionId: 'kid',
+        content: null,
+      }),
+    );
+    b.finalize(RESULT);
+    expect(inputs(events)).toEqual([]);
+  });
+
+  it('answers false, never throws, when the session cannot stop it', async () => {
+    const harness = new AgentHarness({
+      name: 'h',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const events: Captured[] = [];
+    frameworkCast<{
+      _broadcaster: unknown;
+    }>(ctx)._broadcaster = {
+      emit(event: Captured) {
+        events.push(event);
+      },
+    };
+    const b = new AcpEventBridge(
+      {
+        id: 'step',
+      },
+      ctx,
+    );
+    b.offerChildStops(async () => {
+      throw new Error('the connection forgot it');
+    });
+    launch(b, true);
+    const scope = events.find((e) => e.type === 'h:agent_started')?.scope;
+    expect(await harness.stopAgent(scope?.id ?? '')).toBe(false);
+  });
+
+  it('offers no stop once the agent answered, while its calls still finish', async () => {
+    const { harness, events, bridge: b, stopped } = started();
+    launch(b, true);
+    const scope = events.find((e) => e.type === 'h:agent_started')?.scope;
+    b.withdrawChildStops();
+    expect(await harness.stopAgent(scope?.id ?? '')).toBe(false);
+    expect(stopped).toEqual([]);
   });
 
   it('stops one cancellable nested agent through the harness, while its turn runs', async () => {

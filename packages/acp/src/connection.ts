@@ -712,11 +712,11 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     const known = this.childInfo.get(child);
     const title = text('title', 'name') ?? known?.title;
     const description = text('description', 'task') ?? known?.description;
+    // The RFD: `cancel` as an object (`{}` too) grants it; omitted or null does not.
     const capabilities = fields.capabilities;
-    const cancellable =
-      typeof capabilities === 'object' && capabilities !== null
-        ? 'cancel' in capabilities
-        : known?.cancellable;
+    const cancellable = isRecord(capabilities)
+      ? typeof capabilities.cancel === 'object' && capabilities.cancel !== null
+      : known?.cancellable;
     this.childInfo.set(child, {
       sessionId: child,
       ...(cancellable === undefined

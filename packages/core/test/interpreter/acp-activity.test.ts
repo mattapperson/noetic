@@ -338,6 +338,20 @@ describe("an own call's input", () => {
         command: 'sleep 8',
       },
     });
+    // The same input with its keys in another order, and no input, are no change.
+    send(bridge, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'c1',
+      rawInput: {
+        run_in_background: true,
+        command: 'sleep 8',
+      },
+    });
+    send(bridge, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'c1',
+      rawInput: null,
+    });
     send(bridge, {
       sessionUpdate: 'tool_call_update',
       toolCallId: 'c1',
@@ -357,8 +371,8 @@ describe("an own call's input", () => {
         command: 'sleep 8',
       },
       {
-        command: 'sleep 8',
         run_in_background: true,
+        command: 'sleep 8',
       },
     ]);
     expect(named(events, 'tool_call_completed')).toHaveLength(1);

@@ -114,7 +114,7 @@ const agent = claudeCode({
 
 The wrapped command runs with exactly the `args`, `env` and `cwd` you return, with the same process-group shutdown, and with or without the keeper.
 
-`onSpawn` tells you of each agent the machine starts as its own child: `{ pid, exited }`, where `exited` settles once the process has exited. `pid` leads the agent's process group, so signal `-pid` to reach what it started; those processes may outlive `exited`. A kept agent is its keeper's child and is not reported. If `onSpawn` throws, the agent is stopped and the launch fails.
+`onLaunch` tells you of each agent the machine starts as its own child: `{ pid, exited }`, where `exited` settles once the process has exited. `pid` leads the agent's process group, so signal `-pid` to reach what it started; those processes may outlive `exited`. It needs `keeper: false`: a kept agent is its keeper's child and is not reported. The launch waits for a promise `onLaunch` returns; if it throws or rejects, the agent is stopped and the launch fails.
 
 ## Filesystem confinement
 
@@ -322,7 +322,7 @@ The question also shows up in `harness.pending()` and as a `tool_call_held` even
 
 An agent's subagents run in their own child sessions, and each shows up as a [nested agent](/docs/framework/runtime#nested-agents): its text, reasoning and tool calls reach `getFullStream()` with a `scope` naming it, framed by `agent_started`, `agent_status` and `agent_completed` events. They never reach the step's text, items or result, or `getTextStream()`.
 
-`agent_started` names the call that started the subagent (`callId`) when the agent's first message to it carries one of the turn's call ids, as Claude Code's does, and that message arrives as the nested agent's input: a scoped user message on `item_appended`. When the agent lets a client stop one subagent alone (`cancellable`), `harness.stopAgent(scope.id)` stops it while the turn goes on; it answers false once the subagent has stopped (`agent_status` `idle`) or its turn has ended.
+`agent_started` names the call that started the subagent (`callId`) when the agent's first message to it carries one of the turn's call ids, as Claude Code's does, and that message arrives as the nested agent's input: a scoped user message on `item_appended`. When the agent lets a client stop one subagent alone (`cancellable`), `harness.stopAgent(scope.id)` stops it while the turn goes on; it answers false once the subagent has stopped (`agent_status` `idle`), when the session can no longer reach it, or once the agent has answered the turn. It reaches only turns running in this process. The subagent's input is shown once, as it stands when the subagent starts on it.
 
 ## Giving the agent your tools
 
@@ -520,7 +520,7 @@ These are the same events a `callModel` step emits, with the same fields (see [T
 
 Every call that starts also completes before the turn closes — a call the agent never reported finished completes failed.
 
-**Turn metadata.** Like a `callModel` step, the turn a step accepts records `ctx.lastStepMeta.stopReason` (`end_turn`, `max_tokens` or `max_turn_requests`), `usage` (when the adapter supplies it) and `model` (the agent's current `model` option, else the one the step selected). A token or turn cap returns normally; `stopReason` is how you tell a truncated turn from a complete one. The protocol makes the usage an agent reports with its answer the session's running total, so nothing is charged from it unless the adapter's `usageOf` reads it: `claudeCode()` and `codex()` do (`turnUsage`), as both bridges report each turn's own tokens, with cache reads and writes left out of `inputTokens` and added back. A `usage_update` (Codex sends `{ used, size }`) is how full the agent's context window is, not tokens you were billed for, so it never becomes usage or cost.
+**Turn metadata.** Like a `callModel` step, the turn a step accepts records `ctx.lastStepMeta.stopReason` (`end_turn`, `max_tokens` or `max_turn_requests`), `usage` (when the adapter supplies it) and `model` (the agent's current `model` option, else the one the step selected). A token or turn cap returns normally; `stopReason` is how you tell a truncated turn from a complete one. The protocol makes the usage an agent reports with its answer the session's running total, so nothing is charged from it unless the adapter's `usageOf` reads it: `claudeCode()` and `codex()` do (`turnUsage`), as both bridges report each turn's own tokens, with cache reads and writes left out of `inputTokens` and added back (`cachedTokens` and `cacheWriteTokens` kept apart too). Pass `usageOf` to a preset to read them another way, or `usageOf: false` for a bridge that reports the session's running total. A `usage_update` (Codex sends `{ used, size }`) is how full the agent's context window is, not tokens you were billed for, so it never becomes usage or cost.
 
 **Loaded history.** When a step loads a session — `session.load`, or a resume after the host died — the agent replays the old conversation first. None of it reaches the event stream; it never appears as new text, reasoning, or tool calls.
 

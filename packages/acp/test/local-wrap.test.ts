@@ -181,7 +181,7 @@ describe('localMachine without wrap', () => {
   });
 });
 
-describe('localMachine onSpawn', () => {
+describe('localMachine onLaunch', () => {
   it('reports the agent it starts itself, and its exit once it is stopped', async () => {
     const spawned: Array<{
       pid: number;
@@ -190,7 +190,9 @@ describe('localMachine onSpawn', () => {
     const machine = await localMachine('tracked', {
       keeper: false,
       onStderr: () => undefined,
-      onSpawn: (agent) => spawned.push(agent),
+      onLaunch: (agent) => {
+        spawned.push(agent);
+      },
     })({});
     const transport = await machine.launch({
       command: process.execPath,
@@ -225,7 +227,9 @@ describe('localMachine onSpawn', () => {
     const spawned: number[] = [];
     const machine = await localMachine('kept', {
       onStderr: () => undefined,
-      onSpawn: (agent) => spawned.push(agent.pid),
+      onLaunch: (agent) => {
+        spawned.push(agent.pid);
+      },
     })({});
     const transport = await machine.launch({
       command: process.execPath,
@@ -239,13 +243,36 @@ describe('localMachine onSpawn', () => {
   });
 });
 
-describe('localMachine onSpawn that throws', () => {
+describe('localMachine onLaunch that throws', () => {
+  it('treats a rejected promise as a throw', async () => {
+    let pid: number | undefined;
+    const machine = await localMachine('rejects', {
+      keeper: false,
+      onStderr: () => undefined,
+      onLaunch: async (agent) => {
+        pid = agent.pid;
+        await Promise.resolve();
+        throw new Error('registry is down');
+      },
+    })({});
+    await expect(
+      machine.launch({
+        command: process.execPath,
+        args: [
+          FIXTURE,
+        ],
+      }),
+    ).rejects.toThrow('onLaunch');
+    expect(() => process.kill(pid ?? 0, 0)).toThrow();
+    await machine.close();
+  });
+
   it('stops the agent and fails the launch, leaving nothing running', async () => {
     let pid: number | undefined;
     const machine = await localMachine('throws', {
       keeper: false,
       onStderr: () => undefined,
-      onSpawn: (agent) => {
+      onLaunch: (agent) => {
         pid = agent.pid;
         throw new Error('registry is full');
       },
@@ -256,7 +283,7 @@ describe('localMachine onSpawn that throws', () => {
         FIXTURE,
       ],
     });
-    await expect(launching).rejects.toThrow('onSpawn');
+    await expect(launching).rejects.toThrow('onLaunch');
     expect(pid).toBeDefined();
     expect(() => process.kill(pid ?? 0, 0)).toThrow();
     await machine.close();

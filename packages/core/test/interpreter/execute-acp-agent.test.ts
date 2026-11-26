@@ -24,7 +24,7 @@ import type {
   AcpTurnResult,
   HeldCall,
   Item,
-  TokenUsage,
+  RoundUsage,
 } from '@noetic-tools/types';
 import {
   AcpCapabilityError,
@@ -45,7 +45,7 @@ interface FakeAgentOpts {
   agentId?: string;
   text?: string;
   items?: Item[];
-  usage?: TokenUsage | null;
+  usage?: RoundUsage | null;
   cost?: number;
   stopReason?: AcpStopReason;
   modes?: AcpSessionModeState;
@@ -115,9 +115,8 @@ function fakeAgent(opts: FakeAgentOpts = {}): AcpAgent {
               opts.usage === null
                 ? undefined
                 : (opts.usage ?? {
-                    input: 10,
-                    output: 5,
-                    total: 15,
+                    inputTokens: 10,
+                    outputTokens: 5,
                   }),
             cost: opts.cost,
             reportedUsage: opts.reportedUsage,
@@ -238,6 +237,35 @@ describe('executeAcpAgent', () => {
     assert(ctx.lastStepMeta);
     assert(ctx.lastStepMeta.usage);
     expect(ctx.lastStepMeta.usage.inputTokens).toBe(10);
+  });
+
+  it("charges the adapter's turn usage as a model round's, cache reads and writes included", async () => {
+    const { ctx } = harnessCtx();
+    await execute(
+      step.acpAgent({
+        id: 'cached',
+        agent: fakeAgent({
+          usage: {
+            inputTokens: 1000,
+            outputTokens: 50,
+            cachedTokens: 800,
+            cacheWriteTokens: 100,
+          },
+        }),
+        prompt: 'go',
+      }),
+      undefined,
+      ctx,
+    );
+    expect(ctx.tokens.input).toBe(1000);
+    expect(ctx.tokens.output).toBe(50);
+    expect(ctx.tokens.cached).toBe(800);
+    expect(ctx.lastStepMeta?.usage).toEqual({
+      inputTokens: 1000,
+      outputTokens: 50,
+      cachedTokens: 800,
+      cacheWriteTokens: 100,
+    });
   });
 
   it('records the stop reason and model a callModel step records', async () => {
