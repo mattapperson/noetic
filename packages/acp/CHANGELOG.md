@@ -1,3 +1,7 @@
+## @noetic-tools/acp-v2.0.0-next.8 (2026-11-26)
+
+* feat(acp): tell localMachine's wrap the variables the agent sets (#175) ([928c91f](https://github.com/mattapperson/noetic/commit/928c91f)), closes [#175](https://github.com/mattapperson/noetic/issues/175)
+
 ## @noetic-tools/acp-v2.0.0-next.7 (2026-11-26)
 
 * feat(acp): what a host that starts its own agents reads from noetic (#174) ([e21dfed](https://github.com/mattapperson/noetic/commit/e21dfed)), closes [#174](https://github.com/mattapperson/noetic/issues/174) [#171](https://github.com/mattapperson/noetic/issues/171)
