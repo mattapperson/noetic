@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/context",
-  "version": "2.0.0-next.3",
+  "version": "2.0.0-next.4",
   "type": "module",
   "description": "Context layer system for Noetic agents: the ContextLayer contract, lifecycle, budget/projection machinery, and built-in layer implementations.",
   "license": "Apache-2.0",
