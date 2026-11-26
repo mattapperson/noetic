@@ -21,6 +21,15 @@ export * from './types/context-layer';
 export * from './types/context-parts/item-log';
 export * from './types/context-parts/layer-usage';
 export * from './types/context-scope';
+export type {
+  ContextInputOrigin,
+  ContextObservation,
+  ContextRequest,
+  ContextStreamEvent,
+  ContextWindow,
+  LayerRecallEvent,
+  LayerWindow,
+} from './types/context-window';
 export * from './types/custom-item';
 export * from './types/decide';
 export * from './types/detached';

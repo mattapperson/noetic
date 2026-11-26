@@ -503,6 +503,9 @@ Each layer's `recallMode` controls whether its `recall()` blocks the model call:
 
 Both modes recall once per callModel step. The harness runs atomic layers (`recallLayersAtomic`) and eventual layers (`recallLayersEventual`) and merges the two result sets in slot order.
 
+The runtime publishes layer updates as recall or re-render finishes, before assembling the request. Layer authors use the same hooks for built-in and custom layers. Each observation carries the layer's ID, display name, configured recall mode, and the last successful render time for its displayed output. Cache hits keep that time. A pending flag indicates a recall in progress or an outstanding refresh. A re-render that returns no result preserves the layer's preceding contribution. A final request event records the context that survived assembly and conversion.
+
+
 A harness configured with `forceAtomicRecall: true` treats **every** layer as atomic regardless of its `recallMode` — the eventual cache is bypassed entirely.
 
 ### Peek

@@ -2,6 +2,7 @@ import type { ZodType } from 'zod';
 import type { LLMResponse } from './common';
 import type { ItemLog } from './context-parts/item-log';
 import type { ContextScope, ExecutionContext, ExecutionOutcome } from './context-scope';
+import type { LayerRecallEvent } from './context-window';
 import type { DecisionRecord } from './decide';
 import type { Item, ItemSchemaExtensions } from './items';
 import type {
@@ -417,6 +418,8 @@ export interface RecallOptions {
    * drains state (such as queued steering guidance) meant for the next model call.
    */
   peek?: boolean;
+  /** @internal Observe this pass independently of whether recall may commit state. */
+  observe?: (event: LayerRecallEvent) => void;
 }
 
 /** @public Parameters for the `onDecision` hook. */

@@ -8,6 +8,7 @@ import type {
   LayerTraceSpan,
   LLMResponse,
   OnSteerParams,
+  RecallOptions,
   RecallResult,
   ScopedStorage,
   SteeringDecision,
@@ -99,9 +100,10 @@ interface InitLayersParams {
    * otherwise overwrite with a fresh start.
    */
   keep?: boolean;
+  readOnly?: boolean;
 }
 
-interface RecallLayersParams {
+interface RecallLayersParams extends RecallOptions {
   layers: ContextLayer[];
   query: string;
   ctx: ExecutionContext;
@@ -109,8 +111,6 @@ interface RecallLayersParams {
   budgets: Map<string, number>;
   store: LayerStateStore;
   itemSchemas?: ItemSchemaRegistry;
-  /** Render without committing returned state. See `RecallOptions.peek`. */
-  peek?: boolean;
 }
 
 interface StoreLayersParams {
@@ -232,7 +232,7 @@ interface RunAppendPipelineParams {
   store: LayerStateStore;
 }
 
-interface ExecuteRerenderParams {
+interface ExecuteRerenderParams extends RecallOptions {
   requests: RerenderRequest[];
   layers: ContextLayer[];
   ctx: ExecutionContext;
@@ -427,6 +427,7 @@ interface RecallCacheEntry {
   layerId: string;
   items: Item[];
   tokenCount: number;
+  renderedAt?: number;
 }
 
 /**
@@ -438,6 +439,18 @@ interface RecallCacheEntry {
 export interface RecallCache {
   entries: Map<string, RecallCacheEntry>;
   stale: Set<string>;
+  onStale?: (layer: ContextLayer, ctx: ExecutionContext) => void;
+}
+
+const activeRefreshes = new WeakMap<RecallCache, Map<string, symbol>>();
+
+function refreshesOf(cache: RecallCache): Map<string, symbol> {
+  let active = activeRefreshes.get(cache);
+  if (!active) {
+    active = new Map();
+    activeRefreshes.set(cache, active);
+  }
+  return active;
 }
 
 export function createRecallCache(): RecallCache {
@@ -455,7 +468,24 @@ export function createRecallCache(): RecallCache {
  * correct since its state does not persist either.
  */
 function recallCacheKey(layer: ContextLayer, ctx: ExecutionContext): string {
-  return `${resolveScopeKey(layer.scope, ctx)}:${layer.id}`;
+  return JSON.stringify([
+    layer.scope,
+    resolveScopeKey(layer.scope, ctx),
+    layer.id,
+  ]);
+}
+
+function markRecallStale(
+  cache: RecallCache | undefined,
+  layer: ContextLayer,
+  ctx: ExecutionContext,
+): void {
+  if (layer.recallMode === 'eventual' && cache) {
+    const key = recallCacheKey(layer, ctx);
+    cache.stale.add(key);
+    activeRefreshes.get(cache)?.delete(key);
+  }
+  cache?.onStale?.(layer, ctx);
 }
 
 //#endregion
@@ -541,6 +571,7 @@ export async function initLayers({
   storage,
   store,
   keep = false,
+  readOnly = false,
 }: InitLayersParams): Promise<void> {
   // Sequential, array order
   for (const layer of layers) {
@@ -580,12 +611,14 @@ export async function initLayers({
     }
   }
 
-  registerDurableTargets({
-    layers,
-    ctx,
-    storage,
-    store,
-  });
+  if (!readOnly) {
+    registerDurableTargets({
+      layers,
+      ctx,
+      storage,
+      store,
+    });
+  }
 }
 
 /**
@@ -634,6 +667,7 @@ export async function recallLayers({
   store,
   itemSchemas = defaultItemSchemaRegistry,
   peek = false,
+  observe,
 }: RecallLayersParams): Promise<RecallEntry[]> {
   const sorted = [
     ...layers,
@@ -656,12 +690,22 @@ export async function recallLayers({
       if (!peek) {
         await traceSkipped(ctx, layer.id, 'recall');
       }
-      continue; // was disabled
+      observe?.({
+        layer,
+        source: 'fresh',
+        outcome: 'disabled',
+      });
+      continue;
     }
     // Skipping the write is not enough for a peek: a hook may mutate the
     // stored object in place (steering splices its queue), so it gets a copy.
     const state = peek ? copyForPeek(stored) : stored;
     if (peek && state === PEEK_UNSAFE) {
+      observe?.({
+        layer,
+        source: 'fresh',
+        outcome: 'unpeekable',
+      });
       continue;
     }
 
@@ -676,8 +720,12 @@ export async function recallLayers({
         budget,
       });
     const timeout = layer.timeouts?.recall ?? 5e3;
+    observe?.({
+      layer,
+      source: 'fresh',
+      outcome: 'running',
+    });
     try {
-      // A peek renders without leaving a trace, so it records no event either.
       const result = peek
         ? await withTimeout(run(), timeout)
         : await callHook({
@@ -689,33 +737,48 @@ export async function recallLayers({
             measure: (output) => measureRecall(output, budget),
           });
       if (!result) {
-        continue;
-      }
-      const layerSchemas = layerItemSchemas(layer, itemSchemas);
-      if (typeof result === 'string') {
-        results.push({
-          layerId: layer.id,
-          items: [
-            layerSchemas.parseWithCategory(createMessage(result, 'developer'), 'developerMessages'),
-          ],
-          tokenCount: estimateTokens(result),
+        observe?.({
+          layer,
+          source: 'fresh',
+          outcome: 'no-result',
+          at: Date.now(),
         });
         continue;
       }
-      // Returning state means the render changed something, so it cannot be
-      // replayed from a pin — flag it so view assembly never anchors it.
-      const mutatedState = result.state !== undefined;
-      results.push({
-        layerId: layer.id,
-        items: layerSchemas.parseMany(result.items),
-        tokenCount: result.tokenCount,
-        mutatedState,
-      });
-      if (mutatedState && !peek) {
+      const schemas = layerItemSchemas(layer, itemSchemas);
+      const entry: RecallEntry =
+        typeof result === 'string'
+          ? {
+              layerId: layer.id,
+              items: [
+                schemas.parseWithCategory(createMessage(result, 'developer'), 'developerMessages'),
+              ],
+              tokenCount: estimateTokens(result),
+            }
+          : {
+              layerId: layer.id,
+              items: schemas.parseMany(result.items),
+              tokenCount: result.tokenCount,
+              mutatedState: result.state !== undefined,
+            };
+      if (typeof result !== 'string' && entry.mutatedState && !peek) {
         store.set(ctx.executionId, layer.id, result.state);
       }
+      results.push(entry);
+      observe?.({
+        layer,
+        source: 'fresh',
+        outcome: entry.items.length ? 'items' : 'empty',
+        items: entry.items,
+        at: Date.now(),
+      });
     } catch (e) {
       store.diagnostic(layer.id, 'recall', e);
+      observe?.({
+        layer,
+        source: 'fresh',
+        outcome: 'failed',
+      });
     }
   }
 
@@ -813,11 +876,11 @@ export async function recallLayersEventual({
   for (const layer of eventualLayers) {
     const key = recallCacheKey(layer, params.ctx);
     const cached = cache.entries.get(key);
-    const isStale = cache.stale.has(key);
+    const stale = cache.stale.has(key);
 
     // A peek renders a cold or stale layer but leaves the cache as it found it,
     // so the next real recall still sees the entry as needing a render.
-    if (params.peek && (!cached || isStale)) {
+    if (params.peek && (!cached || stale)) {
       results.push(
         ...(await recallLayers({
           ...params,
@@ -829,26 +892,59 @@ export async function recallLayersEventual({
       continue;
     }
 
-    if (!cached || isStale) {
-      const recalled = await recallLayers({
-        ...params,
-        layers: [
-          layer,
-        ],
-      });
-      for (const entry of recalled) {
-        cache.entries.set(key, entry);
-        results.push(entry);
+    if (!cached || stale) {
+      const refresh = Symbol();
+      const active = refreshesOf(cache);
+      active.set(key, refresh);
+      let renderedAt: number | undefined;
+      try {
+        const recalled = await recallLayers({
+          ...params,
+          observe: (event) => {
+            renderedAt = event.at ?? renderedAt;
+            params.observe?.({
+              ...event,
+              pendingUpdate: active.get(key) !== refresh,
+            });
+          },
+          layers: [
+            layer,
+          ],
+        });
+        results.push(...recalled);
+        if (renderedAt !== undefined && active.get(key) === refresh) {
+          cache.stale.delete(key);
+          if (recalled[0]) {
+            cache.entries.set(key, {
+              ...recalled[0],
+              renderedAt,
+            });
+          } else {
+            cache.entries.delete(key);
+          }
+        }
+      } finally {
+        if (active.get(key) === refresh) {
+          active.delete(key);
+        }
       }
-      cache.stale.delete(key);
       continue;
     }
 
     // Serving from cache commits nothing, so the flag from the render that
     // populated it must not ride along — it would force the layer out of the
     // anchor band for good, on turns where its recall never even ran.
+    params.observe?.({
+      layer,
+      source: 'cache',
+      outcome: cached.items.length ? 'items' : 'empty',
+      items: cached.items,
+      at: cached.renderedAt,
+    });
     results.push({
-      ...cached,
+      layerId: cached.layerId,
+      items: cached.items,
+      tokenCount: cached.tokenCount,
       mutatedState: false,
     });
   }
@@ -918,9 +1014,7 @@ export async function storeLayers({
           store.set(ctx.executionId, layer.id, result.state);
           // Invalidate this layer's eventual-recall cache so the next turn
           // re-runs recall() against the freshly stored state.
-          if (recallCache && layer.recallMode === 'eventual') {
-            recallCache.stale.add(recallCacheKey(layer, ctx));
-          }
+          markRecallStale(recallCache, layer, ctx);
         }
       } catch (e) {
         store.diagnostic(layer.id, 'store', e);
@@ -986,9 +1080,7 @@ export async function notifyDecision({
       });
       if (result && 'state' in result) {
         store.set(ctx.executionId, layer.id, result.state);
-        if (recallCache && layer.recallMode === 'eventual') {
-          recallCache.stale.add(recallCacheKey(layer, ctx));
-        }
+        markRecallStale(recallCache, layer, ctx);
       }
     } catch (e) {
       store.diagnostic(layer.id, 'onDecision', e);
@@ -1639,6 +1731,7 @@ export async function executeRerender({
   itemSchemas,
   query = '',
   depth = 0,
+  observe,
 }: ExecuteRerenderParams): Promise<
   {
     layerId: string;
@@ -1697,6 +1790,7 @@ export async function executeRerender({
     budgets,
     store,
     itemSchemas,
+    observe,
   });
 }
 

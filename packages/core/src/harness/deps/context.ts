@@ -14,6 +14,7 @@ export {
   executeRerender,
   exportSpans,
   initLayers,
+  lineageKey,
   notifyDecision,
   onSteerLayers,
   projectHistoryLayers,
@@ -21,6 +22,7 @@ export {
   recallLayersAtomic,
   recallLayersEventual,
   resolveLayerTools,
+  resolveScopeKey,
   runAppendPipeline,
   storeLayers,
 } from '@noetic-tools/context';

@@ -1,11 +1,13 @@
+import type { ContextObservation, ContextStreamEvent, ContextWindow } from '@noetic-tools/types';
 import type { HeldAnswerRequest } from '../runtime/held-calls';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
 import { ConnectionGate } from './connection-gate';
+import { previewContext } from './context-preview';
+import { ContextStreams } from './context-stream';
 import type { LayerStateStore, RecallCache } from './deps/context';
 import {
   afterModelCallLayers,
   allocateBudgets,
-  assembleView,
   beforeToolCallLayers,
   completeLayers,
   contextToExecCtx,
@@ -33,7 +35,6 @@ import {
   dispatchStepThroughAdapter,
   execute,
   isRootRunning,
-  prepareBandedView,
   runRootOf,
   toStep,
 } from './deps/interpreter';
@@ -346,6 +347,8 @@ export class AgentHarness<
   private readonly layerPlans: ReturnType<typeof harnessLayerStore>['plans'];
   /** Per-harness memoization cache for `recallMode: 'eventual'` layers. */
   readonly recallCache: RecallCache;
+  private readonly contextStreams = new ContextStreams((id) => this.sessions.has(id));
+  private readonly ownContextRoots = new WeakSet<Context>();
   /** Per-harness pinned anchor output and epoch bookkeeping, keyed by cache lineage. */
   readonly contextCache: ContextCacheStore;
   /**
@@ -458,6 +461,9 @@ export class AgentHarness<
     this.layerPlans = layers.plans;
 
     this.recallCache = createRecallCache();
+    this.recallCache.onStale = (layer, ctx) => {
+      this.contextStreams.stale(layer, ctx);
+    };
     this.contextCache = createContextCacheStore();
     this.defaultDeliveryMode = opts.defaultDeliveryMode ?? 'next-turn';
     this.itemSchemas = harnessItemSchemas(this.agentGraph, opts.itemSchemas);
@@ -586,6 +592,7 @@ export class AgentHarness<
    * @public
    */
   async close(): Promise<void> {
+    this.contextStreams.close();
     this.storedSessions.parkWatchers?.stopAll();
     await closeHarness(this, [
       ...[
@@ -883,6 +890,54 @@ export class AgentHarness<
   ): AsyncIterable<StreamEvent | CustomItemStreamEvent<DeclaredItems<TItem>>> {
     const session = this.requireSession(scope);
     return session.runner.broadcaster;
+  }
+
+  /** Observe layer recall and request handoff for one thread. */
+  getContextStream(scope?: SessionScope): AsyncIterable<ContextStreamEvent> {
+    return this.contextStreams.stream(scope?.threadId ?? DEFAULT_THREAD_ID);
+  }
+
+  /** Read the latest observation or render a new, isolated preview. */
+  async getCurrentContext(render?: true, scope?: SessionScope): Promise<ContextWindow | undefined> {
+    const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
+    if (!render) {
+      return this.contextStreams.current(threadId);
+    }
+    const session = this.sessions.get(threadId);
+    const active =
+      session?.runner.context ??
+      [
+        ...this.liveRoots.values(),
+      ].find(({ ctx }) => ctx.threadId === threadId)?.ctx;
+    const record = session?.record ?? this.storedSessions.record(threadId);
+    const ctx =
+      active ??
+      this.createContext({
+        items: [
+          ...((await record?.history()) ?? session?.accumulatedItems ?? []),
+        ],
+        threadId,
+        _preview: true,
+      });
+    return previewContext({
+      ctx,
+      liveState: active ? this.layerStateStore : undefined,
+      cache: this.contextCache,
+      storage: this.config.storage,
+      schemas: buildItemSchemaRegistry({
+        base: this.itemSchemas,
+        layers: ctx.layers,
+      }),
+    });
+  }
+
+  /** @internal Start recording a model-bound context assembly. */
+  _observeContext(ctx: Context, stepId: string): ContextObservation | undefined {
+    const root = this.liveRoots.get(rootIdOf(ctx))?.ctx ?? ctx;
+    if (this.ownContextRoots.has(root) && root.threadId === ctx.threadId) {
+      this.ownThreads.add(root.threadId);
+    }
+    return this.contextStreams.begin(ctx, stepId);
   }
 
   async abort(scope?: SessionScope & CancelOptions): Promise<DrainReport | undefined> {
@@ -1533,6 +1588,7 @@ export class AgentHarness<
       dropThread: (threadId) => {
         this.storedSessions.parkWatchers?.stop(threadId);
         this.sessions.delete(threadId);
+        this.contextStreams.drop(threadId);
       },
       layerIds: () => this.layerIds(),
       releaseConnections: (executionId) => this.#connections.registry.releaseRun(executionId),
@@ -2033,6 +2089,7 @@ export class AgentHarness<
     this.stopRecording.delete(threadId);
     this.outputs.delete(threadId);
     this.sessions.delete(threadId);
+    this.contextStreams.drop(threadId);
   }
 
   /**
@@ -2191,12 +2248,14 @@ export class AgentHarness<
     cwdInit?: string;
     /** View layers for the connections the turn attaches, after the harness's own. */
     _connectionViews?: ContextLayer[];
+    _preview?: true;
     _broadcaster?: EventBroadcaster;
   }): Context {
     const resolved = opts ?? {};
     // `ContextImpl` takes the layers as `layers`, so the option spelling is
     // dropped from `rest` rather than spread through under the wrong name.
-    const { contextLayers, extraContextLayers, cwdInit, _connectionViews, ...rest } = resolved;
+    const { contextLayers, extraContextLayers, cwdInit, _connectionViews, _preview, ...rest } =
+      resolved;
     const configuredLayers = contextLayers ?? this._contextLayers;
     const views = [
       ...this.#connections.views,
@@ -2224,18 +2283,19 @@ export class AgentHarness<
      * can be keyed to it — the ledger's storage keys and `ctx.id` must agree for a
      * later `restore()` to find what this run recorded. */
     const executionId = crypto.randomUUID();
-    const ledger = this.stepLedgerStore
-      ? new StepLedger({
-          executionId,
-          store: this.stepLedgerStore,
-          retention: this.stepLedgerRetention,
-        })
-      : undefined;
+    const ledger =
+      !_preview && this.stepLedgerStore
+        ? new StepLedger({
+            executionId,
+            store: this.stepLedgerStore,
+            retention: this.stepLedgerRetention,
+          })
+        : undefined;
     ledger?.runAs(this.version);
-    return new ContextImpl({
+    const ctx = new ContextImpl({
       ...rest,
       id: executionId,
-      ...this.interactiveThread(resolved, executionId),
+      ...(!_preview && this.interactiveThread(resolved, executionId)),
       harness: this,
       channelStore: this.channelStore,
       layers: effectiveLayers,
@@ -2246,6 +2306,10 @@ export class AgentHarness<
       checkpointFn: (c) => this.checkpoint(c),
       ledger,
     });
+    if (!_preview && !opts?.parent && opts?.threadId === undefined && !opts?._broadcaster) {
+      this.ownContextRoots.add(ctx);
+    }
+    return ctx;
   }
 
   /**
@@ -2415,7 +2479,7 @@ export class AgentHarness<
         store: this.layerStateStore,
         itemSchemas: this.itemSchemas,
         forceAtomic: this.config.forceAtomicRecall,
-        peek: opts?.peek,
+        ...opts,
       }),
     );
   }
@@ -2439,80 +2503,15 @@ export class AgentHarness<
         itemSchemas: this.itemSchemas,
         forceAtomic: this.config.forceAtomicRecall,
         cache: this.recallCache,
-        peek: opts?.peek,
+        ...opts,
       }),
     );
   }
 
-  /**
-   * Compute the items array that would be sent to the model on the next turn —
-   * the same arrangement `executeLLM` builds: harness-level context layers'
-   * recall outputs concatenated with the session's accumulated history.
-   *
-   * Runs layer `init` on the throwaway preview context first — exactly what
-   * the next real turn's `ensureLayersInit` would do, re-hydrating thread/
-   * resource-scoped state from storage. Without it, every init-bearing layer
-   * is treated as disabled by the recall lifecycle and the preview silently
-   * degenerates to bare history. The preview execution's store entries are
-   * dropped afterwards so repeated previews don't grow the layer-state store.
-   */
+  /** Render a read-only preview and return its projected items. */
   async previewRequestItems(scope?: SessionScope): Promise<ReadonlyArray<Item>> {
-    const threadId = scope?.threadId ?? DEFAULT_THREAD_ID;
-    // Read-only: if the session doesn't exist, treat history as empty rather
-    // than allocating a SessionRunner for a debug/preview call.
-    const existingSession = this.sessions.get(threadId);
-    const record = existingSession?.record ?? this.storedSessions.record(threadId);
-    const historyItems: Item[] = record
-      ? await record.history()
-      : [
-          ...(existingSession?.accumulatedItems ?? []),
-        ];
-    const ctx = this.createContext({
-      items: historyItems,
-      threadId,
-      contextLayers: this._contextLayers,
-    });
-    const layers = ctx.layers ?? [];
-    if (layers.length === 0) {
-      return historyItems;
-    }
-    try {
-      await this.ensureLayersInit(ctx);
-      const recallResults = await this.recallLayers(layers, '', ctx);
-      // Band the output the way a real turn would, but read-only: a preview
-      // must not pin, count churn, or age the epoch, or looking at a
-      // conversation would change what the next turn sends.
-      const banded = await prepareBandedView({
-        recallResults,
-        layers,
-        execCtx: contextToExecCtx(ctx),
-        store: this.contextCache,
-        config: this.config.contextCache,
-        instructions: undefined,
-        policy: this.config.projection ?? DEFAULT_PROJECTION,
-        systemPromptItems: [],
-        budgets: new Map(),
-        readOnly: true,
-      });
-      if (
-        banded.anchorItems.length === 0 &&
-        banded.liveItems.length === 0 &&
-        banded.deltaItems.length === 0
-      ) {
-        return historyItems;
-      }
-      return assembleView({
-        systemPromptItems: [],
-        layerOutputItems: banded.anchorItems,
-        historyItems,
-        liveLayerItems: banded.liveItems,
-        deltaItems: banded.deltaItems,
-      });
-    } finally {
-      await this.layerStateStore.flush?.(ctx.id);
-      this.layerStateStore.cleanup(ctx.id);
-      this.initializedExecutions.delete(ctx.id);
-    }
+    const preview = await this.getCurrentContext(true, scope);
+    return preview?.items ?? [];
   }
 
   async storeLayers(layers: ContextLayer[], response: LLMResponse, ctx: Context): Promise<void> {
@@ -3000,6 +2999,7 @@ export class AgentHarness<
     ctx: Context,
     budgets: Map<string, number>,
     query?: string,
+    opts?: RecallOptions,
   ): Promise<
     {
       layerId: string;
@@ -3016,6 +3016,7 @@ export class AgentHarness<
       store: this.layerStateStore,
       query,
       itemSchemas: this.itemSchemas,
+      observe: opts?.observe,
     });
   }
 }

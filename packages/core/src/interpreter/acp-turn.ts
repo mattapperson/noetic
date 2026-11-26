@@ -208,6 +208,7 @@ export async function runTurn<TContext, I, O>(params: {
   tools: AcpToolRunner | undefined;
   turnError: TurnError;
   content: AcpContentBlock[];
+  onPrompt?: (content: AcpContentBlock[]) => void;
   /**
    * Collect the turn an earlier host left running on a reattached session
    * before prompting; prompt only when no turn was running.
@@ -238,12 +239,17 @@ export async function runTurn<TContext, I, O>(params: {
             signal,
           })
         : undefined;
-    result =
-      collected ??
-      (await session.prompt({
+    if (collected) {
+      result = collected;
+    } else {
+      if (!signal?.aborted) {
+        params.onPrompt?.(params.content);
+      }
+      result = await session.prompt({
         content: params.content,
         signal,
-      }));
+      });
+    }
   } catch (e) {
     bridge.withdrawChildStops();
     await settle(tools);

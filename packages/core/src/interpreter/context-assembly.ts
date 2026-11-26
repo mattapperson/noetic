@@ -4,8 +4,10 @@ import type {
   ContextCacheStore,
   ContextEpoch,
   ContextLayer,
+  ContextObservation,
   EpochUsage,
   ExecutionContext,
+  InputMessageItem,
   Item,
   ProjectionPolicy,
   ReanchorReason,
@@ -16,6 +18,7 @@ import { NoeticAttr } from '../observability/genai-attributes';
 import type { LayerServeInfo } from './action-deps';
 import {
   allocateBudgets,
+  assembleView,
   churnFor,
   churnRate,
   lineageKey,
@@ -44,6 +47,7 @@ export interface BandedView {
   liveItems: Item[];
   /** At most one developer message superseding stale anchors. */
   deltaItems: Item[];
+  deltaLayers?: string[];
   /** Per-layer output as actually served, for the usage breakdown. */
   servedPerLayer: RecallLayerOutput[];
   serveInfo: Map<string, LayerServeInfo>;
@@ -155,10 +159,49 @@ export async function prepareBandedView(params: PrepareBandedViewParams): Promis
     anchorItems: banded.anchorItems,
     liveItems: banded.liveItems,
     deltaItems,
+    deltaLayers: rendered.layerIds,
     servedPerLayer: banded.servedPerLayer,
     serveInfo: banded.serveInfo,
     epoch: summarize(epoch, banded.liveTokens, deltaTokens),
   };
+}
+
+/** Assemble the model's history and layer bands, keeping steering at the tail. */
+export function assembleModelItems({
+  history,
+  banded,
+  policy,
+  steeringTail = [],
+}: {
+  history: ReadonlyArray<Item>;
+  banded: BandedView;
+  policy: ProjectionPolicy;
+  steeringTail?: InputMessageItem[];
+}): Item[] {
+  const systemItems: Item[] = [];
+  const nonSystemHistory: Item[] = [];
+  const tailIds = new Set(steeringTail.map((i) => i.id));
+  for (const item of history) {
+    if (item.type === 'message' && item.role === 'system') {
+      systemItems.push(item);
+      continue;
+    }
+    // Steering guidance is re-placed at the tail; skip it here so the retry
+    // does not see the same correction twice.
+    if ('id' in item && typeof item.id === 'string' && tailIds.has(item.id)) {
+      continue;
+    }
+    nonSystemHistory.push(item);
+  }
+  return assembleView({
+    systemPromptItems: systemItems,
+    layerOutputItems: banded.anchorItems,
+    historyItems: nonSystemHistory,
+    liveLayerItems: banded.liveItems,
+    deltaItems: banded.deltaItems,
+    tailItems: steeringTail,
+    policy,
+  });
 }
 
 /**
@@ -580,6 +623,7 @@ async function buildDeltaItems(
 ): Promise<{
   items: Item[];
   undescribed: boolean;
+  layerIds?: string[];
 }> {
   if (stale.length === 0) {
     return {
@@ -589,6 +633,7 @@ async function buildDeltaItems(
   }
 
   const blocks: string[] = [];
+  const layerIds: string[] = [];
   let undescribed = false;
   for (const entry of stale) {
     const body = await renderBody(entry, ctx);
@@ -599,6 +644,7 @@ async function buildDeltaItems(
       undescribed = true;
       continue;
     }
+    layerIds.push(entry.layer.id);
     blocks.push(`<update layer="${entry.layer.id}" action="${entry.action}">\n${body}\n</update>`);
   }
   if (blocks.length === 0) {
@@ -621,6 +667,7 @@ async function buildDeltaItems(
       createMessage(text, 'developer'),
     ],
     undescribed,
+    layerIds,
   };
 }
 
@@ -809,13 +856,23 @@ export async function gatherRecallResults(params: {
   budgetMap: Map<string, number>;
   slotOf: Map<string, number>;
   rerenderRequests: ContextRerenderRequest[];
+  observation?: ContextObservation;
 }): Promise<ReadonlyArray<RecallLayerOutput>> {
-  const { ctx, layers, recallQuery, budgetMap, slotOf, rerenderRequests } = params;
+  const { ctx, layers, recallQuery, budgetMap, slotOf, rerenderRequests, observation } = params;
   if (layers === undefined || layers.length === 0) {
     return emptyRecall;
   }
-  const atomic = await ctx.harness.recallLayersAtomic(layers, recallQuery, ctx, budgetMap);
-  const eventual = await ctx.harness.recallLayersEventual(layers, recallQuery, ctx, budgetMap);
+  const opts = {
+    observe: observation?.layer,
+  };
+  const atomic = await ctx.harness.recallLayersAtomic(layers, recallQuery, ctx, budgetMap, opts);
+  const eventual = await ctx.harness.recallLayersEventual(
+    layers,
+    recallQuery,
+    ctx,
+    budgetMap,
+    opts,
+  );
   let recallResults: ReadonlyArray<RecallLayerOutput> = [
     ...atomic,
     ...eventual,
@@ -828,6 +885,9 @@ export async function gatherRecallResults(params: {
       ctx,
       budgetMap,
       recallQuery,
+      {
+        observe: observation && ((event) => observation.layer(event, 'rerender')),
+      },
     );
     recallResults = mergeRecallResults(
       [

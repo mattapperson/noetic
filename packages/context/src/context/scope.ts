@@ -7,7 +7,10 @@ import type {
 
 import { storageGetMany } from './storage-batch';
 
-export function resolveScopeKey(scope: ContextScope, ctx: ExecutionContext): string {
+export function resolveScopeKey(
+  scope: ContextScope,
+  ctx: Pick<ExecutionContext, 'threadId' | 'resourceId' | 'executionId'>,
+): string {
   switch (scope) {
     case 'thread':
       return ctx.threadId;

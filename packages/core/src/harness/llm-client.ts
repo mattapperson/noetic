@@ -282,6 +282,14 @@ export class LlmGateway {
     callModel: (request: CallModelRequest) => Promise<LLMResponse>,
   ): Promise<DecideResponse> {
     if (this.#options.decideOverride) {
+      if (!request.signal?.aborted) {
+        request._contextObservation?.request({
+          target: 'decide-override',
+          model: request.model,
+          state: request.state,
+          instructions: request.instructions,
+        });
+      }
       return this.#options.decideOverride(request);
     }
     return callDecide(request, {

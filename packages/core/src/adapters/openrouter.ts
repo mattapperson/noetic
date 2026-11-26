@@ -249,13 +249,17 @@ function agentImageText(item: Item): string | undefined {
 }
 
 /** @internal Converts Noetic Items to OpenRouter SDK input format. */
-export function itemsToInput(items: ReadonlyArray<Item>): OpenRouterInputItem[] {
+export function itemsToInput(
+  items: ReadonlyArray<Item>,
+  onInput?: (item: Item, index: number) => void,
+): OpenRouterInputItem[] {
   const result: OpenRouterInputItem[] = [];
   for (const item of items) {
     const inputItem = itemToInputItem(item);
     if (!inputItem) {
       continue;
     }
+    onInput?.(item, result.length);
     result.push(inputItem);
   }
   return result;

@@ -12,6 +12,12 @@ import type {
   RecallOptions,
   StorageAdapter,
 } from './context-layer';
+import type {
+  ContextInputOrigin,
+  ContextObservation,
+  ContextStreamEvent,
+  ContextWindow,
+} from './context-window';
 import type { DetachedHandle } from './detached';
 import type {
   HarnessJudgmentContract,
@@ -152,6 +158,14 @@ interface CallModelRequestBase {
    * `decide()` estimate, which must not stream into or record against the step.
    */
   _billTo?: Context;
+  /** @internal */
+  _contextObservation?: ContextObservation;
+  /** @internal */
+  _decisionSample?: number;
+  /** @internal Steering attempt within this context assembly. */
+  _contextAttempt?: number;
+  /** @internal Context contributors indexed by the original item object. */
+  _contextOrigins?: ReadonlyMap<Item, Pick<ContextInputOrigin, 'layerIds' | 'placement'>>;
   /** Optional signal for cancelling the in-flight call (used by session abort). */
   signal?: AbortSignal;
   /**
@@ -442,6 +456,10 @@ export interface AgentHarnessContract<
   getReasoningStream(scope?: SessionScope): AsyncIterable<string>;
   /** Yields all raw stream events (SDK + framework) for the session. */
   getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
+  getContextStream(scope?: SessionScope): AsyncIterable<ContextStreamEvent>;
+  getCurrentContext(render?: true, scope?: SessionScope): Promise<ContextWindow | undefined>;
+  /** @internal */
+  _observeContext?(ctx: Context, stepId: string): ContextObservation | undefined;
 
   /**
    * Cancel the in-flight turn, if any. Queued messages are preserved — the
@@ -645,6 +663,7 @@ export interface AgentHarnessContract<
     ctx: Context,
     budgets: Map<string, number>,
     query?: string,
+    opts?: RecallOptions,
   ): Promise<RecallLayerOutput[]>;
 }
 

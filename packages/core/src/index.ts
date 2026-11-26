@@ -588,8 +588,13 @@ export type { LayerTraceSpan, Span, TraceExporter } from '@noetic-tools/types';
 /** @public */
 export type {
   AgentScope,
+  ContextInputOrigin,
+  ContextRequest,
+  ContextStreamEvent,
+  ContextWindow,
   FrameworkStreamEvent,
   HarnessResponse,
+  LayerWindow,
   SdkStreamEvent,
   StreamEvent,
   StreamingItem,

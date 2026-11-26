@@ -12,7 +12,11 @@ export {
   reconcileResumedConnections,
   runRootOf,
 } from '../../interpreter/connection-steps';
-export { prepareBandedView } from '../../interpreter/context-assembly';
+export {
+  assembleModelItems,
+  computeBudgetMap,
+  prepareBandedView,
+} from '../../interpreter/context-assembly';
 export { collectCustomItems } from '../../interpreter/emit-items';
 export { execute, isRootRunning } from '../../interpreter/execute';
 export type { DetachedSpawnOverrides } from '../../interpreter/step-dispatcher';
