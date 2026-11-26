@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.16 (2026-11-26)
+
+* feat(core): stream context windows from the harness (#181) ([1695950](https://github.com/mattapperson/noetic/commit/1695950)), closes [#181](https://github.com/mattapperson/noetic/issues/181)
+
 ## @noetic-tools/core-v5.22.0-next.15 (2026-11-26)
 
 * feat(core): retry held answers, report what still fails, take typed answers (#178) ([20f4a4b](https://github.com/mattapperson/noetic/commit/20f4a4b)), closes [#178](https://github.com/mattapperson/noetic/issues/178)
