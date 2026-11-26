@@ -26,6 +26,11 @@ interface Told {
   readonly id?: string;
 }
 
+/** A context, held weakly where the runtime can (not every one has `WeakRef`). */
+interface HeldContext {
+  deref(): Context | undefined;
+}
+
 /**
  * One execution whose layers keep a plan: where to tell it, and which layers.
  * The context is held weakly, so a finished execution's context — its item
@@ -33,7 +38,7 @@ interface Told {
  * the context does, or when the execution's layers are cleaned up.
  */
 interface Watched {
-  readonly ctx: WeakRef<Context>;
+  readonly ctx: HeldContext;
   readonly layers: Map<string, ContextLayer>;
   readonly told: Map<string, Told>;
 }
@@ -53,6 +58,20 @@ function planIn(layer: ContextLayer, state: unknown): AgentPlan | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Hold `ctx` weakly, so a finished execution's context is not kept alive by
+ * its plan; a runtime without `WeakRef` holds it until the execution's layer
+ * state is cleaned up.
+ */
+function holdWeakly(ctx: Context): HeldContext {
+  if (typeof WeakRef === 'function') {
+    return new WeakRef(ctx);
+  }
+  return {
+    deref: () => ctx,
+  };
 }
 
 /** Where the plan is: the step running, when the context knows it. */
@@ -80,15 +99,6 @@ function idData(id: string | undefined): Record<string, string> {
 /** Tells each change of the plans an execution's layers keep, once, as it lands. */
 export class LayerPlanReporter {
   private readonly watched = new Map<string, Watched>();
-  /** Drops an execution's entry once its context is collected, unless another replaced it. */
-  private readonly collected = new FinalizationRegistry<{
-    readonly executionId: string;
-    readonly entry: Watched;
-  }>(({ executionId, entry }) => {
-    if (this.watched.get(executionId) === entry) {
-      this.watched.delete(executionId);
-    }
-  });
 
   /**
    * Start telling the plans `layers` keep for `ctx`'s execution. Call before
@@ -160,17 +170,24 @@ export class LayerPlanReporter {
     if (existing && existing.ctx.deref() === ctx) {
       return existing;
     }
+    // A new execution is the moment to let go of the ones whose context is gone.
+    this.sweep();
     const entry: Watched = {
-      ctx: new WeakRef(ctx),
+      ctx: holdWeakly(ctx),
       layers: new Map(),
       told: new Map(),
     };
     this.watched.set(ctx.id, entry);
-    this.collected.register(ctx, {
-      executionId: ctx.id,
-      entry,
-    });
     return entry;
+  }
+
+  /** Forget every execution whose context was collected. */
+  private sweep(): void {
+    for (const [executionId, entry] of this.watched) {
+      if (entry.ctx.deref() === undefined) {
+        this.watched.delete(executionId);
+      }
+    }
   }
 
   /** How many executions are watched: for tests that check nothing is kept. */
@@ -213,36 +230,35 @@ export function watchLayerPlans(
   harnessInternal<LayerPlanReporter>(ctx.harness, 'layerPlans')?.watch(ctx, layers);
 }
 
-/** `store`, telling `reporter` of every write as it lands. */
+/**
+ * `store`, telling `reporter` of every write as it lands. A plain object over
+ * the store, not a Proxy: a host that decorates the harness's store by
+ * replacing its `set` (the inspector does) wraps this `set`, and this one
+ * calls the store's own — never back into the decoration.
+ */
 export function reportingLayerPlans(
   store: LayerStateStore,
   reporter: LayerPlanReporter,
 ): LayerStateStore {
-  return new Proxy(store, {
-    get(target, property) {
-      if (property === 'set') {
-        return <T>(executionId: string, layerId: string, state: T): void => {
-          target.set(executionId, layerId, state);
-          reporter.changed(executionId, layerId, state);
-        };
-      }
-      if (property === 'cleanup') {
-        return (executionId: string): void => {
-          target.cleanup(executionId);
-          reporter.forget(executionId);
-        };
-      }
-      if (property === 'drop' && target.drop) {
-        const drop = target.drop.bind(target);
-        return (executionId: string, layerId: string): void => {
-          drop(executionId, layerId);
-          reporter.drop(executionId, layerId);
-        };
-      }
-      const value = Reflect.get(target, property, target);
-      return typeof value === 'function' ? value.bind(target) : value;
-    },
-  });
+  const set = store.set.bind(store);
+  const cleanup = store.cleanup.bind(store);
+  const drop = store.drop?.bind(store);
+  const reporting: LayerStateStore = Object.create(store);
+  reporting.set = <T>(executionId: string, layerId: string, state: T): void => {
+    set(executionId, layerId, state);
+    reporter.changed(executionId, layerId, state);
+  };
+  reporting.cleanup = (executionId: string): void => {
+    cleanup(executionId);
+    reporter.forget(executionId);
+  };
+  if (drop) {
+    reporting.drop = (executionId: string, layerId: string): void => {
+      drop(executionId, layerId);
+      reporter.drop(executionId, layerId);
+    };
+  }
+  return reporting;
 }
 
 //#endregion

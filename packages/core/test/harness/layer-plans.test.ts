@@ -350,6 +350,27 @@ describe('LayerPlanReporter', () => {
     ]);
   });
 
+  it("lets a host decorate the store's set, as the inspector does, without looping", () => {
+    const { harness, ctx, emitted, reporter } = watchedCtx([
+      layerWith(asPlan),
+    ]);
+    const store = reportingLayerPlans(harness.layerStateStore, reporter);
+    const seen: string[] = [];
+    const inner = store.set.bind(store);
+    store.set = <T>(executionId: string, layerId: string, state: T): void => {
+      inner(executionId, layerId, state);
+      seen.push(layerId);
+    };
+    store.set(ctx.id, 'tasks', {
+      id: 'a',
+      entries: [],
+    });
+    expect(seen).toEqual([
+      'tasks',
+    ]);
+    expect(emitted).toHaveLength(1);
+  });
+
   it('forgets an execution when the store cleans it up, and a layer when the store drops it', () => {
     const { harness, ctx, emitted, reporter } = watchedCtx([
       layerWith(asPlan),
