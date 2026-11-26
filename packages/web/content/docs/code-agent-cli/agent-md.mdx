@@ -30,7 +30,7 @@ Many existing repos already have a `CLAUDE.md`. The convention is to symlink it:
 ln -s CLAUDE.md AGENT.md
 ```
 
-This repo does exactly that: `AGENT.md → CLAUDE.md`. Symlinks are canonicalised with `realpath`, so cycles via symlinks are caught by the import deduper.
+This repo links `AGENT.md` to `AGENTS.md` so coding agents share one set of project instructions. The loader resolves symlinks with `realpath` to catch import cycles.
 
 ## `@import` transclusion
 

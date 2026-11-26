@@ -9,7 +9,7 @@ import { resolve } from 'node:path';
 // are bundled into `dist` at build time, so they are not needed as runtime deps.
 //
 // It also strips the `bun` export conditions (which resolve to `src/*.ts` in
-// development — see CLAUDE.md). The packed tarball ships only `dist/`, so a
+// development — see AGENTS.md). The packed tarball ships only `dist/`, so a
 // surviving `bun` condition would dangle and break bun consumers of the
 // artifact. `npm publish` strips them via each package's `prepublishOnly`
 // (scripts/strip-dev-conditions.ts), but `npm pack` — used by compat's
