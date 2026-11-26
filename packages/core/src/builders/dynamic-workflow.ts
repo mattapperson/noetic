@@ -29,13 +29,12 @@ import { harnessInternal } from '../util/harness-internals';
 import { rootOf } from '../util/root-context';
 import { outputText } from './output-text';
 import { callModel, runCode } from './step-builders';
-import { acpBounds, acpPrompt, checkAcpAgents } from './workflow-acp-grants';
-import { checkConnectionAllowlist, globMatches } from './workflow-connections';
+import { acpBounds } from './workflow-acp-grants';
+import { globMatches } from './workflow-connections';
+import type { Grants, PlannerConnection } from './workflow-grants';
+import { checkGrants, grantsPrompt } from './workflow-grants';
 import type { HydrationContext } from './workflow-hydrator';
 import { hydrateWorkflow } from './workflow-hydrator';
-import { checkMcpServers, mcpPrompt } from './workflow-mcp-servers';
-import { checkRunCode, runCodePrompt } from './workflow-run-code-grant';
-import { checkToolConnections } from './workflow-tool-entries';
 
 //#region Types
 
@@ -169,15 +168,22 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
       // Read once: the planner is shown, the document checked against, and its
       // acp-agent nodes run in this cwd, even if the harness's moves meanwhile.
       const cwd = ctx.cwdState.cwd;
+      const grants: Grants = {
+        connections: opts.connections ?? {},
+        acp: opts.acp,
+        runCode: opts.runCode,
+        mcp: opts.mcp,
+        cwd,
+      };
       const toolList = opts.tools.map((t) => `- ${t.name}: ${t.description}`).join('\n');
       const basePrompt = [
         opts.instructions,
         PLANNER_INSTRUCTIONS,
         `\nAvailable tools:\n${toolList}`,
-        connectionsPrompt(opts.connections, plannerConnections(opts.connections, ctx)),
-        acpPrompt(opts.acpAgents, opts.acp, cwd),
-        runCodePrompt(opts.runCode),
-        mcpPrompt(opts.mcp),
+        grantsPrompt(grants, {
+          connections: plannerConnections(grants.connections, ctx),
+          acpAgents: opts.acpAgents,
+        }),
         `\nTask: ${input}`,
       ]
         .filter(Boolean)
@@ -204,12 +210,8 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
         const text = coerceToString(rawOutput);
 
         const parseResult = tryParseWorkflow(text, maxDepth, {
-          allowlist: opts.connections ?? {},
+          grants,
           ranges: profileVersions(ctx),
-          acp: opts.acp,
-          runCode: opts.runCode,
-          cwd,
-          mcp: opts.mcp,
           secrets: harnessInternal<SecretResolver>(harness, 'secrets'),
         });
         if (!parseResult.ok) {
@@ -234,7 +236,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
           acpBounds: acpBounds(opts.acp, cwd),
           runCodeBounds: opts.runCode ?? {},
           expressionLimits: opts.expressionLimits,
-          allowlist: opts.connections ?? {},
+          allowlist: grants.connections,
           mcp: opts.mcp,
         };
 
@@ -341,11 +343,13 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
   checkAllowlistNames(allowlist, opts.ctx);
   const cwd = opts.ctx.cwdState.cwd;
   const parseResult = tryParseWorkflow(opts.json, opts.maxDepth ?? DEFAULT_MAX_DEPTH, {
-    allowlist,
-    acp: opts.acp,
-    runCode: opts.runCode,
-    cwd,
-    mcp: opts.mcp,
+    grants: {
+      connections: allowlist,
+      acp: opts.acp,
+      runCode: opts.runCode,
+      mcp: opts.mcp,
+      cwd,
+    },
     secrets: harnessInternal<SecretResolver>(opts.harness, 'secrets'),
   });
   if (!parseResult.ok && parseResult.configError) {
@@ -439,41 +443,21 @@ interface ParseFail {
   configError?: NoeticConfigError;
 }
 
-/**
- * What the host lets a document use: `allowlist` the connections it grants,
- * and `acp`, `runCode` and `mcp`, undefined, their narrowest defaults.
- */
+/** What a document is checked against. */
 interface DocumentCheck {
-  allowlist: ConnectionAllowlist;
+  grants: Grants;
   /**
    * Harness connection → profile → installed version. When given, a manifest
    * entry naming a profile without a range gets `^<major>` of the version the
    * connection serves (dynamicWorkflow fills the ranges in itself).
    */
   ranges?: ProfileVersions;
-  /** The most `acp-agent` nodes may ask of each agent. */
-  acp?: AcpAllowlist;
-  /** The most `runCode` nodes may ask; undefined grants no adapter name. */
-  runCode?: RunCodeGrant;
-  /** The harness's working directory: an `acp-agent` node's `cwd` without an `acp` grant. */
-  cwd: string;
-  /** The MCP servers the document may name; undefined grants none. */
-  mcp?: McpAllowlist;
   /** The harness's secret resolver, which a `$secret` in an MCP server needs. */
   secrets?: SecretResolver;
 }
 
 /** Harness connection → profile → the version it serves. */
 type ProfileVersions = ReadonlyMap<string, Readonly<Record<string, string>>>;
-
-/** What the planner is shown of one allowed connection: the profiles it serves and its allowed operations. */
-interface PlannerConnection {
-  readonly profiles: Readonly<Record<string, string>>;
-  readonly operations: ReadonlyArray<{
-    readonly name: string;
-    readonly inputSchema: unknown;
-  }>;
-}
 
 /** The registry surface the planner reads. Structural: builders sit below the registry and must not import it. */
 interface PlannerRegistry {
@@ -573,17 +557,13 @@ function tryParseWorkflow(raw: unknown, maxDepth: number, check: DocumentCheck):
   };
 }
 
-/** The error a document has, checked against its manifest, the host connection allowlist, and what its `acp-agent` and `runCode` nodes may ask. */
+/** The error a document has, checked against the host's grants. */
 function connectionErrorOf(
   doc: WorkflowDocument,
   check: DocumentCheck,
 ): NoeticConfigError | undefined {
   try {
-    checkConnectionAllowlist(doc, check.allowlist);
-    checkToolConnections(doc, check.allowlist);
-    checkAcpAgents(doc, check.acp, check.cwd);
-    checkRunCode(doc, check.runCode);
-    checkMcpServers(doc, check.mcp, check.secrets);
+    checkGrants(doc, check.grants, check.secrets);
     return undefined;
   } catch (error) {
     if (isNoeticConfigError(error)) {
@@ -726,60 +706,6 @@ function plannerConnections(
     });
   }
   return out;
-}
-
-function connectionLine(
-  name: string,
-  entry: ConnectionAllowlist[string],
-  known: PlannerConnection | undefined,
-): string {
-  const profiles = Object.keys(known?.profiles ?? {});
-  const parts = [
-    ...(profiles.length > 0
-      ? [
-          `profiles: ${profiles.join(', ')}`,
-        ]
-      : []),
-    `ops: ${(entry.ops ?? []).join(', ') || '(none)'}`,
-    `events: ${(entry.events ?? []).join(', ') || '(none)'}`,
-  ];
-  if (entry.setup) {
-    parts.push(`setup fields: ${Object.keys(entry.setup).join(', ')}`);
-  }
-  if (entry.secrets) {
-    parts.push(
-      `secrets: ${Object.entries(entry.secrets)
-        .map(([secret, field]) => `${secret} (only in ${field})`)
-        .join(', ')}`,
-    );
-  }
-  const schemas = (known?.operations ?? []).map(
-    (op) => `    - ${op.name} args: ${JSON.stringify(op.inputSchema)}`,
-  );
-  return [
-    `- ${name}: ${parts.join('; ')}`,
-    ...schemas,
-  ].join('\n');
-}
-
-/** The planner's view of the connections it may use: only the allowed ones, with their operations and argument schemas. */
-function connectionsPrompt(
-  allowlist: ConnectionAllowlist | undefined,
-  known: ReadonlyMap<string, PlannerConnection>,
-): string {
-  const entries = Object.entries(allowlist ?? {});
-  if (entries.length === 0) {
-    return '\nNo connections are available: do not emit call, wait or verify nodes or a "connections" map.';
-  }
-  const lines = entries.map(([name, entry]) => connectionLine(name, entry, known.get(name)));
-  return `\nConnections you may use (a document lists the ones it needs in a root "connections" map, e.g. "connections": { "app": { "profile": "<profile>", "from": "<connection>" } } — the version range is filled in for you — or { "events": [...] } for an event source):
-${lines.join('\n')}
-Connection nodes:
-- { "kind": "call", "id": "<unique>", "connection": "<name>", "op": "<operation>", "args": { ... } } (run one operation; values may be { "$expr": "<JSONata on the input; $steps.<id> reads an earlier node's output>" }, { "$literal": ... }, or { "$secret": "<name>" })
-- { "kind": "wait", "id": "<unique>", "connection": "<name>", "event": "<event>", "filter": "<JSONata test on { event, input }>", "around": [<steps>], "timeoutMs": <ms> } (listen, run around, then wait for the event)
-- { "kind": "verify", "id": "<unique>", "subject": "<name>", "expect": [{ "<sense>": "<pattern>" }, ...], "never": [<matchers>], "act": [<steps>], "witnesses": ["<name>"], "close": { "until": "quiet"|"event"|"done"|"exit" } } (run act on the subject and check what was expected happened; act names operations by name)
-Inside "around", "act" or a sequence's "steps", { "<operation>": { ...args } } is a call on the enclosing connection.
-A callModel or acp-agent node may instead give the model a connection's tools with the "tools" entry { "connection": "<name>", "ops": [<optional; globs within the ops above>] }; this needs no "connections" map.`;
 }
 
 function safeParse(text: string): unknown {
