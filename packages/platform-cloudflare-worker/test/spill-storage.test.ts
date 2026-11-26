@@ -4,8 +4,8 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
-import type { ContextData, StorageAdapter } from '@noetic-tools/core';
-import { AgentHarness, callModel, createInMemoryStorage } from '@noetic-tools/core';
+import type { ContextData, StorageAdapter, WorkflowDocument } from '@noetic-tools/core';
+import { AgentHarness, callModel, createInMemoryStorage, workflow } from '@noetic-tools/core';
 import { createD1Storage } from '../src/d1-storage';
 import { createDurableObjectStorage } from '../src/durable-object-storage';
 import { DEFAULT_SPILL_BYTES, spillStorage } from '../src/spill-storage';
@@ -719,5 +719,79 @@ describe('a harness on storage that spills', () => {
     const longest = db.query('SELECT max(length(value)) AS n FROM noetic_storage').get();
     assert(typeof longest === 'object' && longest !== null && 'n' in longest);
     expect(Number(longest.n)).toBeLessThanOrEqual(256);
+  });
+
+  it('stores a turn’s workflow document larger than a row, and resumes on it', async () => {
+    const db = new Database(':memory:');
+    const blobs = fakeBlobs();
+    // A document of a few megabytes: far over a row, and over the default spill size.
+    const SIZE = 3 * DEFAULT_SPILL_BYTES;
+    const document = (prompt: string): WorkflowDocument => ({
+      version: 1,
+      root: {
+        kind: 'callModel',
+        id: 'answer',
+        model: 'test/model',
+        instructions: prompt.padEnd(SIZE, '.'),
+      },
+    });
+    const seen: number[] = [];
+    const harness = (prompt: string, fails: boolean): AgentHarness =>
+      new AgentHarness({
+        name: 'big-flow',
+        params: {},
+        agentGraph: workflow({
+          id: 'flow',
+          document: document(prompt),
+        }),
+        _testCallModel: async (request) => {
+          seen.push(request.instructions?.startsWith('old') ? 1 : 2);
+          if (fails) {
+            throw new Error('fetch failed: ECONNRESET');
+          }
+          return answers.call(request);
+        },
+        environment: {
+          storage: {
+            adapter: createD1Storage({
+              database: fakeD1(db),
+              scope: 'alice',
+              spill: {
+                blobs,
+              },
+            }),
+          },
+        },
+      });
+    const answers = model('reply');
+    const delivery = {
+      threadId: 't',
+      messageId: 'm-1',
+    };
+    const first = harness('old', true);
+    await first.execute('hello', delivery);
+    await first.getAgentResponse(delivery).catch(() => {});
+    await first.close();
+    // The turn's one copy of the document went to the blob store, whole.
+    const spilled = [
+      ...blobs.objects.values(),
+    ].filter((text) => text.length > SIZE);
+    expect(spilled).toHaveLength(1);
+
+    // A harness on an edited document reads it back and finishes the turn on it.
+    const second = harness('new', false);
+    await second.execute('hello', delivery);
+    expect((await second.getAgentResponse(delivery)).text).toBe('reply-1');
+    await second.close();
+    expect(seen).toEqual([
+      1,
+      1,
+    ]);
+    // The copy went with the turn.
+    expect(
+      [
+        ...blobs.objects.values(),
+      ].filter((text) => text.length > SIZE),
+    ).toEqual([]);
   });
 });

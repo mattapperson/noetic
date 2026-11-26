@@ -44,6 +44,8 @@ export const ExecutionPart = {
   Pending: 'pending',
   /** A link to an execution it spawned out of process. */
   Child: 'child',
+  /** The source of the flow its turn began under (spec 23 § Stored flows). */
+  Flow: 'flow',
   Other: 'other',
 } as const;
 

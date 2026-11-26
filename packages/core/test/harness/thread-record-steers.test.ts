@@ -36,6 +36,12 @@ function message(id: string, deliveryMode: QueuedMessage['deliveryMode']): Queue
   };
 }
 
+/** A turn on a flow with no version and no source. */
+const NO_FLOW = {
+  version: undefined,
+  stored: undefined,
+};
+
 const ctx = frameworkCast<Context>({
   id: 'exec-1',
 });
@@ -119,9 +125,13 @@ describe('ThreadRecord steers', () => {
     await record.keepSteer(message('late', 'between-rounds'));
     await record.keepSteer(message('other', 'between-rounds'));
 
-    await record.begin(ctx, [
-      'late',
-    ]);
+    await record.begin(
+      ctx,
+      [
+        'late',
+      ],
+      NO_FLOW,
+    );
 
     expect((await record.steers()).map((steer) => steer.id)).toEqual([
       'other',
@@ -139,6 +149,7 @@ describe('ThreadRecord steers', () => {
       [
         'input',
       ],
+      NO_FLOW,
       [
         'gone',
       ],
@@ -157,18 +168,14 @@ describe('ThreadRecord steers', () => {
     const newer = makeRecord(storage);
     await newer.keepSteer(message('gone', 'between-rounds'));
     newer.hold(fenceAt(2));
-    await newer.begin(ctx, []);
+    await newer.begin(ctx, [], NO_FLOW);
 
     const stale = makeRecord(storage);
     stale.hold(fenceAt(1));
     const error = await stale
-      .begin(
-        ctx,
-        [],
-        [
-          'gone',
-        ],
-      )
+      .begin(ctx, [], NO_FLOW, [
+        'gone',
+      ])
       .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(NoeticErrorImpl);

@@ -82,7 +82,9 @@ export { verify } from './builders/verify-builder';
 /** @public */
 export type { HydrationContext } from './builders/workflow-hydrator';
 /** @public */
-export { hydrateNode, hydrateStepList, hydrateWorkflow } from './builders/workflow-hydrator';
+export { hydrateNode, hydrateStepList } from './builders/workflow-hydrator';
+/** @public */
+export { hydrateWorkflow } from './builders/workflow-source';
 /** @public */
 export type {
   TypedWorkflowStep,
@@ -627,6 +629,7 @@ export type {
   ExecuteOptions,
   ExecutionScope,
   ExecutionStatus,
+  FlowRebuildFailure,
   HarnessJudgmentContract,
   HarnessStatus,
   HeldCall,
@@ -669,7 +672,7 @@ export type {
   WriteOffSpendOptions,
 } from '@noetic-tools/types';
 /** @public */
-export { ExecutionPart, SpendKind } from '@noetic-tools/types';
+export { ExecutionPart, FlowRebuildReason, SpendKind } from '@noetic-tools/types';
 
 //#endregion
 

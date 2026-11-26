@@ -41,6 +41,7 @@ export type {
   ExecutionScope,
   ExecutionStatus,
   ExternalChannel,
+  FlowRebuildFailure,
   ForgetOptions,
   ForgetReport,
   FsAdapter,

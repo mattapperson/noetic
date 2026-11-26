@@ -422,7 +422,7 @@ Pass `now` to the harness to drive the clock yourself; wait deadlines, leases an
 
 ### Flow Versions
 
-Flows change while turns are in flight. Name the flow a harness runs with `version`, and a turn that resumes on a newer deploy moves forward to it:
+Flows change while turns are in flight. A turn that began on a [JSON workflow](/docs/framework/json-runtime) finishes on that workflow: see [Stored workflows](#stored-workflows) below. A flow built in TypeScript has nothing to store, so name it with `version`, and a turn that resumes on a newer deploy moves forward to it:
 
 ```ts validate=none
 const harness = new AgentHarness({
@@ -439,18 +439,49 @@ You settle a stuck turn yourself:
 
 ```ts validate=none
 for (const turn of await harness.listStuckRuns()) {
-  // { threadId, executionId, path, from: 'v1', to: 'v2' }
+  // { threadId, executionId, path, from: 'v1', to: 'v2', rebuild? }
   await harness.execute({ type: 'noetic:decision', action: 'continue' }, { threadId: turn.threadId });
 }
 ```
 
 | Action | What happens |
 |---|---|
-| `continue` | Accept the difference. The turn resumes and the changed step runs again. |
-| `restart` | Forget what the turn recorded and run it from the top. Every step runs again, effects included. |
+| `continue` | Accept the difference. The turn resumes on this harness's flow and the changed step runs again. |
+| `restart` | Forget what the turn recorded and run it from the top on this harness's flow. Every step runs again, effects included. |
 | `abandon` | Drop the turn. Its trail is kept. |
 
-To keep an effect step matching across edits, give it a [`replayKey`](#replay-identity). A harness whose `agentGraph` runs a [JSON workflow](/docs/framework/json-runtime) needs no `version`: it defaults to a hash of every document in the graph (`hydrateWorkflow`, `workflow({ document })`, `workflow({ ref })`, alone or among other steps) and of the named workflows they can refer to, so an edited document or subflow is a new version. Key order does not matter. A document you run yourself with `parseAndRunWorkflow` is not covered: set `version`. Any other flow without a `version` behaves as before: a resumed turn discards whatever no longer matches and runs it again.
+To keep an effect step matching across edits, give it a [`replayKey`](#replay-identity). A flow with no `version` and no JSON workflow in it behaves as before: a resumed turn discards whatever no longer matches and runs it again.
+
+### Stored Workflows
+
+A JSON workflow is data, so the harness keeps it. When `agentGraph` is the step `hydrateWorkflow` returned, or a `workflow({ document })` or `workflow({ ref })` step, there is nothing to set up:
+
+```ts validate=none
+const harness = new AgentHarness({
+  name: 'refunds',
+  agentGraph: workflow({ id: 'flow', document, tools }),
+  environment: { storage: { adapter: storage } },
+});
+```
+
+- **The version names itself.** With no `version`, the harness takes `workflow-<hash>`: a hash of every document in the graph (alone or among other steps) and of the named workflows they can refer to. An edited document or subflow is a new version. Key order does not matter. Set `version` to name it yourself; the workflow is stored and resumed the same way.
+- **Each turn stores the workflow it began on.** The document, and every named workflow, go to storage with the turn when it begins, and are deleted when it ends. One copy per unfinished turn: storage in use grows with the turns in flight times the size of their documents.
+- **A resumed turn finishes on it.** A turn that was cut off, parked or re-delivered, and is picked up by a harness on an edited document, runs the document it began under. Every recorded step replays, nothing runs twice, and there is no `turn_stuck`. The next turn of the thread runs the new document.
+- **The code is yours, today's.** The old document runs with the tools, agents, connections and layers of the harness that resumes it.
+- **No secret is stored.** A document names its secrets (`{ "$secret": "name" }`); values are resolved when a call is sent.
+
+When the harness cannot rebuild the old workflow, the turn moves forward under the rules above, and you are told why: the thread's stream carries `{name}:flow_rebuild_failed` with `{ threadId, executionId, version, reason, message }`, and a turn that then stops as stuck lists the same under `rebuild` in `listStuckRuns()`.
+
+| `reason` | What happened |
+|---|---|
+| `build_failed` | The stored document no longer validates, or names a tool, agent or UI library this harness does not have. |
+| `no_builder` | This harness's `agentGraph` is not a JSON workflow. |
+| `hash_mismatch` | The rebuilt flow runs a document that was not stored. |
+| `unreadable` | What the turn stored does not read as a workflow. |
+
+`continue` and `restart` move a stuck turn onto this harness's workflow, which the turn then stores in place of the old one. `abandon` drops the turn and what it stored.
+
+What is not covered: a JSON workflow that is one step among TypeScript steps names the version but is not stored, since the steps around it are code. A document you run yourself with `parseAndRunWorkflow` or `dynamicWorkflow` is not the harness's flow: set `version`, or make the document the `agentGraph`. A step a subprocess adapter runs out of process is built by that process's own code.
 
 ### The Trail
 
@@ -545,7 +576,7 @@ const [job] = await harness.listStoredExecutions({ prefix: jobId });
 const resumable = job?.executionId === jobId && job.resumable;
 ```
 
-`listStoredThreads` lists every thread with a record, a lease or display output stored; `listStoredExecutions` lists every execution with anything stored, with its `parts` (`snapshot`, `ledger`, `trail`, `held`, `intent`, `pending`, `other`) and `resumable`. Both read keys only. The forget deletes a thread's lease last, so one cut off part way still lists the thread for the next sweep. Deleting goes through your `StorageAdapter`, so storage that spills large values elsewhere deletes their objects with their keys.
+`listStoredThreads` lists every thread with a record, a lease or display output stored; `listStoredExecutions` lists every execution with anything stored, with its `parts` (`snapshot`, `ledger`, `trail`, `held`, `intent`, `pending`, `child`, `flow`, `other`) and `resumable`. Both read keys only. The forget deletes a thread's lease last, so one cut off part way still lists the thread for the next sweep. Deleting goes through your `StorageAdapter`, so storage that spills large values elsewhere deletes their objects with their keys.
 
 ### Implement `getMany` on a networked adapter
 

@@ -19,6 +19,7 @@ import type {
   Context,
   ContextData,
   ExecuteOptions,
+  FlowRebuildFailure,
   Item,
   KeptSteers,
   Step,
@@ -28,6 +29,8 @@ import type {
 import { savedItemIds } from './model-rounds';
 import type { ParkWatchers } from './park-watchers';
 import { steerInConversation, steerItems } from './steer-inbox';
+import type { StoredFlows, TurnFlow } from './stored-flows';
+import { isRebuildFailure } from './stored-flows';
 import type { StoredTurnRecord, ThreadRecord } from './thread-record';
 import type { TurnCuts } from './turn-cuts';
 
@@ -47,6 +50,8 @@ export interface Session {
   arriving?: number;
   /** The `execute()` options of the turn in flight, to resume it with if it parks. */
   turnOptions?: ExecuteOptions;
+  /** The flow the turn in flight runs: the harness's, or the stored one it began under. */
+  turnGraph?: Step<ContextData, string, string>;
   /** The message ids of the turn in flight: what its cuts are counted by. */
   turnMessageIds?: ReadonlyArray<string>;
   /**
@@ -83,9 +88,20 @@ async function keepQueuedMessages(session: Session, record: ThreadRecord): Promi
   }
 }
 
+/** Where a turn's tools come from, besides the harness's own. */
+export interface TurnTools {
+  /** The flow the turn runs: its steps' tools are offered. */
+  readonly graph: Step | undefined;
+  /** The turn's own (`ExecuteOptions.tools`). */
+  readonly turn: ReadonlyArray<Tool>;
+  /** Those of the connections the turn attached. */
+  readonly connections: ReadonlyArray<Tool>;
+}
+
 interface SessionHost {
   agentName: string;
   graph: Step<ContextData, string, string> | undefined;
+  flows: StoredFlows;
   connections: ConnectionGate;
   createContext(opts: {
     threadId: string;
@@ -99,7 +115,7 @@ interface SessionHost {
   }): Context;
   start(): Promise<void>;
   run(graph: Step<ContextData, string, string>, ctx: Context): Promise<string>;
-  setTurnTools(ctx: Context, tools: ReadonlyArray<Tool>, offered: ReadonlyArray<Tool>): void;
+  setTurnTools(ctx: Context, tools: TurnTools): void;
   leaseOptions: TurnLeaseOptions | undefined;
   parkGraceMs: number | undefined;
   parkWatchers: ParkWatchers | undefined;
@@ -264,7 +280,13 @@ async function buildTurnContext({
   const messageIds = messages.map((m) => m.id);
   session.turnMessageIds = messageIds;
   const history = record ? await record.history() : session.accumulatedItems;
-  const graph = host.graph ? frameworkCast<Step>(host.graph) : undefined;
+  const flow = await turnFlow({
+    host,
+    session,
+    messageIds,
+  });
+  session.turnGraph = frameworkCast<Step<ContextData, string, string> | undefined>(flow.graph);
+  const { graph } = flow;
   const views = host.connections.turnViews(perTurnOptions.connections, graph);
   // A re-delivery of a cut-off turn's messages picks that turn up where it died.
   const resumed = await record?.resume(messageIds, {
@@ -287,6 +309,10 @@ async function buildTurnContext({
       _connectionViews: views.layers,
       _broadcaster: session.runner.broadcaster,
     });
+  // A context is made to record under the harness's version. This turn's flow is older.
+  if (flow.version !== host.flows.own.version && ctx instanceof ContextImpl) {
+    ctx.ledger?.runAs(flow.version);
+  }
   bindLease(ctx, lease, host.parkGraceMs);
   // A resumed context was made without the turn's view layers.
   if (!resumed) {
@@ -295,7 +321,11 @@ async function buildTurnContext({
   frameworkCast<Context & SessionCtxExtension>(ctx)._sessionQueue = session.runner.queue;
   await host.start();
   const connectionTools = await host.connections.openTurn(ctx, perTurnOptions.connections, graph);
-  host.setTurnTools(ctx, perTurnOptions.tools ?? [], connectionTools);
+  host.setTurnTools(ctx, {
+    graph,
+    turn: perTurnOptions.tools ?? [],
+    connections: connectionTools,
+  });
   // A stuck turn the host chose to go on with may discard what no longer matches.
   const accept = (await record?.turn())?.accept;
   if (accept && ctx instanceof ContextImpl) {
@@ -308,6 +338,7 @@ async function buildTurnContext({
       record,
       ctx,
       messageIds,
+      flow,
       keptSteers: perTurnOptions.keptSteers,
     });
   }
@@ -317,6 +348,92 @@ async function buildTurnContext({
     await host.announceWakeTimeQuietly();
   }
   return ctx;
+}
+
+/** The flow a turn begins on. */
+interface BegunFlow extends TurnFlow {
+  /** Set when the turn stored the flow it began under and it could not be rebuilt. */
+  readonly failure?: FlowRebuildFailure;
+}
+
+/**
+ * Keep the source of `flow` under the turn's execution (spec 23 § Stored flows),
+ * unless the turn's record says it is there. A turn that moved to a flow with no
+ * source, or runs under a new execution, leaves none behind. Resolves the hash of
+ * what is stored for the turn.
+ */
+async function storeTurnFlow({
+  host,
+  record,
+  ctx,
+  flow,
+}: {
+  host: SessionHost;
+  record: ThreadRecord;
+  ctx: Context;
+  flow: BegunFlow;
+}): Promise<string | undefined> {
+  const prior = await record.turn();
+  const held = prior?.executionId === ctx.id ? prior : undefined;
+  if (prior?.flow !== undefined && !held) {
+    await host.flows.drop(prior.executionId);
+  }
+  const { stored } = flow;
+  if (!stored) {
+    if (held?.flow !== undefined) {
+      await host.flows.drop(ctx.id);
+    }
+    return undefined;
+  }
+  if (held?.flow === stored.hash && held.version === stored.version) {
+    return stored.hash;
+  }
+  return (await host.flows.keep(ctx.id, stored)) ? stored.hash : undefined;
+}
+
+/**
+ * The flow the turn `messageIds` deliver runs (spec 23 § Versions). A new turn
+ * runs the harness's. A turn on record that began under another version runs the
+ * flow it stored, rebuilt here; when it stored none, or it cannot be rebuilt, the
+ * turn moves to the harness's flow, and a failed rebuild is told as
+ * `flow_rebuild_failed`.
+ */
+async function turnFlow({
+  host,
+  session,
+  messageIds,
+}: {
+  host: SessionHost;
+  session: Session;
+  messageIds: ReadonlyArray<string>;
+}): Promise<BegunFlow> {
+  const { own } = host.flows;
+  const turn = await session.record?.redelivered(messageIds);
+  if (turn?.version === undefined || turn.version === own.version || turn.flow === undefined) {
+    return own;
+  }
+  const { threadId } = session.runner;
+  const rebuilt = await host.flows.rebuild(turn.executionId, turn.version);
+  if (rebuilt === undefined) {
+    return own;
+  }
+  if (isRebuildFailure(rebuilt)) {
+    emitFrameworkEvent({
+      broadcaster: session.runner.broadcaster,
+      agentName: host.agentName,
+      eventType: 'flow_rebuild_failed',
+      data: {
+        threadId,
+        executionId: turn.executionId,
+        ...rebuilt,
+      },
+    });
+    return {
+      ...own,
+      failure: rebuilt,
+    };
+  }
+  return rebuilt;
 }
 
 /** Save the park and queued messages before letting the host wake the turn. */
@@ -354,7 +471,8 @@ async function runTurn({
   signal: AbortSignal;
 }): Promise<string> {
   const { threadId } = session.runner;
-  if (!host.graph) {
+  const graph = session.turnGraph;
+  if (!graph) {
     await host.connections.release(ctx.id);
     throw new NoeticConfigError({
       code: 'NO_STEP_CONFIGURED',
@@ -376,7 +494,7 @@ async function runTurn({
       },
     );
   }
-  const result = await host.run(host.graph, ctx).catch((error: unknown) =>
+  const result = await host.run(graph, ctx).catch((error: unknown) =>
     failTurn({
       host,
       session,
@@ -607,6 +725,7 @@ async function beginStoredTurn({
   record,
   ctx,
   messageIds,
+  flow,
   keptSteers,
 }: {
   host: SessionHost;
@@ -614,8 +733,15 @@ async function beginStoredTurn({
   record: ThreadRecord;
   ctx: Context;
   messageIds: ReadonlyArray<string>;
+  flow: BegunFlow;
   keptSteers: KeptSteers | undefined;
 }): Promise<void> {
+  const stored = await storeTurnFlow({
+    host,
+    record,
+    ctx,
+    flow,
+  });
   const { removed, kept } = await splitKeptMessages({
     session,
     record,
@@ -626,12 +752,18 @@ async function beginStoredTurn({
     await record.begin(
       ctx,
       messageIds,
+      {
+        version: flow.version,
+        stored,
+        rebuild: flow.failure,
+      },
       removed.map((steer) => steer.id),
     );
   } catch (error) {
     await host.connections.release(ctx.id);
     throw error;
   }
+
   for (const message of kept) {
     session.keptOptions.delete(message.id);
     if (!session.runner.queue.peekAll().some((queued) => queued.id === message.id)) {

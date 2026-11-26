@@ -351,6 +351,40 @@ export interface StuckTurn {
   readonly from: string;
   /** The version the turn was resumed under. */
   readonly to: string;
+  /**
+   * Set when the turn stored the JSON workflow it began under and this harness
+   * could not rebuild it, so the turn moved to the harness's own flow.
+   */
+  readonly rebuild?: FlowRebuildFailure;
+}
+
+/** @public Why a stored flow could not be rebuilt (spec 23 § Versions). */
+export const FlowRebuildReason = {
+  /** The harness's `agentGraph` is not a JSON workflow, so nothing builds a flow from a stored one. */
+  NoBuilder: 'no_builder',
+  /** What the turn stored is not the flow of its version. */
+  Unreadable: 'unreadable',
+  /** The stored document no longer validates, or names a tool or agent the harness lacks. */
+  BuildFailed: 'build_failed',
+  /** The rebuilt flow does not hash to what was stored: it runs a document the stored source does not hold. */
+  HashMismatch: 'hash_mismatch',
+} as const;
+
+/** @public */
+export type FlowRebuildReason = (typeof FlowRebuildReason)[keyof typeof FlowRebuildReason];
+
+/**
+ * @public
+ * A stored flow this harness could not rebuild for a turn that began under it
+ * (spec 23 § Versions): the data of `{name}:flow_rebuild_failed`, and
+ * `StuckTurn.rebuild`.
+ */
+export interface FlowRebuildFailure {
+  /** The version the turn began under. */
+  readonly version: string;
+  readonly reason: FlowRebuildReason;
+  /** What went wrong, for a person. */
+  readonly message: string;
 }
 
 //#endregion

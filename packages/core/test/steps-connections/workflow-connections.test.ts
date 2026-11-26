@@ -18,11 +18,8 @@ import {
   documentConnectionUses,
   globMatches,
 } from '../../src/builders/workflow-connections';
-import {
-  hydrateNode,
-  hydrateStepList,
-  hydrateWorkflow,
-} from '../../src/builders/workflow-hydrator';
+import { hydrateNode, hydrateStepList } from '../../src/builders/workflow-hydrator';
+import { hydrateWorkflow } from '../../src/builders/workflow-source';
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
 import { expressionErrors } from '../../src/expression/check';
 import { AgentHarness } from '../../src/harness/agent-harness';

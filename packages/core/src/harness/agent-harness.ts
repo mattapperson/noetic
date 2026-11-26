@@ -74,7 +74,13 @@ import {
   StepLedger,
   snapshotCwdState,
 } from './deps/runtime';
-import type { OutputSnapshot, ReadDecision, Session, StoredTurnRecord } from './deps/turns';
+import type {
+  OutputSnapshot,
+  ReadDecision,
+  Session,
+  StoredTurnRecord,
+  TurnTools,
+} from './deps/turns';
 import {
   awaitApproval,
   buildItemSchemaRegistry,
@@ -87,6 +93,7 @@ import {
   OutputStore,
   readDecision,
   SessionStoreOps,
+  StoredFlows,
   stopNestedAgent,
   storedTurnOf,
 } from './deps/turns';
@@ -314,6 +321,8 @@ export class AgentHarness<
   >();
   private readonly storedSessions: SessionStoreOps;
   private readonly version?: string;
+  /** The flow each turn stores, and how one is built again (spec 23 § Stored flows). */
+  private readonly flows: StoredFlows;
   private readonly cutOfContext = new WeakMap<Context, TurnCut>();
   private readonly turnOptionsFor?: (turn: StoredTurn) => ExecuteOptions | Promise<ExecuteOptions>;
   /** Who hears when the next wake time changes (`onWakeTimeChange`). */
@@ -449,6 +458,11 @@ export class AgentHarness<
     const { graph, version } = harnessGraph(opts);
     this.agentGraph = graph;
     this.version = version;
+    this.flows = new StoredFlows(
+      this.checkpointStore ? this.config.storage : undefined,
+      frameworkCast<Step | undefined>(graph),
+      version,
+    );
     this.harnessTools = opts.tools ?? [];
     this._contextLayers = opts.contextLayers;
     this.llm = new LlmGateway({
@@ -1090,11 +1104,12 @@ export class AgentHarness<
       {
         agentName: this.config.name,
         graph: this.agentGraph,
+        flows: this.flows,
         connections: this.#connections,
         createContext: (opts) => this.createContext(opts),
         start: () => this.start(),
-        run: (graph, ctx) => this.initAndRun(graph, '', ctx),
-        setTurnTools: (ctx, tools, offered) => this.setTurnTools(ctx, tools, offered),
+        run: (graph, ctx) => this.runTurnGraph(graph, ctx),
+        setTurnTools: (ctx, tools) => this.setTurnTools(ctx, tools),
         leaseOptions: this.storedSessions.leaseOptions,
         parkGraceMs: this.storedSessions.parkGraceMs,
         parkWatchers: this.storedSessions.parkWatchers,
@@ -1396,6 +1411,11 @@ export class AgentHarness<
         threadId,
         executionId: turn.executionId,
         ...turn.stuck,
+        ...(turn.rebuild
+          ? {
+              rebuild: turn.rebuild,
+            }
+          : {}),
       });
     }
     return found;
@@ -2003,6 +2023,21 @@ export class AgentHarness<
     }
   }
 
+  /**
+   * Run a session turn's flow. The agent graph's connection needs were registered
+   * when the harness was built; a flow rebuilt from a thread's stored source
+   * (spec 23 § Versions) is negotiated here, as any other root is.
+   */
+  private async runTurnGraph(
+    graph: Step<ContextData, string, string>,
+    ctx: Context,
+  ): Promise<string> {
+    if (graph !== this.agentGraph) {
+      this.#connections.negotiateRoot(frameworkCast<Step>(graph));
+    }
+    return this.initAndRun(graph, '', ctx);
+  }
+
   /** Run all layer `init` hooks before the first step executes. Per spec 11,
    *  init MUST complete before any recall fires so layer state is populated. */
   private async initAndRun<I, O>(s: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O> {
@@ -2391,17 +2426,13 @@ export class AgentHarness<
 
   /** Resolves layer-provided tools and merges with step tools into ctx.unifiedTools. */
   /** The tools a session turn offers: its own first (one named like another replaces it), then the flow's, the harness's and its connections'. */
-  private setTurnTools(
-    ctx: Context,
-    turnTools: ReadonlyArray<Tool>,
-    connectionTools: ReadonlyArray<Tool>,
-  ): void {
-    const stepTools = this.agentGraph ? collectAllTools(this.agentGraph) : [];
+  private setTurnTools(ctx: Context, tools: TurnTools): void {
+    const stepTools = tools.graph ? collectAllTools(tools.graph) : [];
     this.setUnifiedTools(ctx, [
-      ...turnTools,
+      ...tools.turn,
       ...stepTools,
       ...this.harnessTools,
-      ...connectionTools,
+      ...tools.connections,
     ]);
   }
 
@@ -2684,6 +2715,8 @@ export class AgentHarness<
     if (this.config.storage) {
       await clearPendingEntries(this.config.storage, executionId);
     }
+    // The flow a turn stored is read only to resume that turn.
+    await this.flows.drop(executionId);
   }
 
   //#endregion

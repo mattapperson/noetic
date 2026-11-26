@@ -10,7 +10,7 @@ import type {
   SubprocessHandle,
 } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
-import { hydrateWorkflow } from '../../src/builders/workflow-hydrator';
+import { hydrateWorkflow } from '../../src/builders/workflow-source';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';

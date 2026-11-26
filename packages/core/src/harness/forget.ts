@@ -86,10 +86,11 @@ const PART_TAILS: Record<string, RegExp> = {
   intent: /^:.+$/,
   pending: /^:.+$/,
   child: /^:[^:]+$/,
+  flow: /^$/,
 };
 
 /** Every place a part's name may start in what follows `execution:`. */
-const PART_NAME = /:(snapshot|ledger|trail|held|intent|pending|child)(?=:|$)/g;
+const PART_NAME = /:(snapshot|ledger|trail|held|intent|pending|child|flow)(?=:|$)/g;
 
 /**
  * The execution id and part of a key core writes, read as the longest id whose
@@ -196,6 +197,7 @@ const PARTS: Record<string, ExecutionPart> = {
   intent: ExecutionPart.Intent,
   pending: ExecutionPart.Pending,
   child: ExecutionPart.Child,
+  flow: ExecutionPart.Flow,
 };
 
 function toPart(name: string): ExecutionPart {

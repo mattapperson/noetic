@@ -5,8 +5,7 @@
  */
 
 import type { Step } from '@noetic-tools/types';
-import type { FlowSource } from '../builders/workflow-hydrator';
-import { flowSourceOf } from '../builders/workflow-hydrator';
+import { flowSourceOf } from '../builders/flow-source';
 import { stepChildren } from '../interpreter/step-walk';
 import { hashText } from '../runtime/durable/step-ledger';
 
@@ -38,36 +37,33 @@ function sortKeys(_key: string, value: unknown): unknown {
   return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
-/** What of a flow's source goes into its version. */
-function describe(source: FlowSource): unknown {
-  return {
-    document: source.document ?? null,
-    ref: source.ref ?? null,
-    // A subflow `ref` runs one of these: an edit to it is an edit to the flow.
-    workflows: source.workflows ? Object.fromEntries(source.workflows) : null,
-  };
-}
-
 //#endregion
 
 //#region Public API
 
 /**
- * The version of the flows in `graph`: a hash of each JSON workflow document it
- * runs and of the named workflows those can refer to, the same whatever order
- * their keys were written in. Undefined when `graph` runs no JSON workflow, or one
- * of its documents cannot be encoded.
+ * The version of the flows in `graph`: a hash of the source of each step in it
+ * that has one (a JSON workflow document and the named workflows it can refer
+ * to), the same whatever order their keys were written in. Undefined when no step
+ * of `graph` has a source, or one cannot be encoded.
  */
 export function flowVersionOf(graph: Step | undefined): string | undefined {
   if (!graph) {
     return undefined;
   }
-  const sources = stepsIn(graph).flatMap((step) => flowSourceOf(step) ?? []);
+  const sources = stepsIn(graph).flatMap((step) => {
+    const flow = flowSourceOf(step);
+    return flow
+      ? [
+          flow.source,
+        ]
+      : [];
+  });
   if (sources.length === 0) {
     return undefined;
   }
   try {
-    return `workflow-${hashText(JSON.stringify(sources.map(describe), sortKeys))}`;
+    return `workflow-${hashText(JSON.stringify(sources, sortKeys))}`;
   } catch {
     return undefined;
   }

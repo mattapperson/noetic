@@ -21,7 +21,8 @@ import {
 import { createInMemoryFsAdapter } from '../../src/adapters/in-memory-fs-adapter';
 import { createInMemoryShellAdapter } from '../../src/adapters/in-memory-shell-adapter';
 import type { HydrationContext } from '../../src/builders/workflow-hydrator';
-import { hydrateNode, hydrateWorkflow } from '../../src/builders/workflow-hydrator';
+import { hydrateNode } from '../../src/builders/workflow-hydrator';
+import { hydrateWorkflow } from '../../src/builders/workflow-source';
 import type { WorkflowDocument, WorkflowNode } from '../../src/schemas/workflow';
 import { makeMockContext, makeTestTool, noRun } from '../_helpers';
 

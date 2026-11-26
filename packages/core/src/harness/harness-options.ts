@@ -289,10 +289,12 @@ export interface AgentHarnessOpts<
    * flow changes, such as a release tag or a hash (spec 23 § Versions). Every step a
    * run records carries it, so the trail shows which version handled each step. A
    * turn resumed under another version keeps the steps that still match, and stops
-   * as stuck rather than redo one that had a lasting effect. A flow hydrated
-   * from a JSON workflow (`hydrateWorkflow`) defaults to a hash of its document, so
-   * editing the document is a new version. Any other flow without one behaves as
-   * before: a resumed turn discards whatever no longer matches.
+   * as stuck rather than redo one that had a lasting effect. A flow that runs a
+   * JSON workflow (`hydrateWorkflow`, `workflow()`) defaults to a hash of its
+   * documents, so editing one is a new version; each turn stores the documents it
+   * began on, and resumes on them whatever version the harness then runs (spec 23
+   * § Stored flows). Any other flow without a version behaves as before: a resumed
+   * turn discards whatever no longer matches.
    */
   version?: string;
   /**
