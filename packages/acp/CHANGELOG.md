@@ -1,3 +1,7 @@
+## @noetic-tools/acp-v2.0.0-next.9 (2026-11-26)
+
+* Read Codex quota usage from ACP prompt replies (#176) ([68084b9](https://github.com/mattapperson/noetic/commit/68084b9)), closes [#176](https://github.com/mattapperson/noetic/issues/176)
+
 ## @noetic-tools/acp-v2.0.0-next.8 (2026-11-26)
 
 * feat(acp): tell localMachine's wrap the variables the agent sets (#175) ([928c91f](https://github.com/mattapperson/noetic/commit/928c91f)), closes [#175](https://github.com/mattapperson/noetic/issues/175)
