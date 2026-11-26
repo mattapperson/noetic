@@ -48,6 +48,7 @@ export type {
   HarnessStatus,
   HeldCall,
   HeldCallHandler,
+  HeldFailureHandler,
   HeldResolution,
   HeldSteerPolicy,
   Item,

@@ -34,6 +34,7 @@ import type {
   ExecuteOptions,
   FsAdapter,
   HeldCallHandler,
+  HeldFailureHandler,
   HeldSteerPolicy,
   ItemSchemaConfig,
   LLMResponse,
@@ -302,6 +303,13 @@ export interface AgentHarnessOpts<
    * decides what is held; this is what the host does with what it held.
    */
   onHeld?: HeldCallHandler;
+  /**
+   * Told when a held call could not be answered: the `onHeld` handler threw, or the
+   * answer it returned was still not recorded after a few tries. The call stays held;
+   * the failure carries a `retry()` for when the host or a person wants another go.
+   * Without one, the failure is only logged.
+   */
+  onHeldFailed?: HeldFailureHandler;
   /**
    * What a steer does at the `held` steer point before any layer has a say: `apply`
    * (the default) skips the held calls for it; `defer` keeps it queued behind them,

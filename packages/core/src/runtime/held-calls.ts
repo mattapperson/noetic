@@ -15,8 +15,11 @@ import type { StorageAdapter } from '@noetic-tools/context';
 import type {
   Context,
   HeldCall,
+  HeldCallContext,
+  HeldCallFailure,
   HeldCallHandler,
   HeldCallSettled,
+  HeldFailureHandler,
   HeldResolution,
   ToolApprover,
 } from '@noetic-tools/types';
@@ -100,6 +103,7 @@ export interface HoldHost {
     readonly now?: () => number;
     readonly approveToolCall?: ToolApprover;
     readonly onHeld?: HeldCallHandler;
+    readonly onHeldFailed?: HeldFailureHandler;
   };
   /** The thread a context's held calls belong to, when it is a thread's turn. */
   heldThreadOf?(ctx: Context): string | undefined;
@@ -1018,65 +1022,132 @@ export function noticeHeld(opts: {
   });
 }
 
-/** Put a held call to the host's handler and take its answer as a decision. */
-async function askHandler(opts: {
+/** The waits before each further try at recording an answer that failed to record. */
+const ANSWER_RETRY_MS = [
+  250,
+  1000,
+];
+
+interface AskOptions {
   harness: HoldHost;
   handler: HeldCallHandler;
   held: HeldCall;
   signal: AbortSignal;
   executionId: string;
   threadId: string | undefined;
-}): Promise<void> {
-  const { harness, held, signal, executionId, threadId } = opts;
+}
+
+/**
+ * Put a held call to the host's handler and take its answer as a decision. A failure
+ * leaves the call held and goes to `onHeldFailed`, whose `retry()` runs the failed
+ * stage again.
+ */
+async function askHandler(opts: AskOptions): Promise<void> {
   let answer: HeldResolution | undefined;
   try {
-    answer = await opts.handler(held, {
-      signal,
-      executionId,
-      ...(threadId === undefined
-        ? {}
-        : {
-            threadId,
-          }),
-    });
+    answer = await opts.handler(opts.held, contextOf(opts));
   } catch (e) {
-    console.warn(
-      `[noetic] ${harness.config.name}: the onHeld handler failed for '${held.name}' (${held.callId}); the call stays held: ${messageOf(e)}`,
-    );
+    reportFailure(opts, {
+      stage: 'handler',
+      error: e,
+      retry: () => void askHandler(opts),
+    });
     return;
   }
   // Settled some other way first: there is nothing left to answer.
-  if (answer === undefined || signal.aborted) {
+  if (answer === undefined || opts.signal.aborted) {
+    return;
+  }
+  await recordAnswer(opts, answer);
+}
+
+/** Record `answer`, trying again after a failure that may pass; one that does not pass is reported. */
+async function recordAnswer(opts: AskOptions, answer: HeldResolution): Promise<void> {
+  const { harness, held, signal, executionId, threadId } = opts;
+  const request: HeldAnswerRequest = {
+    executionId,
+    ...(threadId === undefined
+      ? {}
+      : {
+          threadId,
+        }),
+    callId: held.callId,
+    argsHash: held.argsHash,
+    resolution: answer,
+  };
+  for (let tries = 0; ; tries++) {
+    try {
+      if (harness.answerHeld) {
+        await harness.answerHeld(request);
+      } else {
+        await heldCallsOf(harness).resolve(executionId, request);
+      }
+      return;
+    } catch (e) {
+      if (signal.aborted) {
+        return;
+      }
+      const wait = ANSWER_RETRY_MS[tries];
+      if (wait === undefined) {
+        reportFailure(opts, {
+          stage: 'answer',
+          error: e,
+          retry: () => void recordAnswer(opts, answer),
+        });
+        return;
+      }
+      await sleep(wait, signal);
+    }
+  }
+}
+
+function reportFailure(opts: AskOptions, failure: HeldCallFailure): void {
+  const { harness, held, signal } = opts;
+  const { stage, error } = failure;
+  if (signal.aborted) {
+    return;
+  }
+  const onFailed = harness.config.onHeldFailed;
+  if (!onFailed) {
+    console.warn(
+      `[noetic] ${harness.config.name}: ${stage === 'handler' ? 'the onHeld handler failed' : 'the onHeld answer was not recorded'} for '${held.name}' (${held.callId}); the call stays held: ${messageOf(error)}`,
+    );
     return;
   }
   try {
-    if (harness.answerHeld) {
-      await harness.answerHeld({
-        executionId,
-        ...(threadId === undefined
-          ? {}
-          : {
-              threadId,
-            }),
-        callId: held.callId,
-        argsHash: held.argsHash,
-        resolution: answer,
-      });
-      return;
-    }
-    await heldCallsOf(harness).resolve(executionId, {
-      callId: held.callId,
-      argsHash: held.argsHash,
-      resolution: answer,
-    });
+    onFailed(held, failure, contextOf(opts));
   } catch (e) {
-    if (signal.aborted) {
-      return;
-    }
     console.warn(
-      `[noetic] ${harness.config.name}: the onHeld answer for '${held.name}' (${held.callId}) was refused; the call stays held: ${messageOf(e)}`,
+      `[noetic] ${harness.config.name}: onHeldFailed threw for '${held.name}' (${held.callId}): ${messageOf(e)}`,
     );
   }
+}
+
+function contextOf(opts: AskOptions): HeldCallContext {
+  return {
+    signal: opts.signal,
+    executionId: opts.executionId,
+    ...(opts.threadId === undefined
+      ? {}
+      : {
+          threadId: opts.threadId,
+        }),
+  };
+}
+
+/** Wait `ms`, or less when `signal` aborts first. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(done, ms);
+    signal.addEventListener('abort', done, {
+      once: true,
+    });
+    function done(): void {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    }
+  });
 }
 
 function messageOf(e: unknown): string {

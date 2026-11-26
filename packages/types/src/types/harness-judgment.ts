@@ -209,6 +209,37 @@ export type HeldCallHandler = (
 ) => HeldResolution | undefined | Promise<HeldResolution | undefined>;
 
 /**
+ * @public Why a held call could not be answered (`AgentHarnessOpts.onHeldFailed`): the
+ * call stays held, with no deadline of its own, until `retry()` or another answer
+ * settles it.
+ *
+ * - `handler`: the `onHeld` handler threw. Core does not ask it again by itself.
+ * - `answer`: the answer it returned was not recorded, after a few tries. A
+ *   `hold_refused` error may mean the answer itself was refused, which the same answer
+ *   will be again.
+ */
+export interface HeldCallFailure {
+  readonly stage: 'handler' | 'answer';
+  readonly error: unknown;
+  /**
+   * Try the failed stage again: ask the handler again, or record the same answer
+   * again. A failure is reported to `onHeldFailed` again; success settles the call.
+   */
+  retry(): void;
+}
+
+/**
+ * @public Told when a held call could not be answered (`AgentHarnessOpts.onHeldFailed`),
+ * so the host can say so and offer to retry. `held.signal` aborts once the call
+ * settles any way.
+ */
+export type HeldFailureHandler = (
+  call: HeldCall,
+  failure: HeldCallFailure,
+  held: HeldCallContext,
+) => void;
+
+/**
  * @public What a steer does at the `held` steer point before any layer has a say:
  * `apply` skips the held calls for it, `defer` keeps it queued behind them.
  */
