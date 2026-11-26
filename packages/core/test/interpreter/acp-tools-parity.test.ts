@@ -439,12 +439,30 @@ describe('ACP context layers, as on callModel', () => {
         tools: [],
       }),
       undefined,
-      harness.createContext(),
+      harness.createContext({
+        threadId: 'layered-thread',
+      }),
     );
     const [prompt] = log.prompts;
     assert(prompt);
     expect(prompt).toContain('<context>\nSECRET: pelican\n</context>');
     expect(prompt.indexOf('SECRET')).toBeLessThan(prompt.indexOf('what is the secret?'));
     expect(stored).toHaveLength(1);
+    const window = await harness.getCurrentContext(undefined, {
+      threadId: 'layered-thread',
+    });
+    expect(window?.request).toEqual({
+      target: 'acp',
+      content: [
+        {
+          type: 'text',
+          text: prompt,
+        },
+      ],
+      layerText: {
+        notes: 'SECRET: pelican',
+      },
+    });
+    await harness.close();
   });
 });

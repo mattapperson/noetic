@@ -220,6 +220,13 @@ async function sendNative({
     body: decisionsRequest,
   });
   try {
+    if (!request.signal?.aborted) {
+      request._contextObservation?.request({
+        target: 'decide',
+        model: request.model,
+        state: decisionsRequest.state,
+      });
+    }
     const response = await client.alpha.decisions.create(
       {
         decisionsRequest,
@@ -454,7 +461,7 @@ async function callEstimated(
       {
         length: samples,
       },
-      () =>
+      (_, sample) =>
         deps.callModel({
           model: request.model,
           instructions: estimateInstructions(request),
@@ -469,6 +476,8 @@ async function callEstimated(
           signal: request.signal,
           parentSpan: request.parentSpan,
           _billTo: request._billTo,
+          _contextObservation: request._contextObservation,
+          _decisionSample: sample,
         }),
     ),
   );

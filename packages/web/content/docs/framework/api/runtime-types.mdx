@@ -23,6 +23,8 @@ declare interface HarnessApi<TParams extends Record<string, unknown> = Record<st
   getTextStream(scope?: SessionScope): AsyncIterable<string>;
   getReasoningStream(scope?: SessionScope): AsyncIterable<string>;
   getFullStream(scope?: SessionScope): AsyncIterable<StreamEvent>;
+  getContextStream(scope?: SessionScope): AsyncIterable<ContextStreamEvent>;
+  getCurrentContext(render?: true, scope?: SessionScope): Promise<ContextWindow | undefined>;
   abort(scope?: SessionScope & CancelOptions): Promise<DrainReport | undefined>;
   getStatus(scope: ExecutionScope): ExecutionStatus;
   getStatus(scope?: SessionScope): HarnessStatus;
@@ -154,7 +156,9 @@ declare interface RerenderRequest {
 | `projectHistory(layers, items, ctx)` | Run each layer's `projectHistory` hook in slot order to project (cap, transform) the history portion of the context window. Read-side only. |
 | `runAppendPipeline(layers, items, ctx)` | Run input items through each layer's `onItemAppend` hook in slot order, returning the transformed items plus any re-render requests. |
 | `executeRerender(requests, layers, ctx, budgets, query?)` | Re-run recall for the layers selected by the given re-render requests and return their fresh outputs. |
-| `previewRequestItems(scope?)` | Return the `Item[]` that would be sent on the next turn — accumulated history plus harness-level layer recall outputs. Inits layers on a throwaway context (hydrating scoped state from storage) and drops its state entries afterwards; no session is allocated for unknown thread ids. |
+| `getCurrentContext(render?, scope?)` | Return the latest observed context. Pass `true` to render a fresh preview without committing layer state or publishing events. |
+| `getContextStream(scope?)` | Yield context snapshots as layers update and requests are handed off. |
+| `previewRequestItems(scope?)` | Return projected items from a fresh preview. |
 | `storeLayers(layers, response, ctx)` | Run store on all layers. |
 | `disposeLayers(layers, ctx)` | Dispose all layers. |
 | `getLayerState(executionId, layerId)` | Read a layer's state for a given execution. |

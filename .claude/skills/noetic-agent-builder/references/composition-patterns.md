@@ -1660,3 +1660,8 @@ Each event is delivered once (durable inbox + cursor), as a turn whose message i
 ```
 
 Run it with `parseAndRunWorkflow({ json, harness, ctx, tools, connections: { browsers: { ops: ['ui.*', 'browser.*'], setup: { url: ['http://localhost:*'] } } } })`. A model-written document (`dynamicWorkflow({ connections })`) is only ever shown — and only ever allowed — the allowlisted connections and operations.
+
+
+### Observe the context window
+
+Subscribe to `harness.getContextStream({ threadId })` to show context as each layer renders. Use the assembly ID to keep overlapping steps separate. The final request event carries the actual provider input or ACP prompt. Each event contains a complete snapshot of the observed window at that point. When a snapshot has `gap: true`, replace the reader's view with that snapshot. Layer authors use their usual recall hooks.

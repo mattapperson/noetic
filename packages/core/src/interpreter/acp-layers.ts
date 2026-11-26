@@ -12,6 +12,7 @@ import type {
   Context,
   ContextData,
   ContextLayer,
+  ContextObservation,
   ContextRerenderRequest,
   Item,
   ProjectionPolicy,
@@ -43,10 +44,17 @@ export async function renderLayerContext(params: {
   layers: ContextLayer[] | undefined;
   query: string;
   rerenderRequests: ContextRerenderRequest[];
-}): Promise<string> {
+  observation?: ContextObservation;
+}): Promise<{
+  text: string;
+  layerText: Record<string, string>;
+}> {
   const { ctx, layers } = params;
   if (!layers || layers.length === 0) {
-    return '';
+    return {
+      text: '',
+      layerText: {},
+    };
   }
   const policy: ProjectionPolicy = ctx.harness.config.projection ?? DEFAULT_PROJECTION;
   const recall = await gatherRecallResults({
@@ -65,13 +73,29 @@ export async function renderLayerContext(params: {
       ]),
     ),
     rerenderRequests: params.rerenderRequests,
+    observation: params.observation,
   });
-  const text = recall
-    .flatMap((output) => output.items)
-    .map(itemText)
-    .filter((chunk) => chunk.trim().length > 0)
+  const rendered = recall.map(({ layerId, items }) => ({
+    layerId,
+    text: items
+      .map(itemText)
+      .filter((chunk) => chunk.trim().length > 0)
+      .join('\n\n'),
+  }));
+  const text = rendered
+    .map((entry) => entry.text)
+    .filter(Boolean)
     .join('\n\n');
-  return text.length > 0 ? `<context>\n${text}\n</context>` : '';
+  const layerText = Object.fromEntries(
+    rendered.map((entry) => [
+      entry.layerId,
+      entry.text,
+    ]),
+  );
+  return {
+    text: text.length > 0 ? `<context>\n${text}\n</context>` : '',
+    layerText,
+  };
 }
 
 //#endregion

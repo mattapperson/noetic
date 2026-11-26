@@ -347,11 +347,16 @@ async function promptAgent<TContext, I, O>(params: {
   for (;;) {
     // Recall runs before every turn, as before every model call; its output
     // leads the prompt.
+    const observation = baseCtx.harness._observeContext?.(baseCtx, step.id);
     const context = await renderLayerContext({
       ctx: baseCtx,
       layers,
       query: promptText,
       rerenderRequests,
+      observation,
+    }).catch((error: unknown) => {
+      observation?.end();
+      throw error;
     });
     rerenderRequests = [];
     const result = await runTurn({
@@ -365,14 +370,22 @@ async function promptAgent<TContext, I, O>(params: {
       collect: retries === 0 && resolution.reattached,
       content: buildContent({
         text: [
-          context,
+          context.text,
           turnPrompt,
         ]
           .filter((part) => part.length > 0)
           .join('\n\n'),
         blocks: turnBlocks,
       }),
-    });
+      onPrompt:
+        observation &&
+        ((content) =>
+          observation.request({
+            target: 'acp',
+            content,
+            layerText: context.layerText,
+          })),
+    }).finally(() => observation?.end());
     applyTurnResult(baseCtx, result);
     try {
       assertTurnSucceeded(step.id, result, baseCtx);

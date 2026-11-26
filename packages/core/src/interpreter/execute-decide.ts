@@ -1,4 +1,5 @@
 import type {
+  ContextObservation,
   DecideAnswer,
   DecideQuestion,
   DecideQuestions,
@@ -64,17 +65,18 @@ export async function executeDecide<TContext, I, O>(
 
   const model = await resolveModel(step, ctx);
   const instructions = await resolveLazy(step.instructions, ctx);
-  const state = [
-    ...inputState(input),
-    ...(await viewState(step, input, baseCtx, layers ?? [])),
-    ...contextState(step.context ? await step.context(ctx) : undefined),
-  ];
+  const observation = baseCtx.harness._observeContext?.(baseCtx, step.id);
 
   const span = baseCtx.harness.createSpan('decide.call', baseCtx.span);
   span.setAttribute(NoeticAttr.NODE_ID, step.id);
   let answers: Record<string, DecideAnswer>;
   let response: DecideResponse;
   try {
+    const state = [
+      ...inputState(input),
+      ...(await viewState(step, input, baseCtx, layers ?? [], observation)),
+      ...contextState(step.context ? await step.context(ctx) : undefined),
+    ];
     response = await askHarness(step, baseCtx, {
       model,
       instructions,
@@ -89,6 +91,7 @@ export async function executeDecide<TContext, I, O>(
       signal: isContextImpl(baseCtx) ? baseCtx.abortSignal : undefined,
       parentSpan: span,
       _billTo: baseCtx,
+      _contextObservation: observation,
     });
     trackUsage(baseCtx, {
       items: [],
@@ -105,6 +108,7 @@ export async function executeDecide<TContext, I, O>(
     span.setAttribute('error', true);
     throw e;
   } finally {
+    observation?.end();
     span.end();
     await exportSpans(baseCtx.harness.traceExporter, [
       span,
@@ -336,6 +340,7 @@ async function viewState<TContext, I, O>(
   input: I,
   ctx: Context<ContextData>,
   layers: ContextLayer[],
+  observation?: ContextObservation,
 ): Promise<DecideStatePart[]> {
   if (step.view === 'none') {
     return [];
@@ -346,6 +351,7 @@ async function viewState<TContext, I, O>(
     query: typeof input === 'string' ? input : '',
     ctx,
     policy,
+    observation,
   });
   const history =
     step.view === 'full' ? await ctx.harness.projectHistory(layers, ctx.itemLog.items, ctx) : [];
@@ -363,11 +369,13 @@ async function peekRecall({
   query,
   ctx,
   policy,
+  observation,
 }: {
   layers: ContextLayer[];
   query: string;
   ctx: Context<ContextData>;
   policy: ProjectionPolicy;
+  observation?: ContextObservation;
 }): Promise<Item[]> {
   if (layers.length === 0) {
     return [];
@@ -386,6 +394,7 @@ async function peekRecall({
   );
   const peek = {
     peek: true,
+    observe: observation?.layer,
   };
   const results = [
     ...(await ctx.harness.recallLayersAtomic(layers, query, ctx, budgets, peek)),

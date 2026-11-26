@@ -408,7 +408,10 @@ The agent harness coordinates [context layer](/docs/framework/context-layers) li
 |---|---|
 | `initLayers` | Initialize layers at the start of an agent run. Loads persisted state from storage. |
 | `recallLayers` | Query layers for relevant items given an input string. Returns `RecallLayerOutput[]`. |
-| `previewRequestItems` | Return the `Item[]` that would be sent on the next turn — accumulated history plus harness-level layer recall outputs assembled via `assembleView`. Inits layers on a throwaway context so init-bearing layers contribute; safe to call between turns. |
+| `getCurrentContext(render?, scope?)` | Read the latest observed window, including a partial one while layers render. Pass `true` for an isolated preview from current layer state. |
+| `previewRequestItems(scope?)` | Return the projected items from a fresh preview. |
+
+Use `getContextStream({ threadId })` to receive each layer recall, re-render, or change in pending status before the request leaves Noetic. Each layer includes a display name, recall mode, last successful render time, and pending-update flag. The stream also records the prepared input handed to the native model client or the prompt handed to an ACP agent. It starts with the latest available snapshot and marks a replacement snapshot with `gap` if a slow reader falls behind. The harness keeps the latest windows for up to 32 idle standalone threads with no readers. After eviction, `getCurrentContext()` returns `undefined` for that thread until another window is observed.
 | `storeLayers` | Write new items from an LLM response into layers. |
 | `disposeLayers` | Clean up layers at the end of a run. |
 

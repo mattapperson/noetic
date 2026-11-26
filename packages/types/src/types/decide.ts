@@ -1,6 +1,7 @@
 import type { ZodError, ZodType } from 'zod';
 import { z } from 'zod';
 import type { Context } from './context';
+import type { ContextObservation } from './context-window';
 import type { Span } from './observability';
 
 //#region Questions
@@ -200,6 +201,8 @@ export interface DecideRequest {
   parentSpan?: Span;
   /** @internal The context the call's spend belongs to, so its dispatch record names the execution. */
   _billTo?: Context;
+  /** @internal */
+  _contextObservation?: ContextObservation;
 }
 
 /** @public Response from `harness.decide()`. */

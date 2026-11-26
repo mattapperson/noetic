@@ -10,6 +10,7 @@ import type {
   RecallOptions,
   StorageAdapter,
 } from './context-layer';
+import type { ContextObservation, ContextStreamEvent, ContextWindow } from './context-window';
 import type { DecideRequest, DecideResponse, DecisionRecord } from './decide';
 import type { ApproveRequest } from './harness-judgment';
 import type { HarnessPlatform } from './harness-platform';
@@ -23,6 +24,7 @@ import type {
   DrainReport,
   ExecutionScope,
   ExecutionStatus,
+  SessionScope,
 } from './runtime';
 import type { OnSteerParams, SteeringDecision, SteerVerdict } from './steering';
 import type { StepLike, StepsInput, StepsOutput, ValidStepChain } from './step';
@@ -132,6 +134,10 @@ export type ContextStep<TContext = ContextData, I = unknown, O = unknown> =
 
 /** @public Runtime surface exposed on Context without coupling Context's definition to the runtime type module. */
 export interface ContextHarness extends HarnessPlatform {
+  /** @internal Observe one model-bound context assembly. */
+  _observeContext?(ctx: Context, stepId: string): ContextObservation | undefined;
+  getContextStream(scope?: SessionScope): AsyncIterable<ContextStreamEvent>;
+  getCurrentContext(render?: true, scope?: SessionScope): Promise<ContextWindow | undefined>;
   readonly config: {
     readonly name: string;
     readonly params: Record<string, unknown>;
@@ -296,5 +302,6 @@ export interface ContextHarness extends HarnessPlatform {
     ctx: Context,
     budgets: Map<string, number>,
     query?: string,
+    opts?: RecallOptions,
   ): Promise<ContextRecallLayerOutput[]>;
 }

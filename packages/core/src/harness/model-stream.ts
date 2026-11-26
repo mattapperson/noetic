@@ -1,6 +1,12 @@
 /** Send a model round and manage its response stream, usage, and checkpoints. */
 
-import type { CallModelRequest, Item, ItemSchemaRegistry, Span } from '@noetic-tools/types';
+import type {
+  CallModelRequest,
+  ContextInputOrigin,
+  Item,
+  ItemSchemaRegistry,
+  Span,
+} from '@noetic-tools/types';
 import { frameworkCast, SpendKind, SteerPoint } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import type { OpenRouter } from '@openrouter/agent';
@@ -23,6 +29,7 @@ interface DispatchRound {
   round: number;
   prepared: ReturnType<typeof prepareModelRequest>;
   modelInput: OpenRouterAgent.Item[];
+  origins: ReadonlyArray<ContextInputOrigin>;
   textFormat: ReturnType<typeof buildTextFormat> | undefined;
   recoveryContinuation: boolean;
   agentName: string;
@@ -52,6 +59,7 @@ export async function dispatchRound({
   round,
   prepared,
   modelInput,
+  origins,
   textFormat,
   recoveryContinuation,
   agentName,
@@ -121,6 +129,16 @@ export async function dispatchRound({
     },
     dispatch?.record,
   );
+  request._contextObservation?.request({
+    target: 'model',
+    model: request.model,
+    instructions: prepared.instructions,
+    input: modelInput,
+    origins,
+    round,
+    sample: request._decisionSample,
+    attempt: request._contextAttempt,
+  });
   const callResult = client.callModel(
     {
       model: request.model,

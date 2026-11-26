@@ -1,4 +1,4 @@
-import type { OutputCodec, StandardSchemaV1 } from '@noetic-tools/types';
+import type { ContextObservation, OutputCodec, StandardSchemaV1 } from '@noetic-tools/types';
 import {
   createMessage,
   estimateTokens,
@@ -11,7 +11,6 @@ import {
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { chargeSpent } from '../util/spent';
 import {
-  assembleView,
   commitLayerUsage,
   computeLayerUsage,
   contextToExecCtx,
@@ -53,6 +52,7 @@ import type { BandedView } from './context-assembly';
 import {
   anchoringAttributes,
   appendUserInput,
+  assembleModelItems,
   computeBudgetMap,
   gatherRecallResults,
   prepareBandedView,
@@ -181,29 +181,11 @@ async function assembleTurnItems(params: {
     return rawHistoryItems;
   }
   const projectedHistoryItems = await ctx.harness.projectHistory(layers, rawHistoryItems, ctx);
-  const systemItems: Item[] = [];
-  const nonSystemHistory: Item[] = [];
-  const tailIds = new Set(steeringTail.map((i) => i.id));
-  for (const item of projectedHistoryItems) {
-    if (item.type === 'message' && item.role === 'system') {
-      systemItems.push(item);
-      continue;
-    }
-    // Steering guidance is re-placed at the tail; skip it here so the retry
-    // does not see the same correction twice.
-    if ('id' in item && typeof item.id === 'string' && tailIds.has(item.id)) {
-      continue;
-    }
-    nonSystemHistory.push(item);
-  }
-  return assembleView({
-    systemPromptItems: systemItems,
-    layerOutputItems: banded.anchorItems,
-    historyItems: nonSystemHistory,
-    liveLayerItems: banded.liveItems,
-    deltaItems: banded.deltaItems,
-    tailItems: steeringTail,
+  return assembleModelItems({
+    history: projectedHistoryItems,
+    banded,
     policy: viewPolicy,
+    steeringTail,
   });
 }
 
@@ -440,7 +422,10 @@ export async function executeCallModel<TContext, I, O>(
   // A steer whose layers asked for recall ends the call early. Recall runs again over
   // the conversation the steer joined, and the call goes on from there.
   for (;;) {
-    const response = await callOnFreshView(scope, recallQuery, rerender);
+    const observation = baseCtx.harness._observeContext?.(baseCtx, step.id);
+    const response = await callOnFreshView(scope, recallQuery, rerender, observation).finally(() =>
+      observation?.end(),
+    );
     if (!response.recall) {
       return finalizeStepOutput({
         stepId: step.id,
@@ -473,6 +458,7 @@ async function callOnFreshView<TContext, I, O>(
   scope: ViewCallScope<TContext, I, O>,
   recallQuery: string,
   rerenderRequests: ContextRerenderRequest[],
+  observation?: ContextObservation,
 ): Promise<LLMResponse> {
   const {
     step,
@@ -502,6 +488,7 @@ async function callOnFreshView<TContext, I, O>(
     budgetMap,
     slotOf,
     rerenderRequests,
+    observation,
   });
 
   // Split recall output into the cache-stable anchor band and the live band,
@@ -555,6 +542,38 @@ async function callOnFreshView<TContext, I, O>(
       assembledItems,
       spanAttributes,
     });
+    if (observation) {
+      request._contextObservation = observation;
+      request._contextAttempt = retries;
+      const origins = new Map<
+        Item,
+        {
+          layerIds: string[];
+          placement: 'items' | 'delta';
+        }
+      >();
+      for (const { layerId, items } of banded.servedPerLayer) {
+        for (const item of items) {
+          const previous = origins.get(item);
+          origins.set(item, {
+            layerIds: [
+              ...new Set([
+                ...(previous?.layerIds ?? []),
+                layerId,
+              ]),
+            ],
+            placement: 'items',
+          });
+        }
+      }
+      for (const item of banded.deltaItems) {
+        origins.set(item, {
+          layerIds: banded.deltaLayers ?? [],
+          placement: 'delta',
+        });
+      }
+      request._contextOrigins = origins;
+    }
     spanAttributes = undefined;
     const response = await baseCtx.harness.callModel(request).catch((e: unknown) => {
       chargeSpent(baseCtx, e);

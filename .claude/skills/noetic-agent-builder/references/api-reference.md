@@ -1809,11 +1809,12 @@ await harness.execute('follow-up', { threadId: 'thread-1' });
 // Cancel the in-flight turn. Queued messages stay and drive the next turn.
 await harness.abort({ threadId: 'thread-1', reason: 'user' });
 
-// Preview the items that would be sent on the next turn — accumulated history
-// plus harness-level context layer recall outputs. Read-mostly debug helper for
-// inspecting "what the model will see"; safe to call between turns.
-const items = await harness.previewRequestItems({ threadId: 'thread-1' });
+// Inspect observed context or render a fresh, read-only preview.
+const current = await harness.getCurrentContext(undefined, { threadId: 'thread-1' });
+const preview = await harness.getCurrentContext(true, { threadId: 'thread-1' });
 ```
+
+For standalone threads with no active readers, the harness keeps up to 32 idle context windows. After eviction, `getCurrentContext()` returns `undefined` until the thread publishes another window.
 
 ### Delivery Modes
 
@@ -1917,6 +1918,7 @@ For decision models the OpenRouter adapter calls the native decisions API; for a
 | `saveSessionOutput(items, scope)` | Save display snapshots (objects with a string `type`) by id; resolves the whole output. Model history untouched. |
 | `getTextStream(scope?)` / `getReasoningStream(scope?)` | Text / reasoning deltas. |
 | `getFullStream(scope?)` | Raw SDK + framework events. |
+| `getContextStream(scope?)` | Snapshots as context layers update and requests are handed off. |
 | `abort(scope?)` | Cancel in-flight turn; queued messages preserved. `{ drainMs }` drains first and resolves with the `DrainReport` (see Cancellation). |
 | `getStatus(scope?)` | `{ kind: 'idle' \| 'generating' \| 'draining' \| 'aborting' }`; `draining` carries `deadline`. `getStatus({ executionId })` gives a `run()` execution's `ExecutionStatus` (same kinds, no `turnId`). |
 | `getQueueSize(scope?)` | Count of queued messages. |

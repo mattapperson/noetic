@@ -37,7 +37,10 @@ class ScriptedClient {
     getFullResponsesStream: () => AsyncIterable<unknown>;
     getResponse: () => Promise<unknown>;
   } {
-    this.requests.push(request);
+    this.requests.push({
+      ...request,
+      input: structuredClone(request.input),
+    });
     const round = this.requests.length;
     return {
       async *getFullResponsesStream() {},
@@ -435,4 +438,55 @@ describe('callModel toolChoice', () => {
     expect(client.requests[0]?.tools).toBeUndefined();
     expect(client.requests[0]?.toolChoice).toBeUndefined();
   });
+});
+
+it('records the exact provider context in each model round', async () => {
+  const client = new ScriptedClient('a');
+  const harness = new AgentHarness({
+    name: 'context-rounds',
+    params: {},
+  });
+  frameworkCast<{
+    llm: {
+      client: unknown;
+    };
+  }>(harness).llm.client = client;
+  const ctx = harness.createContext({
+    threadId: 'rounds',
+  });
+  const stream = harness
+    .getContextStream({
+      threadId: 'rounds',
+    })
+    [Symbol.asyncIterator]();
+  const observation = harness._observeContext(ctx, 'reply');
+  try {
+    await harness.callModel({
+      model: 'test/model',
+      items: [
+        makeMessage('user', 'go'),
+      ],
+      instructions: 'be brief',
+      tools: [
+        countingTool('a', []),
+      ],
+      ctx,
+      _contextObservation: observation,
+    });
+    expect(client.requests).toHaveLength(2);
+    for (let round = 0; round < client.requests.length; round++) {
+      const request = client.requests[round];
+      const event = (await stream.next()).value;
+      expect(event?.window.request).toMatchObject({
+        target: 'model',
+        round,
+        input: request?.input,
+        instructions: request?.instructions,
+      });
+    }
+  } finally {
+    observation?.end();
+    await stream.return?.();
+    await harness.close();
+  }
 });

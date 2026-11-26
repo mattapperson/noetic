@@ -2,6 +2,7 @@ import type {
   AgentHarnessContract,
   CallModelRequest,
   Context,
+  ContextInputOrigin,
   Item,
   ItemSchemaRegistry,
   LLMResponse,
@@ -119,6 +120,28 @@ export class AgentHarnessModelCaller {
     });
     let response: LLMResponse | undefined;
     try {
+      if (!request.signal?.aborted) {
+        request._contextObservation?.request({
+          target: 'override',
+          model: request.model,
+          instructions: request.instructions,
+          input: request.items,
+          origins: request.items.flatMap((item, index) => {
+            const origin = request._contextOrigins?.get(item);
+            return origin
+              ? [
+                  {
+                    ...origin,
+                    index,
+                  },
+                ]
+              : [];
+          }),
+          round: 0,
+          sample: request._decisionSample,
+          attempt: request._contextAttempt,
+        });
+      }
       response = await this.opts.callModelOverride(request);
       const itemSchemas = buildItemSchemaRegistry({
         base: this.opts.itemSchemas,
@@ -187,7 +210,25 @@ export class AgentHarnessModelCaller {
     const prepared = prepareModelRequest(request, this.opts.agentName);
     const allItems: Item[] = [];
     let servedTier: string | undefined;
-    const conversationInput = itemsToInput(prepared.remaining);
+    const origins: ContextInputOrigin[] = [];
+    for (const item of request.items) {
+      const origin = request._contextOrigins?.get(item);
+      if (origin && item.type === 'message' && item.role === 'system') {
+        origins.push({
+          ...origin,
+          placement: 'instructions',
+        });
+      }
+    }
+    const conversationInput = itemsToInput(prepared.remaining, (item, index) => {
+      const origin = request._contextOrigins?.get(item);
+      if (origin) {
+        origins.push({
+          ...origin,
+          index,
+        });
+      }
+    });
     const textFormat = request.outputSchema
       ? buildTextFormat(request.outputSchema, request.outputJsonSchema)
       : undefined;
@@ -291,6 +332,7 @@ export class AgentHarnessModelCaller {
         round,
         prepared,
         modelInput,
+        origins,
         textFormat,
         recoveryContinuation,
         agentName: this.opts.agentName,

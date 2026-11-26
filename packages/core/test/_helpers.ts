@@ -551,6 +551,8 @@ export function makeMockHarness(): AgentHarnessContract {
     recallLayersAtomic: async (layers, input, ctx) => harness.recallLayers(layers, input, ctx),
     recallLayersEventual: async () => [],
     previewRequestItems: async () => [],
+    getContextStream: async function* () {},
+    getCurrentContext: async () => undefined,
     storeLayers: async () => {},
     disposeLayers: async () => {},
     checkpoint: async () => {},
