@@ -25,6 +25,7 @@ export {
   sharedAlarm,
   type WakeableHarness,
 } from './alarm-wake';
+export { type CronTick, type CronWakeOptions, cronWake } from './cron-wake';
 export {
   type CreateD1StorageOptions,
   createD1Storage,
