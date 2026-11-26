@@ -1,3 +1,7 @@
+## @noetic-tools/acp-v2.0.0-next.6 (2026-11-26)
+
+* feat: an agent's tool calls, plans and settings reach the host in one vocabulary (#172) ([cf712bf](https://github.com/mattapperson/noetic/commit/cf712bf)), closes [#172](https://github.com/mattapperson/noetic/issues/172) [#170](https://github.com/mattapperson/noetic/issues/170)
+
 ## @noetic-tools/acp-v2.0.0-next.5 (2026-11-25)
 
 * feat: an agent step's turn reaches the host as a model call's does (#171) ([196b1e1](https://github.com/mattapperson/noetic/commit/196b1e1)), closes [#171](https://github.com/mattapperson/noetic/issues/171) [#169](https://github.com/mattapperson/noetic/issues/169)
