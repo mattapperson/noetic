@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.19.0-next.15 (2026-11-26)
+
+* feat!: one subprocess adapter concept, and named fs, shell and subprocess adapters (#182) ([096c64d](https://github.com/mattapperson/noetic/commit/096c64d)), closes [#182](https://github.com/mattapperson/noetic/issues/182)
+
 ## @noetic-tools/types-v3.19.0-next.14 (2026-11-26)
 
 * feat(core): stream context windows from the harness (#181) ([1695950](https://github.com/mattapperson/noetic/commit/1695950)), closes [#181](https://github.com/mattapperson/noetic/issues/181)
