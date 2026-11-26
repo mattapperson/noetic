@@ -1,3 +1,7 @@
+## @noetic-tools/context-v2.0.0-next.2 (2026-11-26)
+
+* feat: an agent's tool calls, plans and settings reach the host in one vocabulary (#172) ([cf712bf](https://github.com/mattapperson/noetic/commit/cf712bf)), closes [#172](https://github.com/mattapperson/noetic/issues/172) [#170](https://github.com/mattapperson/noetic/issues/170)
+
 ## @noetic-tools/context-v2.0.0-next.1 (2026-11-25)
 
 * feat: one approval seam for every path that asks a person ([f2979cc](https://github.com/mattapperson/noetic/commit/f2979cc))
