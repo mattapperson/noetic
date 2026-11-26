@@ -1,3 +1,7 @@
+## @noetic-tools/openui-v2.2.2-next.1 (2026-11-26)
+
+* feat!: one subprocess adapter concept, and named fs, shell and subprocess adapters (#182) ([096c64d](https://github.com/mattapperson/noetic/commit/096c64d)), closes [#182](https://github.com/mattapperson/noetic/issues/182)
+
 ## @noetic-tools/openui-v2.2.1 (2026-10-30)
 
 * ci: publish prereleases from next to the next dist-tag (#152) ([0b247bc](https://github.com/mattapperson/noetic/commit/0b247bc)), closes [#152](https://github.com/mattapperson/noetic/issues/152)
