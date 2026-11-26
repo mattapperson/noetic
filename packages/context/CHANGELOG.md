@@ -1,3 +1,7 @@
+## @noetic-tools/context-v2.0.0-next.3 (2026-11-26)
+
+* feat(core): stream context windows from the harness (#181) ([1695950](https://github.com/mattapperson/noetic/commit/1695950)), closes [#181](https://github.com/mattapperson/noetic/issues/181)
+
 ## @noetic-tools/context-v2.0.0-next.2 (2026-11-26)
 
 * feat: an agent's tool calls, plans and settings reach the host in one vocabulary (#172) ([cf712bf](https://github.com/mattapperson/noetic/commit/cf712bf)), closes [#172](https://github.com/mattapperson/noetic/issues/172) [#170](https://github.com/mattapperson/noetic/issues/170)
