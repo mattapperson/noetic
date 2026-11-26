@@ -34,7 +34,7 @@ import { globMatches } from './workflow-connections';
 import type { Grants, PlannerConnection } from './workflow-grants';
 import { checkGrants, grantsPrompt } from './workflow-grants';
 import type { HydrationContext } from './workflow-hydrator';
-import { hydrateWorkflow } from './workflow-hydrator';
+import { hydrateDocument } from './workflow-hydrator';
 
 //#region Types
 
@@ -240,7 +240,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
           mcp: opts.mcp,
         };
 
-        const hydrated = hydrateWorkflow(parseResult.doc, hydrationCtx);
+        const hydrated = hydrateDocument(parseResult.doc, hydrationCtx);
         return frameworkCast(await executeStep(hydrated, input, ctx));
       }
 
@@ -378,7 +378,7 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
     mcp: opts.mcp,
   };
 
-  const hydrated = hydrateWorkflow(parseResult.doc, hydrationCtx);
+  const hydrated = hydrateDocument(parseResult.doc, hydrationCtx);
   const runSpan = beginWorkflowRunSpan(opts.harness, opts.ctx, parseResult.doc);
   try {
     const result = await executeStep(hydrated, opts.input ?? '', opts.ctx);

@@ -35,7 +35,6 @@ import type {
   WorkflowStepList,
 } from '../schemas/workflow';
 import { shorthandStepId, stepEntryToNode, stepListEntries } from '../schemas/workflow';
-import { flowFrom } from './flow-source';
 import { outputText } from './output-text';
 import { callModel, runCode } from './step-builders';
 import {
@@ -66,7 +65,6 @@ import {
   nodeScope,
 } from './workflow-custom-items';
 import { workflowReplayKey } from './workflow-replay-key';
-import { namedWorkflows, storedWorkflowSource, workflowSource } from './workflow-source';
 import {
   nodeTools,
   recordDocumentConnections,
@@ -140,23 +138,23 @@ export interface HydrationContext {
     readonly cwd: string;
   };
   /**
-   * The hydrated document's identity for `$steps`: each `hydrateWorkflow` call
+   * The hydrated document's identity for `$steps`: each `hydrateDocument` call
    * makes a new one, so two documents in one run never read each other's node
    * outputs. Set internally — callers never set it.
    */
   documentScope?: object;
   /**
    * Custom items the nodes being hydrated may emit (spec 34): the enclosing document's
-   * root scope. Threaded by `hydrateWorkflow` and the subflow hydrator.
+   * root scope. Threaded by `hydrateDocument` and the subflow hydrator.
    */
   customItems?: CustomItemMap;
   /**
    * The connections the enclosing document declares (spec 35 § JSON workflows).
-   * Threaded by `hydrateWorkflow`; a node naming a connection outside it fails
+   * Threaded by `hydrateDocument`; a node naming a connection outside it fails
    * with `CONNECTION_UNKNOWN`. Without a manifest, names pass to the registry as they are.
    */
   connections?: ConnectionManifestEntries;
-  /** What the document uses of each connection, for negotiation and gate 1. Threaded by `hydrateWorkflow`. */
+  /** What the document uses of each connection, for negotiation and gate 1. Threaded by `hydrateDocument`. */
   connectionUses?: ConnectionUses;
   /**
    * The connection an operation written by name, or a node without
@@ -339,7 +337,7 @@ function hydrateSequenceNode(
 
 //#region Document Scope
 
-/** Nodes hydrated outside any `hydrateWorkflow` (a bare `hydrateNode`) share one scope. */
+/** Nodes hydrated outside any `hydrateDocument` (a bare `hydrateNode`) share one scope. */
 const BARE_DOCUMENT_SCOPE: object = {};
 
 /** The `$steps` scope of the document `ctx` is hydrating. */
@@ -473,57 +471,18 @@ export function hydrateNode(
 }
 
 /**
- * Hydrates a complete `WorkflowDocument` into a live `Step` tree.
+ * @internal
+ * Hydrates a complete `WorkflowDocument` into a live `Step` tree. The root holds
+ * no source: `hydrateWorkflow` gives a host one a harness can store, and a step
+ * that hydrates as it runs needs none.
  *
- * @public
- * @param doc - Validated workflow document (version 1).
- * @param ctx - Hydration context with tool registry and step executor.
- * @param customItems - TypeScript declarations of the document's root custom items (spec 34).
- * @returns The root `Step` of the hydrated workflow. A harness given it as `agentGraph` stores the
- *   document with each session and resumes a turn on the document it began under (spec 23 § Versions).
  * @throws `NoeticConfigError` with code `CUSTOM_ITEM_MISMATCH` when `customItems` and the document give one name different types.
  * @throws `NoeticConfigError` with code `CONNECTION_UNKNOWN` when a node uses a connection the document's `connections` do not declare, or `CONNECTION_INVALID` when a node's connection is neither named nor implied, or a source entry is used beyond its events.
  */
-export function hydrateWorkflow(
+export function hydrateDocument(
   doc: WorkflowDocument,
   ctx: HydrationContext,
   customItems?: CustomItemMap,
-): Step<ContextData, string, string> {
-  const source = workflowSource({
-    document: doc,
-    workflows: ctx.workflows,
-  });
-  return flowFrom(source, (from) => {
-    if (from === source) {
-      return hydrateDocument(doc, ctx, customItems);
-    }
-    const stored = storedWorkflowSource(from);
-    if (!stored.document) {
-      throw new NoeticConfigError({
-        code: 'WORKFLOW_VALIDATION_FAILED',
-        message: 'A stored workflow holds no document.',
-        hint: 'hydrateWorkflow builds from a document. The stored flow was built another way.',
-      });
-    }
-    return hydrateDocument(
-      stored.document,
-      {
-        ...ctx,
-        workflows: namedWorkflows(stored, ctx.workflows),
-      },
-      customItems,
-    );
-  });
-}
-
-//#endregion
-
-//#region Document Hydration
-
-function hydrateDocument(
-  doc: WorkflowDocument,
-  ctx: HydrationContext,
-  customItems: CustomItemMap | undefined,
 ): Step<ContextData, string, string> {
   const connectionUses = checkDocumentConnections(doc);
   const root = hydrateNode(doc.root, {

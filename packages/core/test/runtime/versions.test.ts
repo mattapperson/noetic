@@ -17,7 +17,7 @@ import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { callModel, invokeTool, runCode } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
-import { hydrateWorkflow } from '../../src/builders/workflow-hydrator';
+import { hydrateWorkflow } from '../../src/builders/workflow-source';
 import { workflow } from '../../src/builders/workflow-step';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';

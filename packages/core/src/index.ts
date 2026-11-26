@@ -82,7 +82,9 @@ export { verify } from './builders/verify-builder';
 /** @public */
 export type { HydrationContext } from './builders/workflow-hydrator';
 /** @public */
-export { hydrateNode, hydrateStepList, hydrateWorkflow } from './builders/workflow-hydrator';
+export { hydrateNode, hydrateStepList } from './builders/workflow-hydrator';
+/** @public */
+export { hydrateWorkflow } from './builders/workflow-source';
 /** @public */
 export type {
   TypedWorkflowStep,

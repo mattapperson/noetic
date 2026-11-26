@@ -30,7 +30,7 @@ import { spawn } from './spawn-builder';
 import { runCode } from './step-builders';
 import { everyDocumentItem } from './workflow-custom-items';
 import type { HydrationContext } from './workflow-hydrator';
-import { hydrateWorkflow } from './workflow-hydrator';
+import { hydrateDocument } from './workflow-hydrator';
 import { namedWorkflows, storedWorkflowSource, workflowSource } from './workflow-source';
 
 //#region Types
@@ -271,7 +271,7 @@ function hydrate(
     expressionLimits: opts.expressionLimits,
     recursionDepth: opts.ref ? 1 : undefined,
   };
-  const hydrated = hydrateWorkflow(doc, hydrationCtx, opts.customItems);
+  const hydrated = hydrateDocument(doc, hydrationCtx, opts.customItems);
   if (opts.isolation !== 'spawn') {
     return hydrated;
   }

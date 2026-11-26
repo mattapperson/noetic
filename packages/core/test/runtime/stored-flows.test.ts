@@ -26,7 +26,7 @@ import { flowFrom } from '../../src/builders/flow-source';
 import { toStep } from '../../src/builders/sequence';
 import { callModel, invokeTool, runCode, step } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
-import { hydrateWorkflow } from '../../src/builders/workflow-hydrator';
+import { hydrateWorkflow } from '../../src/builders/workflow-source';
 import { workflow } from '../../src/builders/workflow-step';
 import { defineSource } from '../../src/connections/sources';
 import { AgentHarness } from '../../src/harness/agent-harness';
