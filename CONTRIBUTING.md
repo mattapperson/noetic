@@ -50,6 +50,20 @@ package directory:
 bunx tsc --noEmit --strict --skipLibCheck --module esnext --target esnext --moduleResolution bundler --customConditions bun --lib esnext --types bun-types src/index.ts
 ```
 
+## Review a PR with Jev in T3
+
+Import **Review PR with Jev** from `t3.json` in **Settings → Projects → Actions**. Run it from the PR’s thread. It uses the open PR for the current branch and reads `.repo-rules.json` from the root of that checkout.
+
+The action needs Node.js 22 or later, Git, an authenticated GitHub CLI, and `TYPESAFE_API_KEY` in the action’s environment. To use an OpenRouter key, also set `TYPESAFE_BASE_URL=https://openrouter.ai/api/alpha/decisions`. Set `JEV_PROVIDERS` to choose from the [upstream reviewer’s provider list](https://github.com/fatwang2/jev-review-action#jev-providers) instead.
+
+From the terminal, pass a PR number or URL to select a PR. Add `--json` for the full report, or use `--check-policy` on its own to validate the catalog without calling Jev.
+
+```sh
+node scripts/review-pr.mjs 123
+```
+
+The script downloads the pinned [Jev review engine](https://github.com/fatwang2/jev-review-action/tree/929b99227431f0a35752d4860e9ba7c36abe5bda) and sends the PR title, description, and bounded diff to the configured Jev provider. Run the action from a checkout whose script and catalog you trust. The advisory report goes to the action terminal.
+
 ## Developer Certificate of Origin (DCO)
 
 We use the [Developer Certificate of Origin](https://developercertificate.org/) to

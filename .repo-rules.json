@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "mode": "pull-request",
+  "title": "Noetic pull request review",
+  "scope": "Review Noetic changes against this catalog. Apply rules to the behavior changed by the PR, and treat a rule as met when the diff shows it is unaffected. When missing evidence prevents either judgment, answer with uncertainty. This review is advisory.",
+  "categories": {
+    "documentation": "Changes mainly to prose, examples, and documentation",
+    "bugfix": "Changes that correct existing behavior",
+    "feature": "Changes that add a capability",
+    "maintenance": "Internal refactoring, dependencies, CI, and tooling",
+    "other": "Mixed or unclear changes"
+  },
+  "categoryConfidence": 0.7,
+  "checks": [
+    {
+      "id": "scope_match",
+      "title": "Changes match the PR purpose",
+      "question": "Do the changed files serve the purpose stated in the PR title and description?",
+      "yes": "The diff serves the stated purpose with no material unrelated changes.",
+      "no": "The diff materially conflicts with the PR purpose or introduces unrelated changes.",
+      "accept": 0.8,
+      "reject": 0.2
+    },
+    {
+      "id": "step_composition",
+      "title": "Small, typed steps",
+      "question": "Where the PR changes workflow execution, does it build on typed, composable Step<I, O> primitives?",
+      "yes": "The change composes existing steps, or the diff shows why a new step is needed. The rule passes if workflow execution is unaffected.",
+      "no": "The diff duplicates an existing step or adds an abstraction that bypasses typed step composition.",
+      "accept": 0.8,
+      "reject": 0.2
+    },
+    {
+      "id": "explicit_flow",
+      "title": "Explicit control flow",
+      "question": "Can workflow authors see when the workflow calls a model, branches, runs work in parallel, spawns, or stops?",
+      "yes": "Any changed control flow is explicit in the workflow or its public step contract. The rule passes if routing and execution order are unaffected.",
+      "no": "The diff adds implicit routing, retries, or model calls that change workflow behavior outside its declared contract.",
+      "accept": 0.8,
+      "reject": 0.2
+    },
+    {
+      "id": "context_boundaries",
+      "title": "Explicit context boundaries",
+      "question": "Do changes to model or child-run context preserve explicit layer choice, budgets, and boundaries?",
+      "yes": "Changes assemble model context through the layer system and respect scope and budgets. The rule passes if these boundaries are unaffected.",
+      "no": "The diff bypasses layer rules or implicitly shares context across a model or child-run boundary.",
+      "accept": 0.8,
+      "reject": 0.2
+    },
+    {
+      "id": "durable_runs",
+      "title": "Resumable and inspectable execution",
+      "question": "Do changes to durable execution preserve safe resume and visible trace events?",
+      "yes": "Recorded work can still resume safely and changed execution paths can be inspected. The rule passes if durable execution and its traces are unaffected.",
+      "no": "The diff can repeat a recorded effect on resume, lose required state, or hide a material execution decision from tracing.",
+      "accept": 0.8,
+      "reject": 0.2
+    },
+    {
+      "id": "portable_core",
+      "title": "Portable core",
+      "question": "Does the change keep platform, protocol, and product details outside the core execution contracts?",
+      "yes": "Reusable contracts remain portable, and adapters or application code own environment details and product policy.",
+      "no": "The diff makes core depend on a platform, protocol implementation, or app-specific policy.",
+      "accept": 0.8,
+      "reject": 0.2
+    },
+    {
+      "id": "small_api",
+      "title": "Small public API",
+      "question": "Does the change use existing public methods where they fit and keep execute() the main entry point?",
+      "yes": "New public entry points serve behavior existing methods cannot express, and ordinary callers need minimal setup and trigger calls. The rule passes if the public API is unaffected.",
+      "no": "The diff adds a redundant public API or requires an extra ordinary setup or trigger call that the harness can handle itself.",
+      "accept": 0.8,
+      "reject": 0.2
+    },
+    {
+      "id": "preset_defaults",
+      "title": "Working defaults and durable presets",
+      "question": "Do changes to setup preserve a working basic harness and flow, with durability available through a short runtime preset?",
+      "yes": "Basic non-durable execution still works with minimal configuration, and durability setup stays in a short environment preset. The rule passes if setup is unaffected.",
+      "no": "The diff makes basic execution depend on durable infrastructure or moves routine preset setup into caller code.",
+      "accept": 0.8,
+      "reject": 0.2
+    },
+    {
+      "id": "items_api",
+      "title": "Items in and Items out",
+      "question": "Do changes to the harness interface keep typed Items as the primary input and output?",
+      "yes": "New or changed harness methods use typed Items for primary data, with params and callbacks as extension points. The rule passes if harness inputs and outputs are unaffected.",
+      "no": "The diff makes parameters or callbacks the primary way to send or receive harness data that should be represented by Items.",
+      "accept": 0.8,
+      "reject": 0.2
+    },
+    {
+      "id": "json_workflows",
+      "title": "JSON-first workflows",
+      "question": "Can workflows affected by the diff be defined in JSON, with JS and TS helpers building that same form?",
+      "yes": "Changed workflow behavior is represented by a JSON document and builders produce that representation. The rule passes if workflow authoring is unaffected.",
+      "no": "The diff adds workflow behavior expressible only through a separate JS or TS execution path.",
+      "accept": 0.8,
+      "reject": 0.2
+    },
+    {
+      "id": "static_checks",
+      "title": "Typed values and recoverable execution",
+      "question": "Do changes to workflow values or features preserve static type validation and automatic recovery from runtime errors?",
+      "yes": "Affected values have a type that can be checked before execution, and features either reject unsafe workflows during validation or recover automatically at runtime. The rule passes if workflow validation and runtime failure paths are unaffected.",
+      "no": "The diff allows a value that cannot be statically checked or a valid workflow that can hit a new runtime error with no automatic recovery path.",
+      "accept": 0.8,
+      "reject": 0.2
+    }
+  ]
+}
