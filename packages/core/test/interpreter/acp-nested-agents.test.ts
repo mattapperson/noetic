@@ -1049,3 +1049,229 @@ describe('a nested agent: what started it, what it was asked, and stopping it', 
     expect(stopped).toEqual([]);
   });
 });
+
+describe('stopping a nested agent through a running step', () => {
+  const kid = (update: AcpChildUpdate['update'], announcement = false): AcpChildUpdate => ({
+    sessionId: 'kid',
+    announcement,
+    lineage: [
+      {
+        sessionId: 'kid',
+        title: 'general-purpose',
+        cancellable: true,
+      },
+    ],
+    update,
+  });
+
+  /** One step whose agent starts a cancellable subagent; the host stops it mid-turn. */
+  async function runOnce(opts: { fail?: boolean; emit?: false }): Promise<{
+    events: Captured[];
+    cancelled: string[];
+    duringTurn: boolean;
+    afterTurn: boolean;
+  }> {
+    const harness = new AgentHarness({
+      name: 'h',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const events: Captured[] = [];
+    frameworkCast<{
+      _broadcaster: unknown;
+    }>(ctx)._broadcaster = {
+      emit(event: Captured) {
+        events.push(event);
+      },
+    };
+    const cancelled: string[] = [];
+    let duringTurn = false;
+    const agent: AcpAgent = {
+      specificationVersion: 'acp-v1',
+      agentId: 'fake',
+      async connect(connect): Promise<AcpAgentConnection> {
+        const session: AcpSession = {
+          sessionId: 'root',
+          availableCommands: [],
+          async prompt(): Promise<AcpTurnResult> {
+            connect.host.onChildUpdate?.(
+              kid(
+                {
+                  sessionUpdate: 'subagent_update',
+                  sessionId: 'kid',
+                  state: {
+                    state: 'running',
+                  },
+                },
+                true,
+              ),
+            );
+            connect.host.onChildUpdate?.(kid(work('kid').update));
+            const scope = events.find((e) => e.type === 'h:agent_started')?.scope;
+            duringTurn = await harness.stopAgent(scope?.id ?? 'unknown');
+            if (opts.fail) {
+              throw new Error('the agent fell over');
+            }
+            return RESULT;
+          },
+          async cancel() {},
+          async cancelChild(sessionId) {
+            cancelled.push(sessionId);
+          },
+          async setMode() {},
+          async setModel() {},
+        };
+        return {
+          agentCapabilities: {},
+          authMethods: [],
+          protocolVersion: 1,
+          fingerprintFor: (): string => 'fake',
+          async authenticate() {},
+          async newSession() {
+            return session;
+          },
+          async loadSession() {
+            return session;
+          },
+          async close() {},
+        };
+      },
+    };
+    await execute(
+      step.acpAgent({
+        id: 'parent',
+        agent,
+        prompt: 'go',
+        ...(opts.emit === false
+          ? {
+              emit: false,
+            }
+          : {}),
+      }),
+      undefined,
+      ctx,
+    ).catch(() => undefined);
+    const scope = events.find((e) => e.type === 'h:agent_started')?.scope;
+    return {
+      events,
+      cancelled,
+      duringTurn,
+      afterTurn: await harness.stopAgent(scope?.id ?? 'unknown'),
+    };
+  }
+
+  it('stops it through the session while the turn runs, and offers nothing once it ended', async () => {
+    const run = await runOnce({});
+    expect(run.duringTurn).toBe(true);
+    expect(run.cancelled).toEqual([
+      'kid',
+    ]);
+    expect(run.afterTurn).toBe(false);
+  });
+
+  it('takes the offer back when the turn fails', async () => {
+    const run = await runOnce({
+      fail: true,
+    });
+    expect(run.duringTurn).toBe(true);
+    expect(run.afterTurn).toBe(false);
+  });
+});
+
+describe('a nested agent, the step emitting nothing', () => {
+  it('emits nothing of it, not even what it was asked', () => {
+    const harness = new AgentHarness({
+      name: 'h',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const events: Captured[] = [];
+    frameworkCast<{
+      _broadcaster: unknown;
+    }>(ctx)._broadcaster = {
+      emit(event: Captured) {
+        events.push(event);
+      },
+    };
+    const b = new AcpEventBridge(
+      {
+        id: 'step',
+        emit: false,
+      },
+      ctx,
+    );
+    b.begin();
+    b.forwardChild(announce('kid'));
+    b.forwardChild(
+      own('kid', {
+        sessionUpdate: 'session_message',
+        messageId: 'm1',
+        senderSessionId: 'root',
+        recipientSessionId: 'kid',
+        content: [
+          {
+            type: 'text',
+            text: 'Do it.',
+          },
+        ],
+      }),
+    );
+    expect(events.filter((e) => e.scope && e.type.startsWith('h:'))).toEqual([]);
+  });
+
+  it('a stopped one offers no second stop', async () => {
+    const harness = new AgentHarness({
+      name: 'h',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const events: Captured[] = [];
+    frameworkCast<{
+      _broadcaster: unknown;
+    }>(ctx)._broadcaster = {
+      emit(event: Captured) {
+        events.push(event);
+      },
+    };
+    const b = new AcpEventBridge(
+      {
+        id: 'step',
+      },
+      ctx,
+    );
+    const stopped: string[] = [];
+    b.offerChildStops(async (sessionId) => {
+      stopped.push(sessionId);
+    });
+    b.begin();
+    const lineage = [
+      {
+        sessionId: 'kid',
+        title: 'Explore',
+        cancellable: true,
+      },
+    ];
+    b.forwardChild({
+      ...work('kid'),
+      lineage,
+    });
+    b.forwardChild({
+      sessionId: 'kid',
+      announcement: true,
+      lineage,
+      update: {
+        sessionUpdate: 'subagent_update',
+        sessionId: 'kid',
+        state: frameworkCast<{
+          state: 'running';
+        }>({
+          state: 'idle',
+          stopReason: 'end_turn',
+        }),
+      },
+    });
+    const scope = events.find((e) => e.type === 'h:agent_started')?.scope;
+    expect(await harness.stopAgent(scope?.id ?? '')).toBe(false);
+    expect(stopped).toEqual([]);
+  });
+});

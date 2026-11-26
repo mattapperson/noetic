@@ -114,7 +114,7 @@ const agent = claudeCode({
 
 The wrapped command runs with exactly the `args`, `env` and `cwd` you return, with the same process-group shutdown, and with or without the keeper.
 
-`onSpawn` tells you of each agent the machine starts as its own child: `{ pid, exited }`, where `exited` settles once the process has exited. A kept agent is its keeper's child and is not reported.
+`onSpawn` tells you of each agent the machine starts as its own child: `{ pid, exited }`, where `exited` settles once the process has exited. `pid` leads the agent's process group, so signal `-pid` to reach what it started; those processes may outlive `exited`. A kept agent is its keeper's child and is not reported. If `onSpawn` throws, the agent is stopped and the launch fails.
 
 ## Filesystem confinement
 
@@ -322,7 +322,7 @@ The question also shows up in `harness.pending()` and as a `tool_call_held` even
 
 An agent's subagents run in their own child sessions, and each shows up as a [nested agent](/docs/framework/runtime#nested-agents): its text, reasoning and tool calls reach `getFullStream()` with a `scope` naming it, framed by `agent_started`, `agent_status` and `agent_completed` events. They never reach the step's text, items or result, or `getTextStream()`.
 
-`agent_started` names the call that started the subagent (`callId`) when the agent's first message to it carries one of the turn's call ids, as Claude Code's does, and that message arrives as the nested agent's input: a scoped user message on `item_appended`. When the agent lets a client stop one subagent alone (`cancellable`), `harness.stopAgent(scope.id)` stops it while the turn goes on.
+`agent_started` names the call that started the subagent (`callId`) when the agent's first message to it carries one of the turn's call ids, as Claude Code's does, and that message arrives as the nested agent's input: a scoped user message on `item_appended`. When the agent lets a client stop one subagent alone (`cancellable`), `harness.stopAgent(scope.id)` stops it while the turn goes on; it answers false once the subagent has stopped (`agent_status` `idle`) or its turn has ended.
 
 ## Giving the agent your tools
 
@@ -513,14 +513,14 @@ for await (const chunk of harness.getTextStream()) {
 | `tool_call_update` of a running call | `tool_progress` with what changed: `status`, `title`, `kind`, `locations`, `progress`, `content`, and `input` when the agent wrote more of the call's input |
 | `tool_call_update` that finishes a call | `tool_call_completed` `{ name, callId, error, output?, content?, result? }` — `content` its diffs, terminals, images and resources |
 | `plan` (and the draft `plan_update` / `plan_removed`) | `plan_updated` `{ stepId, plan }` / `plan_removed` `{ stepId, id }` |
-| the turn starting, `current_mode_update`, a `config_option_update` that changes the model or its effort | `agent_config_updated` `{ stepId, mode?, model?, effort? }`: what the session runs with, then each change |
+| the turn starting, `current_mode_update`, a `config_option_update` that changes the model or its effort | `agent_config_updated` `{ stepId, mode?, model?, effort? }`: what the session runs with, then each change (`effort: null` when it no longer has one) |
 | every other update — `available_commands_update`, `session_info_update`, `usage_update`, … | nothing: session state, not output |
 
 These are the same events a `callModel` step emits, with the same fields (see [Tool calls, plans and agent settings](/docs/framework/runtime#tool-calls-plans-and-agent-settings)), so nothing you consume names the protocol. `toolId` is the tool the call is to, as the agent names it: `claudeCode()` reads Claude Code's own tool name (`Read`, or `read_file` with `toolServer: 'workspace'` for its `mcp__workspace__read_file`), `codex()` an MCP call's server and tool; a call no reader can place goes by its title. Pass `toolIdOf` to `defineAcpAgent` to teach another agent. A call's `progress` comes from the agent's `_meta.progress` or its raw output's `progress`; an update that leaves `content` out keeps what the call had, so the completion carries everything it produced. A call to one of the step's own `tools` is reported once, by the tool bridge.
 
 Every call that starts also completes before the turn closes — a call the agent never reported finished completes failed.
 
-**Turn metadata.** Like a `callModel` step, the turn a step accepts records `ctx.lastStepMeta.stopReason` (`end_turn`, `max_tokens` or `max_turn_requests`), `usage` (when the adapter supplies it) and `model` (the agent's current `model` option, else the one the step selected). A token or turn cap returns normally; `stopReason` is how you tell a truncated turn from a complete one. The protocol makes the usage an agent reports with its answer the session's running total, so nothing is charged from it unless the adapter's `usageOf` reads it: `claudeCode()` and `codex()` do, as both bridges report each turn's own tokens. A `usage_update` (Codex sends `{ used, size }`) is how full the agent's context window is, not tokens you were billed for, so it never becomes usage or cost.
+**Turn metadata.** Like a `callModel` step, the turn a step accepts records `ctx.lastStepMeta.stopReason` (`end_turn`, `max_tokens` or `max_turn_requests`), `usage` (when the adapter supplies it) and `model` (the agent's current `model` option, else the one the step selected). A token or turn cap returns normally; `stopReason` is how you tell a truncated turn from a complete one. The protocol makes the usage an agent reports with its answer the session's running total, so nothing is charged from it unless the adapter's `usageOf` reads it: `claudeCode()` and `codex()` do (`turnUsage`), as both bridges report each turn's own tokens, with cache reads and writes left out of `inputTokens` and added back. A `usage_update` (Codex sends `{ used, size }`) is how full the agent's context window is, not tokens you were billed for, so it never becomes usage or cost.
 
 **Loaded history.** When a step loads a session — `session.load`, or a resume after the host died — the agent replays the old conversation first. None of it reaches the event stream; it never appears as new text, reasoning, or tool calls.
 

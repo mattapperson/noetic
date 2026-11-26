@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type * as acp from '@agentclientprotocol/sdk';
 import { frameworkCast, isAcpCapabilityError } from '@noetic-tools/types';
 import { rawInputRecord } from '../src/permission-channel';
-import { claudeTurnUsage, codexTurnUsage } from '../src/turn-usage';
+import { turnUsage } from '../src/turn-usage';
 import { createAcpTestRig, textChunk } from './_helpers';
 
 const TEXT_PROMPT: acp.ContentBlock[] = [
@@ -211,7 +211,7 @@ describe('current session updates (#96)', () => {
           cachedWriteTokens: 100,
         },
       },
-      usageOf: claudeTurnUsage,
+      usageOf: turnUsage,
     });
     const session = await rig.connection.newSession({
       cwd: '/workspace',
@@ -242,32 +242,28 @@ describe('preset turn usage', () => {
       : {}),
   });
 
-  test('Claude Code counts cache reads and writes as input; Codex already does', () => {
+  test('counts cache reads and writes as input, as both bridges leave them out of inputTokens', () => {
+    // codex-acp 2.2.2 and claude-agent-acp 0.93 both report 1000 input tokens,
+    // 800 read from the cache and 100 written to it, this way.
     const usage: acp.Usage = {
-      inputTokens: 10,
-      outputTokens: 5,
-      totalTokens: 45,
-      cachedReadTokens: 20,
-      cachedWriteTokens: 10,
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 1050,
+      cachedReadTokens: 800,
+      cachedWriteTokens: 100,
     };
-    expect(claudeTurnUsage(answer(usage))).toEqual({
-      input: 40,
-      output: 5,
-      total: 45,
-      cached: 20,
-    });
-    expect(codexTurnUsage(answer(usage))).toEqual({
-      input: 10,
-      output: 5,
-      total: 15,
-      cached: 20,
+    expect(turnUsage(answer(usage))).toEqual({
+      input: 1000,
+      output: 50,
+      total: 1050,
+      cached: 800,
     });
   });
 
   test('an answer without counts charges nothing', () => {
-    expect(claudeTurnUsage(answer(undefined))).toBeUndefined();
+    expect(turnUsage(answer(undefined))).toBeUndefined();
     expect(
-      codexTurnUsage(
+      turnUsage(
         answer(
           frameworkCast<acp.Usage>({
             inputTokens: -1,

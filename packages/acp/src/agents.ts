@@ -28,7 +28,7 @@ import {
   sessionToolWiring,
 } from './tool-wiring';
 import type { TurnUsageOf } from './turn-usage';
-import { claudeTurnUsage, codexTurnUsage } from './turn-usage';
+import { turnUsage } from './turn-usage';
 
 /** @public How to launch an agent as a process. */
 export interface AcpProcessSpec {
@@ -215,7 +215,7 @@ export function claudeCode(opts: AcpPresetOptions = {}): AcpAgent {
     wiring: claudeToolWiring,
     instructionsMeta: claudeInstructionsMeta,
     toolIdOf: claudeToolId,
-    usageOf: claudeTurnUsage,
+    usageOf: turnUsage,
   });
 }
 
@@ -230,7 +230,7 @@ export function codex(opts: AcpPresetOptions = {}): AcpAgent {
     opts,
     wiring: codexToolWiring,
     toolIdOf: codexToolId,
-    usageOf: codexTurnUsage,
+    usageOf: turnUsage,
   });
 }
 

@@ -720,7 +720,10 @@ child (the RFD's `session_message`) is its input, a scoped user message; its
 `messageId`, when it is one of the turn's calls, is the call that started the
 child (`agent_started`'s `callId`). A child announced with
 `capabilities.cancel` is `cancellable`: `AcpSession.cancelChild(sessionId)`
-sends `session/cancel` for it alone, which `harness.stopAgent` uses. A connection remembers at most a
+sends `session/cancel` for it alone, which `harness.stopAgent` uses. It
+refuses (`AcpCapabilityError`) any other id — the session itself, another
+session of the connection, a child below another session, one not announced
+as cancellable — since `session/cancel` for those would stop a turn. A connection remembers at most a
 thousand children, forgetting the one heard from least recently first — the
 order the keeper keeps, so a child still speaking is never forgotten — but
 never one another kept child was announced under, so a child is never placed without its parent. Updates for a session the connection does not
@@ -895,12 +898,12 @@ step's. The `AcpEventBridge` translates each variant into the same
 | `agent_thought_chunk` | `response.reasoning.delta` |
 | `tool_call` | `response.output_item.added` (function_call) + `response.function_call_arguments.delta`/`.done` + `response.output_item.done` |
 | `tool_call` of the agent's own tool | also the framework `tool_call_started` `{ name, callId, title, kind?, locations?, status? }`, as the `callModel` tool loop emits it; `status` when the agent said `pending` or `in_progress` |
-| `tool_call` / `tool_call_update` of a call still running | the framework `tool_progress` `{ name, callId, … }` with what the update changed: `status`, `title`, `kind`, `locations`, `progress`, `content`, and `input` — the call's `rawInput`, whole, when it differs from what the call had |
+| `tool_call` / `tool_call_update` of a call still running | the framework `tool_progress` `{ name, callId, … }` with what the update changed: `status`, `title`, `kind`, `locations`, `progress`, `content`, and `input` — the call's `rawInput`, whole, when it differs from what the call had. An update that finishes the call with new input reports that `input` alone, just before its completion, which carries none |
 | `tool_call` / `tool_call_update` that reports the call `completed` or `failed` | the framework `tool_call_completed` `{ name, callId, error, output?, content?, result? }`, once per call; `content` is the call's latest content as structure, `output` the text it carries, `result` its raw output |
 | `plan`, draft `plan_update` | the framework `plan_updated` `{ stepId, plan }`: entries, or a markdown or file plan, with its `id` |
 | draft `plan_removed` | the framework `plan_removed` `{ stepId, id }` |
-| `current_mode_update` | the framework `agent_config_updated` `{ stepId, mode }` |
-| `config_option_update` that changes the `model` option or the effort option (category `thought_level`, else id `effort` or `reasoning_effort`) | the framework `agent_config_updated` `{ stepId, model?, effort? }` with what changed |
+| `current_mode_update` to another mode | the framework `agent_config_updated` `{ stepId, mode }` |
+| `config_option_update` that changes the `model` option or the effort option (category `thought_level`, else id `effort` or `reasoning_effort`) | the framework `agent_config_updated` `{ stepId, model?, effort? }` with what changed; `effort: null` when the options no longer have one |
 | the turn starting | the framework `agent_config_updated` `{ stepId, mode?, model?, effort? }`: the session's current mode, model and effort, when it has any |
 | every other variant — `user_message_chunk`, `available_commands_update`, `session_info_update`, `usage_update`, … | nothing: session state the runtime tracks on the live session, not output |
 
@@ -988,10 +991,10 @@ none; every attempt's spend is charged all the same:
   model call's. The protocol specifies the `usage` a `session/prompt` answer
   reports as the session's running total, so the runtime charges nothing from
   it on its own; an adapter whose bridge reports each turn's own figures reads
-  them with `usageOf` (`defineAcpAgent`). `claudeCode()` and `codex()` do:
-  claude-agent-acp tallies the turn alone and leaves cache reads and writes
-  out of `inputTokens`, which `claudeTurnUsage` adds back; codex-acp reports
-  the prompt's own, its `inputTokens` already counting cached ones.
+  them with `usageOf` (`defineAcpAgent`). `claudeCode()` and `codex()` do,
+  with `turnUsage`: claude-agent-acp and codex-acp each tally the turn alone,
+  and both leave cache reads and writes out of `inputTokens`, so the turn's
+  input is all three.
 - `model` — the model the turn ran with: the current value of the session's
   `model` config option (found by category, else by id, as the session finds
   it to set it), else the model the step selected.

@@ -17,10 +17,12 @@ function count(value: unknown): number | undefined {
 }
 
 /**
- * claude-agent-acp: `usage` is the turn's own, and its `inputTokens` leave out
- * the tokens read from and written to the cache, as Anthropic counts them.
+ * The turn's own `usage`, as claude-agent-acp and codex-acp report it: both
+ * tally the turn alone, and both leave the tokens read from and written to the
+ * cache out of `inputTokens`, so they are added back to make the turn's input.
+ * @public
  */
-export const claudeTurnUsage: TurnUsageOf = (answer) => {
+export const turnUsage: TurnUsageOf = (answer) => {
   const usage = answer.usage;
   const input = count(usage?.inputTokens);
   const output = count(usage?.outputTokens);
@@ -34,30 +36,6 @@ export const claudeTurnUsage: TurnUsageOf = (answer) => {
     input: all,
     output,
     total: all + output,
-    ...(read === undefined
-      ? {}
-      : {
-          cached: read,
-        }),
-  };
-};
-
-/**
- * codex-acp: `usage` is the prompt's own, and its `inputTokens` already count
- * the cached ones, as OpenAI counts them.
- */
-export const codexTurnUsage: TurnUsageOf = (answer) => {
-  const usage = answer.usage;
-  const input = count(usage?.inputTokens);
-  const output = count(usage?.outputTokens);
-  if (input === undefined || output === undefined) {
-    return undefined;
-  }
-  const read = count(usage?.cachedReadTokens);
-  return {
-    input,
-    output,
-    total: input + output,
     ...(read === undefined
       ? {}
       : {

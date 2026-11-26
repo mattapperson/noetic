@@ -553,8 +553,10 @@ async function handleToolProgress(state: TurnState, event: StreamEvent): Promise
   }
   const report = readPresentation(event);
   const content = readContent(event);
+  // An agent's call whose input it wrote after announcing the call.
+  const input = event.data.input === undefined ? undefined : asRecord(event.data.input);
   // A report the editor can show nothing of — a generator's bare event — sends nothing.
-  if (Object.keys(report).length === 0 && content === undefined) {
+  if (Object.keys(report).length === 0 && content === undefined && input === undefined) {
     return;
   }
   await notifyIfPrimary(state.params, state.primary, {
@@ -584,6 +586,11 @@ async function handleToolProgress(state: TurnState, event: StreamEvent): Promise
       ? {}
       : {
           content: content.map(wireContent),
+        }),
+    ...(input === undefined
+      ? {}
+      : {
+          rawInput: input,
         }),
     ...(report.progress === undefined
       ? {}

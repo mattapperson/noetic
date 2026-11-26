@@ -127,9 +127,9 @@ function buildContent(opts: {
 }
 
 /**
- * The turn's tokens as a model round reports them, from the adapter. What the
- * agent's `session/prompt` answer reports is the session's running total, not
- * the turn's, so it is never charged.
+ * The turn's tokens as a model round reports them, from the adapter (its
+ * `usageOf`). The protocol makes what a `session/prompt` answer reports the
+ * session's running total, so without the adapter nothing is charged.
  */
 function turnUsage(result: AcpTurnResult): RoundUsage | undefined {
   if (!result.usage) {

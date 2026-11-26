@@ -238,3 +238,27 @@ describe('localMachine onSpawn', () => {
     await machine.close();
   });
 });
+
+describe('localMachine onSpawn that throws', () => {
+  it('stops the agent and fails the launch, leaving nothing running', async () => {
+    let pid: number | undefined;
+    const machine = await localMachine('throws', {
+      keeper: false,
+      onStderr: () => undefined,
+      onSpawn: (agent) => {
+        pid = agent.pid;
+        throw new Error('registry is full');
+      },
+    })({});
+    const launching = machine.launch({
+      command: process.execPath,
+      args: [
+        FIXTURE,
+      ],
+    });
+    await expect(launching).rejects.toThrow('onSpawn');
+    expect(pid).toBeDefined();
+    expect(() => process.kill(pid ?? 0, 0)).toThrow();
+    await machine.close();
+  });
+});

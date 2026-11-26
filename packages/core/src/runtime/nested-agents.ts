@@ -4,8 +4,8 @@
  * turn runs in this process.
  */
 
-/** Stops one nested agent; the turn that runs it goes on. */
-type Stop = () => Promise<void>;
+/** Stops one nested agent, the turn that runs it going on: false when it has already stopped. */
+type Stop = () => Promise<boolean>;
 
 const registries = new WeakMap<object, Map<string, Stop>>();
 
@@ -29,12 +29,8 @@ export function offerStop(harness: object, scopeId: string, stop: Stop): () => v
   };
 }
 
-/** Stop the nested agent `scopeId`: false when no running turn here offers to. */
+/** Stop the nested agent `scopeId`: false when no running turn here offers to, or it already stopped. */
 export async function stopNestedAgent(harness: object, scopeId: string): Promise<boolean> {
   const stop = registries.get(harness)?.get(scopeId);
-  if (!stop) {
-    return false;
-  }
-  await stop();
-  return true;
+  return stop ? await stop() : false;
 }

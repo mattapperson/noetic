@@ -510,6 +510,54 @@ describe("an agent's plan, mode and model", () => {
     ]);
   });
 
+  it('tells the same mode once, and an effort the session no longer has as null', () => {
+    const { bridge, events } = bridgeCtx();
+    bridge.begin();
+    const select = (id: string, category: string, currentValue: string) => ({
+      type: 'select' as const,
+      id,
+      name: id,
+      category,
+      currentValue,
+      options: [],
+    });
+    bridge.announceSettings({
+      modes: {
+        currentModeId: 'default',
+        availableModes: [],
+      },
+      configOptions: [
+        select('model', 'model', 'sonnet'),
+        select('effort', 'thought_level', 'high'),
+      ],
+    });
+    send(bridge, {
+      sessionUpdate: 'current_mode_update',
+      currentModeId: 'default',
+    });
+    // A model without an effort option.
+    send(bridge, {
+      sessionUpdate: 'config_option_update',
+      configOptions: [
+        select('model', 'model', 'haiku'),
+      ],
+    });
+
+    expect(named(events, 'agent_config_updated').map((event) => event.data)).toEqual([
+      {
+        stepId: 'agent',
+        mode: 'default',
+        model: 'sonnet',
+        effort: 'high',
+      },
+      {
+        stepId: 'agent',
+        model: 'haiku',
+        effort: null,
+      },
+    ]);
+  });
+
   it('tells nothing at the start of a session that says nothing of its settings', () => {
     const { bridge, events } = bridgeCtx();
     bridge.begin();

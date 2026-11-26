@@ -244,7 +244,8 @@ export class AcpEventBridge {
   private messageId = '';
   private messageText = '';
   private sawText = false;
-  /** The model and effort the agent last reported, so a change is told once. */
+  /** The mode, model and effort the agent last reported, so a change is told once. */
+  private mode: string | undefined;
   private model: string | undefined;
   private effort: string | undefined;
   /** Maps an agent's title for a bridged tool call to the tool's wire name. */
@@ -317,7 +318,11 @@ export class AcpEventBridge {
     }
     const agent = this.openChild(child.sessionId);
     if (input) {
-      agent?.bridge.itemAppended(createMessage(input.text, 'user'));
+      // Gated by the step's `emit`, as the nested agent's other events are:
+      // a host that filters them out never meets a scope it was not shown.
+      agent?.bridge.framework('item_appended', {
+        item: createMessage(input.text, 'user'),
+      });
       return;
     }
     agent?.bridge.forward({
@@ -349,7 +354,10 @@ export class AcpEventBridge {
     if (update.sessionUpdate !== 'session_message') {
       return undefined;
     }
-    if (update.senderSessionId === child.sessionId) {
+    // Sent to the child, by another session: not one the child sends on.
+    const to = update.recipientSessionId;
+    const toAnother = to !== undefined && to !== null && to !== child.sessionId;
+    if (toAnother || update.senderSessionId === child.sessionId) {
       return undefined;
     }
     const text = (update.content ?? []).map(blockText).join('');
@@ -440,7 +448,16 @@ export class AcpEventBridge {
     const stop = this.stopChild;
     const cancellable = info.cancellable === true && stop !== undefined;
     if (cancellable) {
-      this.offers.push(offerStop(this.ctx.harness, scope.id, () => stop(info.sessionId)));
+      this.offers.push(
+        offerStop(this.ctx.harness, scope.id, async () => {
+          // One that already stopped has nothing left to stop.
+          if (this.statuses.get(info.sessionId)?.status === 'idle') {
+            return false;
+          }
+          await stop(info.sessionId);
+          return true;
+        }),
+      );
     }
     const launch = this.launches.get(info.sessionId);
     agent.bridge.framework('agent_started', {
@@ -514,6 +531,7 @@ export class AcpEventBridge {
    */
   announceSettings(session: Pick<AcpSession, 'modes' | 'configOptions'>): void {
     const mode = session.modes?.currentModeId;
+    this.mode = mode;
     this.model = modelOf(session.configOptions);
     this.effort = effortOf(session.configOptions);
     const settings = {
@@ -1294,9 +1312,12 @@ export class AcpEventBridge {
       return;
     }
     if (update.sessionUpdate === 'current_mode_update') {
-      this.framework('agent_config_updated', {
-        mode: update.currentModeId,
-      });
+      if (update.currentModeId !== this.mode) {
+        this.mode = update.currentModeId;
+        this.framework('agent_config_updated', {
+          mode: update.currentModeId,
+        });
+      }
       return;
     }
     if (update.sessionUpdate !== 'config_option_update') {
@@ -1310,14 +1331,15 @@ export class AcpEventBridge {
         : {
             model,
           }),
-      ...(effort === undefined || effort === this.effort
+      // null: the session no longer has an effort to set (a model without one).
+      ...(effort === this.effort
         ? {}
         : {
-            effort,
+            effort: effort ?? null,
           }),
     };
     this.model = model ?? this.model;
-    this.effort = effort ?? this.effort;
+    this.effort = effort;
     if (Object.keys(changed).length > 0) {
       this.framework('agent_config_updated', changed);
     }

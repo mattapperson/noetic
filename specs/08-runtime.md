@@ -789,12 +789,15 @@ show one.
   update that arrives late opens no new nested agent.
 - **What started it, and what it was asked.** `callId` is the call of the
   agent above it that started it — one of the turn's calls, whose id the
-  nested agent's first message carries. That message — what the agent above
-  asked of it — is its input: a user message on its `item_appended`, scoped.
+  nested agent's first message carries, when that message is what opens it.
+  A message sent to it by another session — what the agent above asked of
+  it — is its input: a user message on its `item_appended`, scoped, and like
+  the rest of its events subject to the step's `emit`.
 - **Stopping one.** `cancellable` says its agent lets a client stop it alone.
   While its turn runs in this process, `harness.stopAgent(scope.id)` stops it
   and the turn goes on; the agent then reports how it ended with its
-  `agent_status`. It answers false for any other id, and once the turn ended.
+  `agent_status`. It answers false for any other id, for one whose last
+  status was `idle` (it already stopped), and once the turn ended.
 - **Ids.** `scope.id` is the nested agent's identity — scoped events carry no
   adapter id. It is the step's dispatch path, the turn, and the subagent's own
   id (`<path>/turn:<turn>/agent:<id>`), so a steering retry or a later prompt
@@ -915,7 +918,8 @@ none runs (`init`, between turns) carries none.
 - `agent_config_updated` — `{ stepId, mode?, model?, effort? }`: what the
   session runs with as each turn starts — its mode, its model and how hard
   that model reasons, as far as the agent says — then, carrying only what
-  changed, each change the agent reports. A step's last
+  changed, each change the agent reports. `effort: null` says the session no
+  longer has an effort to set (a model without one). A step's last
   model is also its `lastStepMeta.model` (`02-step-variants` § `StepMeta`).
 
 All three kinds are scoped to the nested agent they belong to, like the rest of

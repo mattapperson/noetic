@@ -244,6 +244,8 @@ class AcpSessionImpl implements AcpSession {
   private queue: Promise<unknown> = Promise.resolve();
   /** Set by the connection: how the agent's answer says what a turn cost. */
   usageOf: TurnUsageOf | undefined;
+  /** Set by the connection: whether `child` is a subagent below this session the agent lets a client stop. */
+  stoppable: (child: string) => boolean = () => false;
 
   constructor(
     private readonly agentId: string,
@@ -433,6 +435,15 @@ class AcpSessionImpl implements AcpSession {
   }
 
   async cancelChild(sessionId: string): Promise<void> {
+    // Never this session itself, nor another on the connection: `session/cancel`
+    // for those would stop a turn, not a subagent.
+    if (!this.stoppable(sessionId)) {
+      throw new AcpCapabilityError({
+        agentId: this.agentId,
+        capability: 'subagent cancel',
+        message: `ACP agent '${this.agentId}' announced no subagent '${sessionId}' it lets a client stop below session '${this.sessionId}'.`,
+      });
+    }
     await this.agent.cancel({
       sessionId,
     });
@@ -684,7 +695,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     }
   }
 
-  /** Keep what an announcement says of a child: its title and description. */
+  /** Keep what an announcement says of a child: its title, description, and whether it can be stopped alone. */
   private describe(child: string, update: AcpSessionNotification['update']): void {
     const fields: Record<string, unknown> = {
       ...update,
@@ -743,6 +754,17 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
       at = this.children.get(at);
     }
     return chain;
+  }
+
+  /** The session a child was announced under, through every subagent above it. */
+  private rootOf(child: string): string | undefined {
+    const seen = new Set<string>();
+    let at: string | undefined = child;
+    while (at !== undefined && this.children.has(at) && !seen.has(at)) {
+      seen.add(at);
+      at = this.children.get(at);
+    }
+    return at;
   }
 
   /** A child's updates held before it was announced, routed now as its own, in order. */
@@ -883,6 +905,10 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
 
   private track(session: AcpSessionImpl): AcpSessionImpl {
     session.usageOf = this.settings.usageOf;
+    session.stoppable = (child) =>
+      this.children.has(child) &&
+      this.childInfo.get(child)?.cancellable === true &&
+      this.rootOf(child) === session.sessionId;
     this.sessions.set(session.sessionId, session);
     // Everything held while no session was known goes through the routing
     // again, in order: the new session's own updates are delivered, a child

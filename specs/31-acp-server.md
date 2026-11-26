@@ -194,7 +194,7 @@ The translation is the client direction's `AcpEventBridge` table (spec 27,
 | `response.output_text.delta` | `agent_message_chunk` |
 | `response.reasoning.delta` | `agent_thought_chunk` |
 | `tool_call_started` (framework, carries `callId`) | `tool_call` — `toolCallId` = `callId`; `title`, `kind` and `locations` as the event carries them, else from the tool's `presentation` declaration in the serve options (below); status `pending` while gated or when the event says so, `in_progress` once running |
-| `tool_progress` of a call it started | `tool_call_update` — what the report changed: `status`, `title`, `kind`, `locations`, `content`, and `progress` as `_meta.progress` |
+| `tool_progress` of a call it started | `tool_call_update` — what the report changed: `status`, `title`, `kind`, `locations`, `content`, `input` as `rawInput`, and `progress` as `_meta.progress` |
 | `tool_call_completed` | `tool_call_update` — `completed` or `failed`; its structured `content` (diffs, images, resources) when it carries any it can show — a data-URL `input_image` or audio `input_file` as the media block, a video's data as a `resource`, a plain URL as a `resource_link` — else the output — or the error — as text content |
 | `response.output_item.done` of an `image_generation_call` | `agent_message_chunk` with the image (a data URL's media type, else `image/png`) |
 | `plan_updated` with entries, `plan_removed` | `plan` — the wire shows one plan: an update shows its entries, whatever its id; a removal clears them only when it removes the plan shown. A markdown or file plan is not sent |

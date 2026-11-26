@@ -107,8 +107,13 @@ export interface LocalMachineOptions {
 
 /** @public An agent process {@link LocalMachineOptions.onSpawn} reports. */
 export interface LocalAgentProcess {
+  /**
+   * The command's own process, which leads the agent's process group (POSIX):
+   * signal `-pid` to reach everything it started, a wrapper's grandchildren
+   * included.
+   */
   readonly pid: number;
-  /** Settles once the process has exited. */
+  /** Settles once that process has exited; what it started may outlive it. */
   readonly exited: Promise<void>;
 }
 
@@ -387,10 +392,16 @@ async function spawnStdio(
     throw fail('was spawned without usable stdio pipes', undefined);
   }
   if (onSpawn && child.pid !== undefined) {
-    onSpawn({
-      pid: child.pid,
-      exited,
-    });
+    try {
+      onSpawn({
+        pid: child.pid,
+        exited,
+      });
+    } catch (error) {
+      // No one holds the agent yet: stop it rather than leave it running.
+      await close().catch(() => undefined);
+      throw fail('was stopped: the onSpawn callback threw', error);
+    }
   }
 
   return {

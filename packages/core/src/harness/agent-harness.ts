@@ -1906,7 +1906,8 @@ export class AgentHarness<
    * running in this process whose `agent_started` said it is `cancellable`,
    * by its scope id. The turn that runs it goes on; the agent reports how it
    * ended with its `agent_status`. False when no running turn here has a
-   * nested agent by that id that can be stopped.
+   * nested agent by that id that can be stopped, or it already stopped
+   * (its last `agent_status` was `idle`).
    * @public
    */
   async stopAgent(scopeId: string): Promise<boolean> {

@@ -629,9 +629,10 @@ export interface AcpTurnResult {
   usage?: TokenUsage;
   cost?: number;
   /**
-   * The `usage` the agent's `session/prompt` answer reported, verbatim: the
-   * session's running total, not this turn's, so the runtime never charges it
-   * (an adapter that knows its agent's figures supplies `usage`).
+   * The `usage` the agent's `session/prompt` answer reported, verbatim. The
+   * protocol makes it the session's running total, so the runtime never
+   * charges it as it is: an adapter whose agent reports each turn's own
+   * figures reads them into `usage` (`usageOf`).
    * Context-window occupancy (`usage_update`) is not here.
    */
   reportedUsage?: acp.Usage;

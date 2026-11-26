@@ -495,6 +495,45 @@ function subagentAnnounce(parent: string, child: string): acp.SessionNotificatio
 }
 
 describe("subagents' own sessions", () => {
+  test('cancelChild refuses anything but a cancellable subagent of the session', async () => {
+    const refusals: unknown[] = [];
+    let session: Awaited<ReturnType<typeof rig.connection.newSession>> | undefined;
+    const tryStop = async (id: string): Promise<void> => {
+      await session?.cancelChild?.(id).catch((e: unknown) => {
+        refusals.push(e);
+      });
+    };
+    const rig = await createAcpTestRig({
+      script: {
+        onPrompt: async (conn, params) => {
+          await conn.sessionUpdate({
+            sessionId: params.sessionId,
+            update: {
+              sessionUpdate: 'subagent_update',
+              sessionId: 'plain-kid',
+              title: 'Explore',
+            },
+          });
+          await tryStop(params.sessionId);
+          await tryStop('stranger');
+          await tryStop('plain-kid');
+          await conn.sessionUpdate(textChunk(params.sessionId, 'the answer'));
+        },
+      },
+    });
+    session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    const result = await session.prompt({
+      content: PROMPT,
+    });
+    expect(refusals).toHaveLength(3);
+    expect(refusals.every(isAcpCapabilityError)).toBe(true);
+    expect(rig.calls.cancel).toEqual([]);
+    expect(result.text).toBe('the answer');
+    await rig.close();
+  });
+
   test('a subagent announced as cancellable is stopped alone, by its child session', async () => {
     const lineages: Array<ReadonlyArray<AcpChildInfo>> = [];
     let stopKid: (() => Promise<void>) | undefined;
