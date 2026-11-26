@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.15 (2026-11-26)
+
+* feat(core): retry held answers, report what still fails, take typed answers (#178) ([20f4a4b](https://github.com/mattapperson/noetic/commit/20f4a4b)), closes [#178](https://github.com/mattapperson/noetic/issues/178)
+
 ## @noetic-tools/core-v5.22.0-next.14 (2026-11-26)
 
 * Refactor harness turns and model execution (#177) ([0f0ea34](https://github.com/mattapperson/noetic/commit/0f0ea34)), closes [#177](https://github.com/mattapperson/noetic/issues/177)
