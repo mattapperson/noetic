@@ -10,7 +10,7 @@
  * adapter, so this module imports no `node:*`.
  */
 
-import type { AcpAgent, AcpTransportFactory, SubprocessAdapter } from '@noetic-tools/types';
+import type { AcpAgent, AcpTransportFactory } from '@noetic-tools/types';
 import type { InstructionsMeta } from './connection';
 import { defineAcpAgent } from './define';
 import type { AcpToolWiring } from './tool-bridge';
@@ -121,13 +121,13 @@ export interface AcpPresetOptions {
   /** Environment overrides for the agent process — API keys, feature flags. */
   env?: Record<string, string | undefined>;
   /**
-   * Where the agent runs — a remote runner, a sandbox: an adapter, or the
-   * name of one of the harness's `environment.subprocess` adapters. The
-   * preset's command runs there, with its tool settings. A step's own
-   * `subprocess` name comes first. Without either the agent runs through the
-   * harness's default. The adapter it lands on must have `open`.
+   * Where the agent runs — a remote runner, a sandbox: the name of one of the
+   * harness's `environment.subprocess` adapters. The preset's command runs
+   * there, with its tool settings. A step's own `subprocess` name comes
+   * first. Without either the agent runs through the harness's default. The
+   * adapter it lands on must have `open`.
    */
-  subprocess?: SubprocessAdapter | string;
+  subprocess?: string;
   /** Attach to an agent this package does not start, in place of the preset's command. */
   transport?: AcpTransportFactory;
   /**
@@ -340,7 +340,7 @@ export function customAcpAgent(opts: {
   args?: ReadonlyArray<string>;
   env?: Record<string, string | undefined>;
   /** See {@link AcpPresetOptions.subprocess}. */
-  subprocess?: SubprocessAdapter | string;
+  subprocess?: string;
   /** See {@link AcpPresetOptions.transport}. */
   transport?: AcpTransportFactory;
 }): AcpAgent {

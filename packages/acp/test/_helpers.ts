@@ -9,6 +9,7 @@
 
 import type * as acp from '@agentclientprotocol/sdk';
 import { AgentSideConnection, ndJsonStream, RequestError } from '@agentclientprotocol/sdk';
+import { createInMemorySubprocessAdapter } from '@noetic-tools/core';
 import type {
   AcpAgentConnection,
   AcpBoundPermissionHandler,
@@ -22,11 +23,13 @@ import type {
   ShellAdapter,
   ShellExecOptions,
   ShellExecResult,
+  SubprocessAdapter,
+  SubprocessChoice,
 } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import { adapterSet, frameworkCast } from '@noetic-tools/types';
 import type { InstructionsMeta } from '../src/connection';
 import { openAcpConnection } from '../src/connection';
-import { createAcpLoopbackPair } from '../src/transport-loopback';
+import { createAcpLoopbackPair, loopbackLink } from '../src/transport-loopback';
 import type { TurnUsageOf } from '../src/turn-usage';
 
 //#region Adapters
@@ -177,6 +180,50 @@ function abortSignalPromise(signal?: AbortSignal): Promise<void> {
     });
   });
 }
+
+//#region Where agents run
+
+/**
+ * What a harness whose only subprocess adapter is `adapter` hands an agent's
+ * `connect` and `spawn`, for a test that calls them with no harness.
+ */
+export function through(adapter: SubprocessAdapter): SubprocessChoice {
+  return {
+    adapters: adapterSet({
+      kind: 'subprocess',
+      method: 'spawn',
+      config: adapter,
+    }),
+  };
+}
+
+type ToAgent = (conn: AgentSideConnection) => acp.Agent;
+
+const scripts = new Map<string, ToAgent>();
+
+/**
+ * Runs in this process the agent whose command {@link scripted} handed out.
+ * A test builds its harness in one place and its agents in another, so the
+ * harness takes this one adapter: `environment: { subprocess: scriptedSubprocess }`.
+ */
+export const scriptedSubprocess = createInMemorySubprocessAdapter({
+  open: loopbackLink((conn, command) => {
+    const toAgent = scripts.get(command.command);
+    if (!toAgent) {
+      throw new Error(`No scripted agent starts with '${command.command}'.`);
+    }
+    return toAgent(conn);
+  }),
+});
+
+/** A command that starts `toAgent` when run through {@link scriptedSubprocess}. */
+export function scripted(toAgent: ToAgent): string {
+  const command = `scripted-${scripts.size}`;
+  scripts.set(command, toAgent);
+  return command;
+}
+
+//#endregion
 
 //#region Fake agent
 

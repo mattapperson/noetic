@@ -130,7 +130,8 @@ export interface ConnectionRuntime extends ConnectionRegistry {
    * provider and options is that connection; it is not connected twice.
    *
    * @throws NoeticConfigError `CONNECTION_NAME_TAKEN` when a name is held with a
-   * different provider or options, `CONNECTION_INVALID` for a malformed entry
+   * different provider or options, or by a step on another subprocess
+   * adapter, `CONNECTION_INVALID` for a malformed entry
    * or one that sets `pool`.
    */
   attach(root: Context, entries: ReadonlyArray<AttachedEntry>): Promise<void>;
@@ -578,7 +579,10 @@ class Runtime implements ConnectionRuntime {
     }
     const held = this.entries.get(entry.name) ?? attachment.entries.get(entry.name);
     if (held) {
-      if (!sameConfig(held.config, entry.config)) {
+      // A connection a step attached runs its process where that step's
+      // agent runs, so a step on another subprocess adapter cannot share it.
+      const elsewhere = held.home === attachment.entries && held.subprocess !== entry.subprocess;
+      if (!sameConfig(held.config, entry.config) || elsewhere) {
         throw nameTakenError(entry.name, entry.where, held.scope);
       }
       return [];

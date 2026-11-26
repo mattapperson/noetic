@@ -15,13 +15,16 @@ import type {
   AcpSession,
   AcpTurnResult,
   FsAdapter,
+  NamedAdapters,
   ShellAdapter,
+  SubprocessAdapter,
   SubprocessChoice,
 } from '@noetic-tools/types';
 import { isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { createInMemoryFsAdapter } from '../../src/adapters/in-memory-fs-adapter';
 import { createInMemoryShellAdapter } from '../../src/adapters/in-memory-shell-adapter';
 import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
+import { toStep } from '../../src/builders/sequence';
 import type { StepAcpAgentOpts } from '../../src/builders/step-builders';
 import { step } from '../../src/builders/step-builders';
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
@@ -45,8 +48,26 @@ interface Hosts {
   shell: Record<'laptop' | 'builder', ShellAdapter>;
 }
 
-/** A harness with a `laptop` (the default) and a `builder` adapter of each kind. */
-function twoHosts(storage?: StorageAdapter): Hosts {
+type Subprocesses = NamedAdapters<SubprocessAdapter>;
+
+/** `laptop` (the default) and `builder`. */
+function laptopAndBuilder(): Subprocesses {
+  return {
+    laptop: {
+      adapter: createInMemorySubprocessAdapter(),
+      default: true,
+    },
+    builder: {
+      adapter: createInMemorySubprocessAdapter(),
+    },
+  };
+}
+
+/**
+ * A harness with a `laptop` (the default) and a `builder` adapter of each
+ * kind, or with `subprocess` in place of its subprocess adapters.
+ */
+function twoHosts(storage?: StorageAdapter, subprocess: Subprocesses = laptopAndBuilder()): Hosts {
   const fs = {
     laptop: createInMemoryFsAdapter(),
     builder: createInMemoryFsAdapter(),
@@ -84,15 +105,7 @@ function twoHosts(storage?: StorageAdapter): Hosts {
           adapter: shell.builder,
         },
       },
-      subprocess: {
-        laptop: {
-          adapter: createInMemorySubprocessAdapter(),
-          default: true,
-        },
-        builder: {
-          adapter: createInMemorySubprocessAdapter(),
-        },
-      },
+      subprocess,
     },
   });
   return {
@@ -221,8 +234,11 @@ afterEach(async () => {
   }
 });
 
-/** Run the step until its agent is mid-turn, as a host that then dies leaves it. */
-async function cutOff(storage: StorageAdapter, names?: Names): Promise<string> {
+/**
+ * Run the step until its agent is mid-turn, as a host that then dies leaves
+ * it. `preset` is the subprocess adapter the agent itself names.
+ */
+async function cutOff(storage: StorageAdapter, names?: Names, preset?: string): Promise<string> {
   const { harness } = twoHosts(storage);
   const ctx = harness.createContext();
   const connects: AcpConnectOptions[] = [];
@@ -231,6 +247,7 @@ async function cutOff(storage: StorageAdapter, names?: Names): Promise<string> {
       coder(
         recordingAgent(connects, {
           hangs: true,
+          subprocess: preset,
         }),
         names,
       ),
@@ -248,20 +265,38 @@ async function cutOff(storage: StorageAdapter, names?: Names): Promise<string> {
   return ctx.id;
 }
 
-async function resume(
+type Resume = (
   storage: StorageAdapter,
   executionId: string,
   acpStep: ReturnType<typeof coder>,
-): Promise<unknown> {
-  const { harness } = twoHosts(storage);
-  const ctx = await harness.restore(executionId);
-  assert(ctx);
-  const done = harness.run(acpStep, undefined, ctx).catch((e: unknown) => e);
-  running.push({
-    ctx,
-    done,
-  });
-  return await done;
+) => Promise<unknown>;
+
+/** Resumes on a new harness with `subprocess` as its subprocess adapters, or the first run's layout. */
+function resumeUnder(subprocess?: Subprocesses): Resume {
+  return async (storage, executionId, acpStep) => {
+    const { harness } = twoHosts(storage, subprocess);
+    const ctx = await harness.restore(executionId);
+    assert(ctx);
+    const done = harness.run(acpStep, undefined, ctx).catch((e: unknown) => e);
+    running.push({
+      ctx,
+      done,
+    });
+    return await done;
+  };
+}
+
+const resume = resumeUnder();
+
+/** The subprocess adapter name the step's stored session record keeps. */
+async function recordedSubprocess(storage: StorageAdapter): Promise<unknown> {
+  for (const key of await storage.list('')) {
+    const record = await storage.get<Record<string, unknown>>(key);
+    if (record?.agentId === 'recording' && 'sessionId' in record) {
+      return record.subprocess;
+    }
+  }
+  return undefined;
 }
 
 //#endregion
@@ -381,6 +416,38 @@ describe('a connection an ACP step lists in its tools', () => {
     assert(given);
     expect(given.name).toBeUndefined();
   });
+
+  it('is refused to a second step on another subprocess adapter, where its process does not run', async () => {
+    const { harness } = twoHosts();
+    const docs = createInMemoryConnection({
+      name: 'docs',
+    });
+    const coderOn = (id: string, subprocess?: string) =>
+      step.acpAgent({
+        id,
+        agent: recordingAgent([]),
+        prompt: 'Add the feature.',
+        tools: [
+          docs,
+        ],
+        subprocess,
+      });
+    const error = rootCause(
+      await harness
+        .run(
+          toStep([
+            coderOn('here'),
+            coderOn('there', 'builder'),
+          ]),
+          undefined,
+          harness.createContext(),
+        )
+        .catch((e: unknown) => e),
+    );
+    assert(isNoeticConfigError(error));
+    expect(error.code).toBe('CONNECTION_NAME_TAKEN');
+    expect(error.message).toContain('subprocess adapter');
+  });
 });
 
 describe('a session shared by steps', () => {
@@ -460,7 +527,123 @@ describe('a session shared by steps', () => {
   });
 });
 
+describe("the subprocess adapter a step's session record names", () => {
+  it.each([
+    {
+      case: "the step's name, before the preset's",
+      step: 'builder',
+      preset: 'laptop',
+      recorded: 'builder',
+    },
+    {
+      case: "the preset's name, before the default",
+      step: undefined,
+      preset: 'builder',
+      recorded: 'builder',
+    },
+    {
+      case: "the default's name, when neither names one",
+      step: undefined,
+      preset: undefined,
+      recorded: 'laptop',
+    },
+  ])('is $case', async ({ step: named, preset, recorded }) => {
+    const storage = createInMemoryStorage();
+    await cutOff(
+      storage,
+      {
+        subprocess: named,
+      },
+      preset,
+    );
+    expect(await recordedSubprocess(storage)).toBe(recorded);
+  });
+});
+
 describe('a resumed step whose agent outlived its host', () => {
+  it('reattaches under an unchanged set when neither the step nor its agent names an adapter', async () => {
+    const storage = createInMemoryStorage();
+    const executionId = await cutOff(storage);
+    const connects: AcpConnectOptions[] = [];
+    const output = await resume(
+      storage,
+      executionId,
+      coder(
+        recordingAgent(connects, {
+          hangs: true,
+        }),
+      ),
+    );
+    expect(output).toBe('done');
+    expect(connects[0]?.reattach).toEqual(HANDLE);
+  });
+
+  it.each([
+    {
+      change: 'renames the entry',
+      subprocess: (): Subprocesses => ({
+        desk: {
+          adapter: createInMemorySubprocessAdapter(),
+          default: true,
+        },
+        builder: {
+          adapter: createInMemorySubprocessAdapter(),
+        },
+      }),
+      now: 'desk',
+    },
+    {
+      change: 'points the default at another entry',
+      subprocess: (): Subprocesses => ({
+        laptop: {
+          adapter: createInMemorySubprocessAdapter(),
+        },
+        builder: {
+          adapter: createInMemorySubprocessAdapter(),
+          default: true,
+        },
+      }),
+      now: 'builder',
+    },
+  ])('fails, attaching nowhere, under a set that $change', async ({ subprocess, now }) => {
+    const storage = createInMemoryStorage();
+    const executionId = await cutOff(storage);
+    const connects: AcpConnectOptions[] = [];
+    const error = rootCause(
+      await resumeUnder(subprocess())(
+        storage,
+        executionId,
+        coder(
+          recordingAgent(connects, {
+            hangs: true,
+          }),
+        ),
+      ),
+    );
+    assert(isNoeticConfigError(error));
+    expect(error.code).toBe('ACP_SESSION_ADAPTER_CONFLICT');
+    expect(error.message).toContain("'laptop'");
+    expect(error.message).toContain(`'${now}'`);
+    expect(connects).toHaveLength(0);
+  });
+
+  it('cannot tell a set that keeps the name and swaps the adapter behind it', async () => {
+    const storage = createInMemoryStorage();
+    const executionId = await cutOff(storage);
+    const connects: AcpConnectOptions[] = [];
+    // The record names the adapter; nothing identifies the object behind the name.
+    await resumeUnder(laptopAndBuilder())(
+      storage,
+      executionId,
+      coder(
+        recordingAgent(connects, {
+          hangs: true,
+        }),
+      ),
+    );
+    expect(connects[0]?.reattach).toEqual(HANDLE);
+  });
+
   it('reattaches through the adapter the agent was started through', async () => {
     const storage = createInMemoryStorage();
     const executionId = await cutOff(storage, {

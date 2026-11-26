@@ -337,7 +337,9 @@ export class KeeperLink {
   }
 
   private async shutdown(): Promise<void> {
-    if (this.closed) {
+    // A socket this host already dropped (`detach`, `release`) has let go of
+    // the agent: there is no one left to tell to stop.
+    if (this.closed || this.socket.destroyed) {
       return;
     }
     this.write({

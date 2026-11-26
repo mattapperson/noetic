@@ -10,11 +10,15 @@ import assert from 'node:assert';
 import type {
   AcpAgent,
   AcpAgentConnection,
+  AcpConnectOptions,
   AcpPromptOptions,
   AcpSession,
   AcpTurnResult,
 } from '@noetic-tools/types';
 import { frameworkCast, isNoeticConfigError } from '@noetic-tools/types';
+import { createInMemoryFsAdapter } from '../../src/adapters/in-memory-fs-adapter';
+import { createInMemoryShellAdapter } from '../../src/adapters/in-memory-shell-adapter';
+import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
 import { acpAgentTool } from '../../src/builders/acp-agent-tool';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { makeMessage } from '../_helpers';
@@ -231,5 +235,60 @@ describe('acpAgentTool', () => {
       assert(isNoeticConfigError(e));
       expect(e.code).toBe('MISSING_ACP_AGENT');
     }
+  });
+
+  it('runs the agent on the adapters it names', async () => {
+    const fs = {
+      laptop: createInMemoryFsAdapter(),
+      builder: createInMemoryFsAdapter(),
+    };
+    const shell = {
+      laptop: createInMemoryShellAdapter(),
+      builder: createInMemoryShellAdapter(),
+    };
+    const named = <A>(adapters: { laptop: A; builder: A }) => ({
+      laptop: {
+        adapter: adapters.laptop,
+        default: true,
+      },
+      builder: {
+        adapter: adapters.builder,
+      },
+    });
+    const harness = new AgentHarness({
+      name: 'test',
+      params: {},
+      environment: {
+        fs: named(fs),
+        shell: named(shell),
+        subprocess: named({
+          laptop: createInMemorySubprocessAdapter(),
+          builder: createInMemorySubprocessAdapter(),
+        }),
+      },
+    });
+    const connects: AcpConnectOptions[] = [];
+    const agent = fakeAgent();
+    const built = acpAgentTool({
+      agent: {
+        ...agent,
+        connect: async (opts) => {
+          connects.push(opts);
+          return await agent.connect(opts);
+        },
+      },
+      subprocess: 'builder',
+      fs: 'builder',
+      shell: 'builder',
+    });
+
+    await callTool(built, 'build it', {
+      harness,
+      ctx: harness.createContext(),
+    });
+
+    expect(connects[0]?.subprocess?.name).toBe('builder');
+    expect(connects[0]?.host.fs).toBe(fs.builder);
+    expect(connects[0]?.host.shell).toBe(shell.builder);
   });
 });

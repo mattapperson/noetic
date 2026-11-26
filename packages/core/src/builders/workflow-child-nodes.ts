@@ -405,6 +405,7 @@ function resolveSubflowDocument(
       ...ctx,
       recursionDepth: depth,
       acpBounds: undefined,
+      runCodeBounds: undefined,
     },
   };
 }

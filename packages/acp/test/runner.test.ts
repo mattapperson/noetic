@@ -52,6 +52,9 @@ async function runAgent(subprocess: SubprocessAdapter): Promise<{
   const ctx = new AgentHarness({
     name: 'runner',
     params: {},
+    environment: {
+      subprocess,
+    },
   }).createContext();
   const out = await execute(
     step.acpAgent({
@@ -67,7 +70,6 @@ async function runAgent(subprocess: SubprocessAdapter): Promise<{
             NOETIC_TOOL_AGENT_MARK: 'launched-remotely',
           },
         },
-        subprocess,
         tools: claudeToolWiring,
       }),
       prompt: 'call echo',
@@ -298,10 +300,7 @@ describe('attached transports', () => {
     expect(
       codeFor(
         codex({
-          subprocess: createWebSocketSubprocessAdapter({
-            url: 'ws://127.0.0.1:1',
-            token: TOKEN,
-          }),
+          subprocess: 'runner',
         }),
       ),
     ).toBeUndefined();

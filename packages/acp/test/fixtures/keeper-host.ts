@@ -24,7 +24,6 @@ const agent = customAcpAgent({
   args: [
     agentScript,
   ],
-  subprocess: subprocessFor(process.argv[4] ?? 'local'),
 });
 let announced = false;
 let announce: () => void = () => undefined;
@@ -46,6 +45,7 @@ const host: AcpClientHost = {
 const connection = await agent.connect({
   host,
   whenHostExits,
+  subprocess: subprocessFor(process.argv[4] ?? 'local'),
 });
 const session = await connection.newSession({
   cwd: process.cwd(),

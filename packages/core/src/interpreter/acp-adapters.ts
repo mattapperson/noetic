@@ -27,10 +27,9 @@ export function acpAdapterNames<TContext, I, O>(
 }
 
 function nameIn<A>(set: AdapterSet<A>, name: string | undefined): string {
-  if (name !== undefined) {
-    set.get(name);
-    return name;
+  if (name === undefined) {
+    return set.defaultName;
   }
-  // A set always has exactly one default.
-  return set.list().find((adapter) => adapter.default)?.name ?? '';
+  set.get(name);
+  return name;
 }

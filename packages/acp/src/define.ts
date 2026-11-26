@@ -21,7 +21,6 @@ import type {
   SpawnCommand,
   SubprocessAdapter,
   SubprocessChoice,
-  SubprocessLink,
   ToolBridgeAddress,
 } from '@noetic-tools/types';
 import { AcpConnectError, NoeticConfigError } from '@noetic-tools/types';
@@ -46,12 +45,12 @@ export interface DefineAcpAgentOptions {
   /** Starts the agent: this command, run through {@link subprocess}. */
   command?: SpawnCommand;
   /**
-   * Where {@link command} runs: an adapter, or the name of one of the
-   * harness's `environment.subprocess` adapters. A step's own `subprocess`
-   * name comes first. Without either it runs through the harness's default.
-   * The adapter it lands on must have `open`.
+   * Where {@link command} runs: the name of one of the harness's
+   * `environment.subprocess` adapters. A step's own `subprocess` name comes
+   * first. Without either it runs through the harness's default. The adapter
+   * it lands on must have `open`.
    */
-  subprocess?: SubprocessAdapter | string;
+  subprocess?: string;
   /**
    * Opens the byte stream to an agent this package does not start. Used in
    * place of `command`.
@@ -93,6 +92,7 @@ export interface DefineAcpAgentOptions {
 interface Opened {
   open(env: Record<string, string>): Promise<AcpTransport>;
   reach(bridge: ToolBridgeAddress): Promise<ToolBridgeAddress>;
+  /** Releases what was opened. Only the first call does anything. */
   close(): Promise<void>;
 }
 
@@ -110,7 +110,7 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
   return {
     specificationVersion: 'acp-v1',
     agentId: def.agentId,
-    ...(def.command && typeof def.subprocess === 'string'
+    ...(def.command && def.subprocess !== undefined
       ? {
           subprocess: def.subprocess,
         }
@@ -141,10 +141,10 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
         bridge = await openBridge(def, opts, {
           reach: opened.reach,
         });
-        const transport = await opened.open(bridge?.env ?? {});
+        const transport = closingWith(await opened.open(bridge?.env ?? {}), opened);
         return await openAcpConnection({
           agentId: def.agentId,
-          transport: closingWith(transport, opened),
+          transport,
           host: opts.host,
           signal,
           tools: bridge,
@@ -155,6 +155,7 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
         });
       } catch (e) {
         await bridge?.close();
+        // A failed handshake has closed the stream, and the link with it.
         await opened.close().catch(() => undefined);
         throw e;
       }
@@ -251,48 +252,44 @@ async function openTarget(
         },
       }),
     reach: (bridge) => link.reach(bridge),
-    close: () => link.close(),
+    close: once(() => link.close()),
   };
 }
 
 /**
- * Where a command agent runs: the adapter the step names, else the agent's
- * own (an adapter, or a name), else the harness's default. A name is one of
- * the harness's adapters.
+ * Where a command agent runs, among the harness's adapters: the one the step
+ * names, else the one the agent names, else the default.
  *
  * @throws `NoeticConfigError` `ADAPTER_UNKNOWN` for a name the harness lacks,
- * `SUBPROCESS_NAME_WITHOUT_HARNESS` for a named adapter with no harness set
- * to find it in, `SUBPROCESS_CANNOT_OPEN` when no adapter is given at all.
+ * `SUBPROCESS_NAME_WITHOUT_HARNESS` for a name with no harness set to find
+ * it in, `SUBPROCESS_CANNOT_OPEN` for no name and no harness set.
  */
 function subprocessOf(
   def: DefineAcpAgentOptions,
   given: SubprocessChoice | undefined,
 ): SubprocessAdapter {
-  const own = def.subprocess;
-  const name = given?.name ?? (typeof own === 'string' ? own : undefined);
-  if (name !== undefined) {
-    if (!given) {
-      throw new NoeticConfigError({
-        code: 'SUBPROCESS_NAME_WITHOUT_HARNESS',
-        message: `ACP agent '${def.agentId}' names the subprocess adapter '${name}', and was given no harness adapters to find it among.`,
-        hint: 'Run the agent as a step, so the harness passes its `environment.subprocess`, or give the agent the adapter itself.',
-      });
-    }
+  const name = given?.name ?? def.subprocess;
+  if (given) {
     return given.adapters.get(name);
   }
-  if (typeof own === 'object') {
-    return own;
+  if (name !== undefined) {
+    throw new NoeticConfigError({
+      code: 'SUBPROCESS_NAME_WITHOUT_HARNESS',
+      message: `ACP agent '${def.agentId}' names the subprocess adapter '${name}', and was given no harness adapters to find it among.`,
+      hint: 'Run the agent as a step, so the harness passes its `environment.subprocess`.',
+    });
   }
-  if (!given) {
-    throw cannotOpen(
-      `ACP agent '${def.agentId}' has no subprocess adapter to start its command through.`,
-    );
-  }
-  return given.adapters.get();
+  throw cannotOpen(
+    `ACP agent '${def.agentId}' has no subprocess adapter to start its command through.`,
+  );
 }
 
-/** Closing the agent's stream closes the link it was started through. */
-function closingWith(transport: AcpTransport, opened: Opened): AcpTransport {
+/**
+ * The agent's stream, taking the link it came through with it: closing the
+ * stream, or letting go of the agent, closes the link. A link stops only
+ * what it still holds, so closing it after `detach` leaves the agent running.
+ */
+function closingWith(transport: AcpTransport, opened: Pick<Opened, 'close'>): AcpTransport {
   const detach = transport.detach?.bind(transport);
   return {
     readable: transport.readable,
@@ -309,12 +306,26 @@ function closingWith(transport: AcpTransport, opened: Opened): AcpTransport {
         await opened.close();
       }
     },
-    // Letting go keeps the link open: closing it would stop the agent a later host reattaches to.
     ...(detach
       ? {
-          detach,
+          detach: once(async () => {
+            try {
+              await detach();
+            } finally {
+              await opened.close();
+            }
+          }),
         }
       : {}),
+  };
+}
+
+/** `release`, run by the first call only; later calls wait for that run. */
+function once(release: () => Promise<void>): () => Promise<void> {
+  let released: Promise<void> | undefined;
+  return () => {
+    released ??= release();
+    return released;
   };
 }
 
@@ -344,6 +355,7 @@ async function reattachTo(
     },
     `ACP agent '${def.agentId}'`,
   );
+  const close = once(() => link.close());
   let bridge: ToolBridge | undefined;
   let attached: AcpTransport | undefined;
   try {
@@ -353,7 +365,9 @@ async function reattachTo(
         message: `The subprocess adapter ACP agent '${def.agentId}' runs through cannot reattach to an agent.`,
       });
     }
-    const transport = await link.attach(handle);
+    const transport = closingWith(await link.attach(handle), {
+      close,
+    });
     attached = transport;
     bridge = await openBridge(def, opts, {
       reach: (address) => link.reach(address),
@@ -361,11 +375,7 @@ async function reattachTo(
     });
     return await openAcpConnection({
       agentId: def.agentId,
-      transport: closingWith(transport, {
-        open: async () => transport,
-        reach: (address) => link.reach(address),
-        close: () => link.close(),
-      }),
+      transport,
       host: opts.host,
       signal,
       tools: bridge,
@@ -377,22 +387,12 @@ async function reattachTo(
     });
   } catch (e) {
     await bridge?.close();
-    await letGoOf(attached, link);
+    // This host did not adopt the agent: let go of it, so it keeps running
+    // for a host that can — never stop it. Letting go closes the link.
+    await attached?.detach?.().catch(() => undefined);
+    await close().catch(() => undefined);
     throw e;
   }
-}
-
-/**
- * A reattach that failed before this host adopted the agent: let go of it, so
- * it keeps running for a host that can — never stop it. Only a link that
- * reached nothing is closed.
- */
-async function letGoOf(attached: AcpTransport | undefined, link: SubprocessLink): Promise<void> {
-  if (attached?.detach) {
-    await attached.detach().catch(() => undefined);
-    return;
-  }
-  await link.close().catch(() => undefined);
 }
 
 const BridgeCredentialsSchema = z.object({

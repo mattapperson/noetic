@@ -300,6 +300,9 @@ interface NamedAdapter<A> {
 interface AdapterSet<A> {
   /** The adapter called `name`, or the default without one. */
   get(name?: string): A;
+  /** The name `get()` resolves to. */
+  readonly defaultName: string;
+  /** Every adapter, in the order the environment gave them. Frozen. */
   list(): ReadonlyArray<AdapterInfo>;
 }
 
@@ -339,22 +342,27 @@ const harness = new AgentHarness({
 harness.fs;                          // the default: laptop
 ctx.adapters.fs.get('builder');      // a named one
 ctx.adapters.fs.get();               // the default
+ctx.adapters.fs.defaultName;         // 'laptop'
 ctx.adapters.fs.list();              // [{ name: 'laptop', default: true }, { name: 'builder', default: false }]
 ctx.adapters.shell.get('default');   // one unnamed adapter goes by 'default'
 ```
 
-- **The default.** Whatever names no adapter uses the default: `harness.fs`, `harness.shell`, `harness.subprocess`, the same three on `Context`, `fs` and `shell` on `ToolExecutionContext` and `ExecutionContext`, and every step that runs a child. A set of several marks exactly one entry `default: true`. A set of one needs no mark.
+- **The default.** Whatever names no adapter uses the default: `harness.fs`, `harness.shell`, `harness.subprocess`, the same three on `Context`, `fs` and `shell` on `ToolExecutionContext` and `ExecutionContext`, and every step that runs a child. A set of several marks exactly one entry `default: true`. A set of one needs no mark: its entry is always the default, so `default: false` on it leaves the set with none and is refused (`ADAPTER_DEFAULT_MISSING`).
 - **One unnamed adapter** is a set of one called `'default'` (`DEFAULT_ADAPTER_NAME`): `get()` and `get('default')` return it, and `list()` returns one entry. A kind the environment leaves out is the in-memory adapter under that name.
-- **Access.** `AgentHarness.adapters`, `Context.adapters`, `ToolExecutionContext.adapters` and `ExecutionContext.adapters` are the same `AdapterSets`, so a tool or a context layer reaches a named adapter the way it reaches the default. A context preview (`getCurrentContext(true)`) hands its layers every one of them read-only, as it does the defaults.
-- **Who picks by name.** An ACP step names the adapters its agent uses, and an agent preset names a subprocess adapter (`27-acp-agent-steps` § The subprocess adapter). A JSON `runCode` node names a subprocess adapter (`26-json-workflow-runtime`). `spawn`, `runCode` and `detachedSpawn` steps take an adapter object, as before (`04-spawn`).
+- **The name `default`** means the default adapter in every set, so `get('default')` and `get()` never differ where both answer. A named set may call an entry `default` only when that entry is its default; any other entry of that name is refused (`ADAPTER_INVALID`). A set with no entry of that name has no `'default'`: `get('default')` is `ADAPTER_UNKNOWN` there.
+- **The listing is frozen.** `list()` returns one frozen array of frozen entries, the same on every call: a caller that writes to it gets a `TypeError`, and nothing a caller does changes which adapter is the default. `defaultName` is the default's name, read from the set itself: the runtime never looks the default up in the listing.
+- **Access.** `AgentHarness.adapters`, `Context.adapters`, `ToolExecutionContext.adapters` and `ExecutionContext.adapters` are the same `AdapterSets` — all three kinds, the subprocess set included, on a layer's `ExecutionContext` too — so a tool or a context layer reaches a named adapter the way it reaches the default. A context preview (`getCurrentContext(true)`) hands its layers every one of them read-only, as it does the defaults.
+- **Who picks by name.** An ACP step names the adapters its agent uses, `acpAgentTool` passes the same three names to its step, and an agent preset names a subprocess adapter — a name, never an adapter object (`27-acp-agent-steps` § The subprocess adapter). A JSON `runCode` node names a subprocess adapter, which a document the host did not write may do only for the names the host's `runCode` grant lists (`26-json-workflow-runtime`). `spawn`, `runCode` and `detachedSpawn` steps take an adapter object, as before (`04-spawn`).
+- **Names stay in the process that built the harness.** A step the local subprocess adapter runs out of process (`registryEntry`) runs on a child harness with in-memory adapters only: the parent's adapters, named or default, do not reach it. A step that names an adapter there fails with `ADAPTER_NOT_IN_CHILD`; one that names none uses the child's in-memory `fs`, `shell` and `subprocess` (`04-spawn` § Out-of-process children).
+- **`environment.fs`, `.shell` and `.subprocess` are a union** (`AdapterConfig`): an adapter, or a named set. Code that read `environment.fs.readFile` reads `harness.fs` or `harness.adapters.fs.get(name)` instead.
 
-A value is an adapter when it has the method every adapter of its kind has — `readFile`, `exec`, `spawn` — and a named set when it is a plain object whose entries each hold an adapter under `adapter`. A set's own entry of that name is an object, never a function, so no set reads as an adapter and no adapter as a set. The harness checks the three when it is built:
+A value is an adapter when it has the method every adapter of its kind has — `readFile`, `exec`, `spawn` — and a named set when it is a plain object whose entries each hold an adapter under `adapter`. A set's own entry of that name is an object, never a function, so no set reads as an adapter and no adapter as a set. A plain object that is both — it has the method, and a member that is an `{ adapter }` entry — is refused rather than read as either. The harness checks the three when it is built, so a value that passed before the union and is neither is refused now: a partial test double without its kind's method, or an empty object.
 
 | `NoeticConfigError` code | When |
 |---|---|
-| `ADAPTER_INVALID` | The value is neither an adapter nor a plain object of entries, or an entry holds no adapter. |
+| `ADAPTER_INVALID` | The value is neither an adapter nor a plain object of entries (a test double lacking `readFile`, `exec` or `spawn` included), or both at once; an entry holds no adapter; or an entry named `default` is not the default. |
 | `ADAPTER_SET_EMPTY` | A named set has no entries. |
-| `ADAPTER_DEFAULT_MISSING` | Several entries, none marked `default: true`. |
+| `ADAPTER_DEFAULT_MISSING` | Several entries, none marked `default: true`; or one entry marked `default: false`. |
 | `ADAPTER_DEFAULT_AMBIGUOUS` | More than one entry marked `default: true`. |
 | `ADAPTER_UNKNOWN` | `get(name)` for a name the set lacks. The message lists the names it has. |
 

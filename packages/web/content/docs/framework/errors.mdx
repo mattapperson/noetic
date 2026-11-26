@@ -286,9 +286,9 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### ADAPTER_INVALID
 
-**Cause:** `environment.fs`, `environment.shell` or `environment.subprocess` is neither an adapter of that kind nor a set of named ones, or an entry of a named set holds no adapter under `adapter`.
+**Cause:** `environment.fs`, `environment.shell` or `environment.subprocess` is neither an adapter of that kind nor a set of named ones, or an entry of a named set holds no adapter under `adapter`. A value is an adapter when it has its kind's method (`readFile`, `exec`, `spawn`), so a partial test double without it fails this way. So does a plain object that is both — it has that method and an `{ adapter }` entry — and a named set whose entry called `default` is not its default: that name is the default adapter's.
 
-**Fix:** Pass one adapter, or `{ <name>: { adapter, displayName?, description?, default? } }`. See [Named adapters](/docs/framework/runtime#named-adapters).
+**Fix:** Pass one adapter, or `{ <name>: { adapter, displayName?, description?, default? } }`. Give a test double its kind's method. Rename an entry called `default`, or mark it `default: true`. See [Named adapters](/docs/framework/runtime#named-adapters).
 
 #### ADAPTER_SET_EMPTY
 
@@ -298,9 +298,9 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### ADAPTER_DEFAULT_MISSING
 
-**Cause:** A named adapter set has several entries and none is marked `default: true`.
+**Cause:** A named adapter set has several entries and none is marked `default: true`, or its one entry is marked `default: false`.
 
-**Fix:** Add `default: true` to the adapter that anything naming none should use.
+**Fix:** Add `default: true` to the adapter that anything naming none should use. On a set of one, drop `default: false`: its entry is always the default.
 
 #### ADAPTER_DEFAULT_AMBIGUOUS
 
@@ -314,6 +314,12 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Use one of those names, or add the name to that kind in `environment`.
 
+#### ADAPTER_NOT_IN_CHILD
+
+**Cause:** A step named a harness adapter (`step.acpAgent({ subprocess: 'builder' })`, `ctx.adapters.fs.get('builder')`) while running out of process, in a child the local subprocess adapter started (`createLocalSubprocessAdapter({ registryEntry })`). Named adapters do not reach an out-of-process child: it has only its own in-memory `fs`, `shell` and `subprocess`.
+
+**Fix:** Run the step in-process, or name no adapter in it. See [Out-of-process children](/docs/framework/operators/spawn#out-of-process-children).
+
 #### CHECKPOINT_SCHEMA_MISMATCH
 
 **Cause:** `harness.restore()` found a checkpoint written by a runtime version whose snapshot schema this version does not recognize.
@@ -322,7 +328,7 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### SUBPROCESS_CANNOT_OPEN
 
-**Cause:** Something needed to start a process and hold its stdio — an ACP agent, or a stdio MCP server started with `spawnOn()` or `agent.spawn` — and the subprocess adapter it landed on has no `open`. An agent lands on the adapter its step names, else the one its preset names, else the harness's default; nothing stands in for it. The default adapter of a harness given no `environment.subprocess` runs steps in memory and has no `open`, so `claudeCode()` on such a harness fails this way. So does an agent connected by hand with no adapter at all.
+**Cause:** Something needed to start a process and hold its stdio — an ACP agent, or a stdio MCP server started with `spawnOn()` or `agent.spawn` — and the subprocess adapter it landed on has no `open`. An agent lands on the adapter its step names, else the one its preset names, else the harness's default; nothing stands in for it. The default adapter of a harness given no `environment.subprocess` runs steps in memory and has no `open`, so `claudeCode()` on such a harness fails this way. So does an agent connected by hand with no harness adapters at all.
 
 **Fix:** Give the harness an adapter that has `open` — `environment: { subprocess: createLocalSubprocessAdapter() }` from `@noetic-tools/platform-node` runs processes on this machine — or name another one that does (`subprocess: 'builder'` on the step or the preset).
 
@@ -330,7 +336,7 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Cause:** An agent that names a harness subprocess adapter (`claudeCode({ subprocess: 'builder' })`) was connected with no harness adapters to find the name among, usually by calling `agent.connect()` by hand.
 
-**Fix:** Run the agent as a step, so the harness passes its `environment.subprocess`, or give the agent the adapter itself.
+**Fix:** Run the agent as a step, so the harness passes its `environment.subprocess`.
 
 #### SUBPROCESS_RUNS_NO_STEPS
 
@@ -608,7 +614,7 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### UNKNOWN_SUBPROCESS_REFERENCE
 
-**Cause:** A `runCode` node names a subprocess adapter that neither `HydrationContext.resolveSubprocess` nor the harness's `environment.subprocess` has. The message lists the harness's names.
+**Cause:** A `runCode` node names a subprocess adapter that neither `HydrationContext.resolveSubprocess` nor the harness's `environment.subprocess` has. The message lists the harness's names, unless the document is one `parseAndRunWorkflow` or `dynamicWorkflow` ran: its author is not told them.
 
 **Fix:** Name one of the harness's adapters, map the name in `resolveSubprocess(ref)`, or omit `subprocess` to use the harness default.
 
@@ -706,7 +712,7 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### ACP_SESSION_ADAPTER_CONFLICT
 
-**Cause:** A resumed step would reattach to an agent that outlived its host, but the step now resolves to another subprocess adapter than the one that started the agent: its `subprocess` name, its agent's, or the harness's default changed. The agent may still be working where it was started, so the step attaches nowhere and fails.
+**Cause:** A resumed step would reattach to an agent that outlived its host, but the step now resolves to another subprocess adapter than the one that started the agent: its `subprocess` name, its agent's, or the harness's default changed, or the entry was renamed. The agent may still be working where it was started, so the step attaches nowhere and fails. The check compares names: a host that keeps a name and puts another adapter behind it is not caught.
 
 **Fix:** Resume with the step, its agent and `environment.subprocess` resolving to the adapter name the message gives, as in the run that started the agent.
 
@@ -769,7 +775,7 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### CONNECTION_NOT_ALLOWED
 
-**Cause:** A JSON workflow asks for more than its `connections` allowlist grants, or sets a setup field the profile reserves to the host (such as the command or path of an app). Or an `acp-agent` node asks for more than the `acp` allowlist grants its agent (`permissions`, `mode`, `model`, `cwd`, `clientCapabilities`, `session`), or names an MCP server, header or environment value the `mcp` allowlist does not grant, or names one header or variable twice.
+**Cause:** A JSON workflow asks for more than its `connections` allowlist grants, or sets a setup field the profile reserves to the host (such as the command or path of an app). Or an `acp-agent` node asks for more than the `acp` allowlist grants its agent (`permissions`, `mode`, `model`, `subprocess`, `fs`, `shell`, `cwd`, `clientCapabilities`, `session`), or a `runCode` node names a harness subprocess adapter the `runCode` grant does not list, or the document names an MCP server, header or environment value the `mcp` allowlist does not grant, or names one header or variable twice.
 
 **Fix:** Widen the allowlist passed to `parseAndRunWorkflow` or `dynamicWorkflow`, or move the host-only field into the pool's own `setup` in the harness configuration. For an MCP server URL, write it as the message shows.
 
@@ -787,9 +793,9 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### CONNECTION_NAME_TAKEN
 
-**Cause:** An entry names a connection that its scope or an outer one already attaches with a different provider or options. The scopes are the harness, then the turn (`execute(input, { connections })`), then a step's `tools`. Two entries in one list or record with the same name and different providers fail the same way.
+**Cause:** An entry names a connection that its scope or an outer one already attaches with a different provider or options. The scopes are the harness, then the turn (`execute(input, { connections })`), then a step's `tools`. Two entries in one list or record with the same name and different providers fail the same way. So do two `acpAgent` steps of one turn that list the same entry under different `subprocess` names: the entry is one connection, started in one place.
 
-**Fix:** Pass the same entry object the outer scope uses, or give this one another name.
+**Fix:** Pass the same entry object the outer scope uses, or give this one another name. Give steps that share an entry the same `subprocess`.
 
 ### Verification
 

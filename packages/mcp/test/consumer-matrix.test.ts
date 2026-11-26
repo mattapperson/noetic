@@ -32,6 +32,7 @@ import type {
   McpAllowlist,
   Step,
   StepToolEntry,
+  SubprocessAdapter,
   WorkflowMcpServer,
   WorkflowToolEntry,
 } from '@noetic-tools/types';
@@ -221,107 +222,109 @@ interface AgentLog {
   listed: string[];
 }
 
+const CLAUDE_SHAPED: AcpAgent = defineAcpAgent({
+  agentId: 'claude-shaped',
+  command: {
+    command: 'claude-shaped',
+  },
+  tools: claudeToolWiring,
+});
+
 /**
- * An ACP agent shaped like Claude Code: it reaches the bridge with an MCP
- * client, announces its call as an ACP `tool_call`, and calls
- * `linear_get_issue` with its own call id `call_1` in `_meta`.
+ * Runs {@link CLAUDE_SHAPED} in this process as an agent shaped like Claude
+ * Code: it reaches the bridge with an MCP client, announces its call as an
+ * ACP `tool_call`, and calls `linear_get_issue` with its own call id
+ * `call_1` in `_meta`.
  */
-function claudeShaped(log: AgentLog): AcpAgent {
-  return defineAcpAgent({
-    agentId: 'claude-shaped',
-    command: {
-      command: 'claude-shaped',
-    },
-    tools: claudeToolWiring,
-    subprocess: createInMemorySubprocessAdapter({
-      open: loopbackLink((conn) => {
-        let servers: ReadonlyArray<AcpMcpServer> = [];
-        return {
-          async initialize() {
-            return {
-              protocolVersion: 1,
-              agentCapabilities: {
-                mcpCapabilities: {
-                  http: true,
-                },
+function claudeShapedSubprocess(log: AgentLog): SubprocessAdapter {
+  return createInMemorySubprocessAdapter({
+    open: loopbackLink((conn) => {
+      let servers: ReadonlyArray<AcpMcpServer> = [];
+      return {
+        async initialize() {
+          return {
+            protocolVersion: 1,
+            agentCapabilities: {
+              mcpCapabilities: {
+                http: true,
               },
-            };
-          },
-          async newSession(params) {
-            servers = params.mcpServers;
-            return {
-              sessionId: 'claude-1',
-            };
-          },
-          async authenticate() {
-            return {};
-          },
-          async cancel() {},
-          async prompt(params) {
-            const bridge = servers.find((server) => server.name === 'noetic');
-            if (!bridge || !('url' in bridge)) {
-              throw new Error('no tool bridge in session/new');
-            }
-            const client = new Client({
-              name: 'claude-shaped',
-              version: '0.0.0',
-            });
-            await client.connect(
-              new StreamableHTTPClientTransport(new URL(bridge.url), {
-                requestInit: {
-                  headers: Object.fromEntries(
-                    bridge.headers.map((header) => [
-                      header.name,
-                      header.value,
-                    ]),
-                  ),
-                },
-              }),
-            );
-            log.listed = (await client.listTools()).tools.map((tool) => tool.name);
-            await conn.sessionUpdate({
-              sessionId: params.sessionId,
-              update: {
-                sessionUpdate: 'tool_call',
-                toolCallId: 'call_1',
-                title: 'mcp__noetic__linear_get_issue',
-                kind: 'other',
-                status: 'pending',
+            },
+          };
+        },
+        async newSession(params) {
+          servers = params.mcpServers;
+          return {
+            sessionId: 'claude-1',
+          };
+        },
+        async authenticate() {
+          return {};
+        },
+        async cancel() {},
+        async prompt(params) {
+          const bridge = servers.find((server) => server.name === 'noetic');
+          if (!bridge || !('url' in bridge)) {
+            throw new Error('no tool bridge in session/new');
+          }
+          const client = new Client({
+            name: 'claude-shaped',
+            version: '0.0.0',
+          });
+          await client.connect(
+            new StreamableHTTPClientTransport(new URL(bridge.url), {
+              requestInit: {
+                headers: Object.fromEntries(
+                  bridge.headers.map((header) => [
+                    header.name,
+                    header.value,
+                  ]),
+                ),
               },
-            });
-            const result = await client.callTool({
-              name: 'linear_get_issue',
-              arguments: {
-                id: 'ENG-1',
+            }),
+          );
+          log.listed = (await client.listTools()).tools.map((tool) => tool.name);
+          await conn.sessionUpdate({
+            sessionId: params.sessionId,
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId: 'call_1',
+              title: 'mcp__noetic__linear_get_issue',
+              kind: 'other',
+              status: 'pending',
+            },
+          });
+          const result = await client.callTool({
+            name: 'linear_get_issue',
+            arguments: {
+              id: 'ENG-1',
+            },
+            _meta: {
+              'claudecode/toolUseId': 'call_1',
+            },
+          });
+          const text = frameworkCast<
+            Array<{
+              text?: string;
+            }>
+          >(result.content)
+            .map((part) => part.text ?? '')
+            .join('');
+          await client.close();
+          await conn.sessionUpdate({
+            sessionId: params.sessionId,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: {
+                type: 'text',
+                text: `read: ${text}`,
               },
-              _meta: {
-                'claudecode/toolUseId': 'call_1',
-              },
-            });
-            const text = frameworkCast<
-              Array<{
-                text?: string;
-              }>
-            >(result.content)
-              .map((part) => part.text ?? '')
-              .join('');
-            await client.close();
-            await conn.sessionUpdate({
-              sessionId: params.sessionId,
-              update: {
-                sessionUpdate: 'agent_message_chunk',
-                content: {
-                  type: 'text',
-                  text: `read: ${text}`,
-                },
-              },
-            });
-            return {
-              stopReason: 'end_turn',
-            };
-          },
-        };
-      }),
+            },
+          });
+          return {
+            stopReason: 'end_turn',
+          };
+        },
+      };
     }),
   });
 }
@@ -422,11 +425,10 @@ function graphFor(
     readonly consumer: Consumer;
     readonly entry: ReturnType<typeof linear>;
   },
-  log: AgentLog,
   harness: () => AgentHarness,
 ): Step<ContextData, string, string> {
   const { attachment, consumer, entry } = pairing;
-  const agent = claudeShaped(log);
+  const agent = CLAUDE_SHAPED;
   const tools: StepToolEntry[] = [
     attachment === 'pick by name' ? connectionTools('linear') : entry,
   ];
@@ -548,7 +550,6 @@ async function observe(attachment: Attachment, consumer: Consumer): Promise<Obse
         consumer,
         entry,
       },
-      log,
       () => {
         if (!built) {
           throw new Error('harness not built');
@@ -562,6 +563,7 @@ async function observe(attachment: Attachment, consumer: Consumer): Promise<Obse
           return `Bearer ${TOKEN}`;
         },
       },
+      subprocess: claudeShapedSubprocess(log),
     },
     callModelDefaults: {
       provider: 'openrouter',

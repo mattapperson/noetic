@@ -1,7 +1,7 @@
 # JSON Workflow Runtime
 
 > **Depends On:** `01-step-type` (Step, Until), `02-step-variants` (callModel, invokeTool), `03-control-flow` (conditional, inParallel), `04-spawn` (spawn), `05-loop-and-until` (loop, until), `08-runtime` (AgentHarness), `33-expressions` (Expression)
-> **Exports:** `WorkflowDocument`, `WorkflowNode`, `WorkflowDocumentSchema`, `WorkflowNodeSchema`, `UntilPredicateSchema`, `MergeStrategySchema`, `hydrateWorkflow`, `hydrateNode`, `dynamicWorkflow`, `parseAndRunWorkflow`
+> **Exports:** `WorkflowDocument`, `WorkflowNode`, `WorkflowDocumentSchema`, `WorkflowNodeSchema`, `UntilPredicateSchema`, `MergeStrategySchema`, `hydrateWorkflow`, `hydrateNode`, `dynamicWorkflow`, `parseAndRunWorkflow`, `RunCodeGrant`
 
 ---
 
@@ -596,7 +596,8 @@ interface HydrationContext {
 | `acpAgents`          | No       | ACP agent adapters keyed by `agentId` (`claude-code`, `codex`, …). Open set. |
 | `bindings`           | No       | Document connection name → harness connection name, when they differ (spec 35). Connection nodes resolve connections through the harness registry when they run. |
 | `uiLibraries`        | No       | Output codecs for `callModel` nodes' `output` codec references.                |
-| `resolveSubprocess`  | No       | Resolves the name a `runCode` node's `subprocess` gives. A name it does not know is one of the harness's subprocess adapters (§ No In-Process Closures). |
+| `resolveSubprocess`  | No       | Resolves the name a `runCode` node's `subprocess` gives. A name it does not know is one of the harness's subprocess adapters, when `runCodeBounds` allows it (§ No In-Process Closures). |
+| `runCodeBounds`      | No       | Internal: the `RunCodeGrant` that `runCode` nodes are held to when the host did not write the document. Set by `parseAndRunWorkflow` and `dynamicWorkflow`, dropped for named subflow refs; callers never set it (§ runCode). |
 | `workflows`          | No       | Named sub-workflow documents that `subflow` nodes resolve via `ref`.     |
 | `maxRecursionDepth`  | No       | Deepest allowed chain of named-ref resolutions on one path. Positive integer or `Infinity`; default `100`. |
 | `recursionDepth`     | No       | Internal: named-ref resolutions above the node being hydrated. Threaded by the subflow hydrator; callers never set it. |
@@ -724,6 +725,7 @@ function dynamicWorkflow(opts: {
   connections?: ConnectionAllowlist;
   acpAgents?: ReadonlyMap<string, AcpAgent>;
   acp?: AcpAllowlist;
+  runCode?: RunCodeGrant;
   mcp?: McpAllowlist;
 }): Step<string, string>
 ```
@@ -769,6 +771,7 @@ function parseAndRunWorkflow(opts: {
   connections?: ConnectionAllowlist;
   acpAgents?: ReadonlyMap<string, AcpAgent>;
   acp?: AcpAllowlist;
+  runCode?: RunCodeGrant;
   mcp?: McpAllowlist;
 }): Promise<string>
 ```
@@ -803,7 +806,7 @@ A `callModel` node's `tools` entries are objects. Besides `{ "type": … }` (a r
 - **`{ "connection", "ops"? }`** names a harness, turn or document connection and becomes `connectionTools(name, { ops })`: every tool of the connection, or only those whose operations all match the `ops` globs. It needs no `connections` manifest entry. A name no connection has fails with `CONNECTION_UNKNOWN` when the turn's tool set is built. Under a `connections` allowlist the name must be granted and each `ops` glob must lie inside a granted glob (`get_issue` and `get_*` inside `get_*`; `*` is not); without `ops` the pick takes exactly the granted operations. Anything else is `CONNECTION_NOT_ALLOWED`. `parseAndRunWorkflow` and `dynamicWorkflow` always hold a document to a `connections` allowlist — no option is `connections: {}` — so a `callModel` or `acp-agent` node gets exactly the tools it lists, and a node with no `tools` is offered each granted connection with exactly its granted operations plus the MCP servers the document's `connections` attach (its other tools are those of any step with no `tools`): with nothing granted, no connection. A pick of a server the document's own `connections` attach answers to `mcp`, not `connections`. `hydrateWorkflow` and `workflow()`, for documents the host wrote, apply no allowlist unless given one.
 - **`{ "mcp": … }`** is an MCP server the step attaches, in ACP's `McpServer` shape as `mcp()` takes it: `{ "name", "type": "http" | "sse", "url", "headers"? }` or `{ "name", "command", "args"?, "env"? }`, like `tools: [mcp({ … })]`. Header and environment values are `$secret`s only; it takes no `cwd` and no `policy`, and the schema refuses any other key. The server must match an `mcp` grant (§ MCP servers), which supplies its secrets, its policy and the provider that connects it.
 
-An `acp-agent` node takes the same two entries in its own `tools` (no `{ "type" }` entries): connections served to the agent with noetic as the MCP client, never handed to the agent's own MCP client (spec 27 § Tools). A stdio `{ "mcp" }` entry on an `acp-agent` node starts through its agent's `spawn`, where the agent runs: through the subprocess adapter the node names, when it names one.
+An `acp-agent` node takes the same two entries in its own `tools` (no `{ "type" }` entries): connections served to the agent with noetic as the MCP client, never handed to the agent's own MCP client (spec 27 § Tools). A stdio `{ "mcp" }` entry on an `acp-agent` node starts through its agent's `spawn`, where the agent runs: through the subprocess adapter the node names, when it names one. The `spawn` the host's `mcp.provider` is handed is already bound to the harness's subprocess adapters and the node's name, so a provider that calls `spawn(command)` and forwards nothing still starts the server there.
 
 The same `{ "mcp" }` entry under the document's `connections`, keyed by its name, attaches the server for the whole document (spec 35 § JSON workflows):
 
@@ -814,16 +817,17 @@ The same `{ "mcp" }` entry under the document's `connections`, keyed by its name
   "root": { "kind": "callModel", "id": "triage", "instructions": "…" } }
 ```
 
-**A document run in the middle of a turn.** A step entry connects with the turn, before its tool set is built (spec 35 § Attaching connections). A document `parseAndRunWorkflow` or `dynamicWorkflow` hydrates from a running step did not exist then, so when the harness runs it, it attaches the document's entries — its nodes' and its `connections`' — to the turn (released when the turn ends) and adds their tools to the pool for that run only: the rest of the turn keeps the tool set it started with. A name the harness or turn already holds with a different provider or options is `CONNECTION_NAME_TAKEN`.
+**A document run in the middle of a turn.** A step entry connects with the turn, before its tool set is built (spec 35 § Attaching connections). A document `parseAndRunWorkflow` or `dynamicWorkflow` hydrates from a running step did not exist then, so when the harness runs it, it attaches the document's entries — its nodes' and its `connections`' — to the turn (released when the turn ends) and adds their tools to the pool for that run only: the rest of the turn keeps the tool set it started with. A name the harness or turn already holds with a different provider or options — or, for an entry another `acp-agent` node attached, under another `subprocess` name — is `CONNECTION_NAME_TAKEN`.
 
 ### What a document may ask of an agent
 
-`parseAndRunWorkflow` and `dynamicWorkflow` run documents the host did not write, so an `acp-agent` node gets only what the host grants. Two allowlists cover it, and both are checked at parse time (inline subflows included), before anything runs:
+`parseAndRunWorkflow` and `dynamicWorkflow` run documents the host did not write, so an `acp-agent` node gets only what the host grants, and a `runCode` node runs only where the host lets it. Three grants cover it, all checked at parse time (inline subflows included), before anything runs:
 
 - **`acp`** (`AcpAllowlist`) — per agent id, the most a node may ask in `permissions`, `mode`, `model`, `subprocess`, `fs`, `shell`, `cwd`, `clientCapabilities` and `session` (§ ACP agents).
+- **`runCode`** (`RunCodeGrant`) — the harness subprocess adapters a `runCode` node may name (§ runCode).
 - **`mcp`** (`McpAllowlist`) — the MCP servers a document may attach as `{ "mcp" }` entries, in a node's `tools` or its `connections`, and the secrets their headers and environment may carry (§ MCP servers).
 
-`acpAgents` is the registry of agents a node may name, not an allowlist: a node naming an agent outside it fails with `UNKNOWN_ACP_AGENT_REFERENCE`. Nothing else on the node is limited — `prompt` passes as written. Named subflow refs come from the host's own registry and are neither checked nor held to the grants: every registered workflow is one any document may invoke, run with the host's settings, so a host registers only workflows it would let an untrusted document run. A host that wrote the document itself runs it with `workflow()` (spec 02) or `hydrateWorkflow`, which check none of the `acp` limits.
+`acpAgents` is the registry of agents a node may name, not an allowlist: a node naming an agent outside it fails with `UNKNOWN_ACP_AGENT_REFERENCE`. Nothing else on the node is limited — `prompt` passes as written. Named subflow refs come from the host's own registry and are neither checked nor held to the grants: every registered workflow is one any document may invoke, run with the host's settings, so a host registers only workflows it would let an untrusted document run. A host that wrote the document itself runs it with `workflow()` (spec 02) or `hydrateWorkflow`, which check none of the `acp` or `runCode` limits.
 
 #### ACP agents
 
@@ -860,6 +864,23 @@ Each field of an `AcpAgentGrant` is a ceiling; an agent with no entry gets the n
 
 A document's sessions never join the host's. Each run of `parseAndRunWorkflow`, and each run of a `dynamicWorkflow` step, moves its nodes' `session.reuse` keys into a namespace of its own, so two nodes of one document still share a session, but no node can take over a session the host or another document opened — and the servers, cwd and capabilities it was opened with.
 
+#### runCode
+
+A `runCode` node's `subprocess` picks the host its code runs on, so a document may name a harness subprocess adapter only when the host's `runCode` grant lists it:
+
+```ts
+parseAndRunWorkflow({
+  json, harness, ctx, tools,
+  runCode: { subprocess: ['sandbox'] },
+});
+```
+
+| Field | A node may | Default |
+|-------|-----------|---------|
+| `subprocess` | name one of these harness subprocess adapters (`08-runtime` § Named Adapters). A name moves the code to another host, so none is granted by default: a node runs on the harness's default. | no name |
+
+A node naming an adapter the grant does not list fails validation with `CONNECTION_NOT_ALLOWED`. The refusal names the node, the name it asked for and the names the grant lists — never the harness's other adapters, which are not the document author's to learn. A granted name the harness lacks fails the step with `UNKNOWN_SUBPROCESS_REFERENCE`, which under a grant lists no names either. The hydrated node checks the grant again when it runs, so a node that reaches hydration unchecked is still refused. `dynamicWorkflow` shows its planner the granted names. `HydrationContext.resolveSubprocess` is the host's own code and comes first: a name it resolves needs no grant.
+
 #### MCP servers
 
 `parseAndRunWorkflow` and `dynamicWorkflow` accept an MCP server a document names — a `{ "mcp" }` entry in a node's `tools` or the document's `connections` — only when the host's `mcp` allowlist grants it, and check every server (inline subflows included) at parse time, before anything runs. Two different servers under one name — two nodes, or a node and the document's `connections` — are `CONNECTION_NAME_TAKEN` there too; the same server written the same way twice is one connection:
@@ -884,7 +905,7 @@ parseAndRunWorkflow({
 - **The host connects it.** `provider` builds the connection for the granted server — ACP's `McpServer` shape with its secrets resolved (`GrantedMcpServer`) — so `provider: mcp` is all it takes; core never imports `@noetic-tools/mcp`. A stdio server is the exact granted command, and the host decides where it runs. Without `provider`, a document that names a server fails with `CONNECTION_INVALID`. The same server under the same allowlist is always the same provider, so two nodes naming it share one connection.
 - **No allowlist grants nothing.** An absent `mcp` refuses every server on both functions, as an absent `connections` grants no connection and an absent `acp` the narrowest agent settings: there is no trusted mode for a document. A host that trusts one passes the grants it wants.
 
-A document asking for more than `acp` or `mcp` grants fails validation with `CONNECTION_NOT_ALLOWED`, naming the node (or the document's connections) and what it asked for. `dynamicWorkflow` feeds the refusal back to the planner like any validation error, and shows the planner the registered agent ids, each agent's limits, and only the granted servers.
+A document asking for more than `acp`, `runCode` or `mcp` grants fails validation with `CONNECTION_NOT_ALLOWED`, naming the node (or the document's connections) and what it asked for. `dynamicWorkflow` feeds the refusal back to the planner like any validation error, and shows the planner the registered agent ids, each agent's limits, and only the granted servers.
 
 ---
 
@@ -892,7 +913,7 @@ A document asking for more than `acp` or `mcp` grants fails validation with `CON
 
 ### No In-Process Closures
 
-Programmatic `runCode` accepts an `execute` closure, which is not JSON-serialisable. The `runCode` node instead carries its body as a code STRING dispatched through a subprocess adapter — never eval'd in-process. A node with no `subprocess` runs through the harness's default (`ctx.subprocess`). A node that names one runs through the adapter `HydrationContext.resolveSubprocess` returns for the name, else the harness's subprocess adapter of that name (`08-runtime` § Named Adapters), so a document author sees one set of names. A name neither knows fails the step with `UNKNOWN_SUBPROCESS_REFERENCE`, whose message lists the harness's names. In-process computation is expressed as a `compute` expression (spec 33), which is interpreted as data, or through tool calls and LLM steps. An adapter that reaches only a remote runner refuses the request with `SUBPROCESS_CANNOT_END_INPUT`, since the runner's frames carry no end of input (`08-runtime` § Request Dispatch).
+Programmatic `runCode` accepts an `execute` closure, which is not JSON-serialisable. The `runCode` node instead carries its body as a code STRING dispatched through a subprocess adapter — never eval'd in-process. A node with no `subprocess` runs through the harness's default (`ctx.subprocess`). A node that names one runs through the adapter `HydrationContext.resolveSubprocess` returns for the name, else the harness's subprocess adapter of that name (`08-runtime` § Named Adapters). In a document the host did not write — one run by `parseAndRunWorkflow` or `dynamicWorkflow` — a harness name must be one the host's `runCode` grant lists, and none is by default (§ runCode); `resolveSubprocess` is the host's own code and needs no grant. A name neither knows fails the step with `UNKNOWN_SUBPROCESS_REFERENCE`, whose message lists the harness's names only for a document the host wrote. In-process computation is expressed as a `compute` expression (spec 33), which is interpreted as data, or through tool calls and LLM steps. An adapter that reaches only a remote runner refuses the request with `SUBPROCESS_CANNOT_END_INPUT`, since the runner's frames carry no end of input (`08-runtime` § Request Dispatch).
 
 ### Static Lazy Fields Only
 
@@ -985,7 +1006,7 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `UNKNOWN_SUBPROCESS_REFERENCE` | A `runCode` node's `subprocess` names an adapter neither `resolveSubprocess` nor the harness has. |
 | `ADAPTER_UNKNOWN`              | An `acp-agent` node's `subprocess`, `fs` or `shell` names an adapter the harness lacks. Raised when the step runs. |
 | `CONNECTION_UNKNOWN`           | A node names a connection the manifest or harness does not have. Other connection codes are in `35-connections` § Errors. |
-| `CONNECTION_NOT_ALLOWED`       | A document asks for more than `connections` grants (a manifest, or a `{ "connection" }` tool entry and its `ops`), names an MCP server, header or environment value `mcp` does not grant, or an `acp-agent` node asks for more than `acp` grants (§ Tools, § What a document may ask of an agent). |
+| `CONNECTION_NOT_ALLOWED`       | A document asks for more than `connections` grants (a manifest, or a `{ "connection" }` tool entry and its `ops`), names an MCP server, header or environment value `mcp` does not grant, an `acp-agent` node asks for more than `acp` grants, or a `runCode` node names a subprocess adapter `runCode` does not grant (§ Tools, § What a document may ask of an agent). |
 | `CONNECTION_NAME_TAKEN`        | A document's `{ "mcp" }` entry uses a name the harness or the turn holds for a different connection, or the document names two different servers under one name (§ Tools, § MCP servers). |
 | `UNKNOWN_UNTIL_PREDICATE`      | An until predicate kind is unrecognised.                                 |
 | `INVALID_UNTIL_DECIDER`        | A decide until predicate does not ask exactly one boolean question (raised at hydration by `loop`/`any`/`all`). |

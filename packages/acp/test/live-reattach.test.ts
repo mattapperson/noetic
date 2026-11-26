@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { LineSplitter } from '../src/keeper/protocol';
 import type { LiveAgentId } from './fixtures/live-agents';
-import { askToEcho, echoHost, isLiveAgentId, liveAgent } from './fixtures/live-agents';
+import { askToEcho, connectLive, echoHost, isLiveAgentId } from './fixtures/live-agents';
 
 const LIVE = process.env.ACP_LIVE_AGENT === '1' && process.platform !== 'win32';
 const HOST = fileURLToPath(new URL('./fixtures/live-host.ts', import.meta.url));
@@ -84,7 +84,7 @@ describe.skipIf(!LIVE)('live: a real bridge after its host is killed', () => {
         expect(first.text).toContain('echo[host1]:first');
 
         const calls: string[] = [];
-        const connection = await liveAgent(id).connect({
+        const connection = await connectLive(id, {
           host: echoHost('host2', calls, cwd),
           reattach: first.handle,
         });

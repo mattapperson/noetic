@@ -235,6 +235,15 @@ Registry policy is **latest registration wins**. Dispatch-and-lookup happen in t
 
 Cross-process callers share the registry by importing the same entry module. The out-of-process adapter's bootstrap reads `NOETIC_REGISTRY_ENTRY` (or equivalent adapter configuration), imports that module, and then resolves `stepId` via `lookupStep`.
 
+### Out-of-process children
+
+The bootstrap runs the step on a harness of its own, built with no `environment`: in-memory `fs`, `shell` and `subprocess`, each a set of one called `default`. The parent's adapters are objects in the parent's process and are not rebuilt in the child, so:
+
+- **A step that names an adapter fails.** `step.acpAgent({ subprocess: 'builder' })`, or any `ctx.adapters.<kind>.get('builder')`, under a `spawn` the local adapter runs out of process fails with `NoeticConfigError` `ADAPTER_NOT_IN_CHILD`. Its message says named adapters do not reach an out-of-process child, and to run the step in-process or name no adapter in it.
+- **A step that names none uses the child's in-memory adapters**, not the parent's defaults: a file it writes through `ctx.fs` is gone when the child exits, and an ACP agent it starts fails with `SUBPROCESS_CANNOT_OPEN`, since the in-memory subprocess adapter has no `open`.
+
+A step that needs the harness's adapters runs in-process: leave `registryEntry` off the adapter, or give the step an in-process adapter as its own `subprocess`.
+
 ### Durable Handle Manifests
 
 Adapters that opt into durability persist a manifest per handle through the harness's `StorageAdapter`:

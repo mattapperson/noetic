@@ -517,6 +517,11 @@ async function runAcpPath(gateLog: GateLog, agentLog: AgentLog): Promise<Item[]>
   const harness = new AgentHarness({
     name: 'acp-path',
     params: {},
+    environment: {
+      subprocess: createInMemorySubprocessAdapter({
+        open: loopbackLink(claudeShapedAgent(agentLog)),
+      }),
+    },
     ...gates(gateLog),
   });
   const ctx = harness.createContext();
@@ -527,9 +532,6 @@ async function runAcpPath(gateLog: GateLog, agentLog: AgentLog): Promise<Item[]>
       command: {
         command: 'claude-shaped',
       },
-      subprocess: createInMemorySubprocessAdapter({
-        open: loopbackLink(claudeShapedAgent(agentLog)),
-      }),
       tools: claudeToolWiring,
     }),
     prompt: 'go',

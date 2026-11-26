@@ -9,7 +9,9 @@
  *      `registerStep` side effects populate the registry in this process.
  *   3. Looks up the requested step by id.
  *   4. Constructs a minimal harness (in-memory adapters, no nested
- *      subprocess) and runs the step.
+ *      subprocess) and runs the step. The parent's adapters do not reach
+ *      this process, so a step that names one fails with
+ *      `ADAPTER_NOT_IN_CHILD`; one that names none uses the in-memory ones.
  *   5. Serialises the result (or error) as a JSON envelope on stdout.
  *
  * Protocol: the parent reads **exactly one JSON line** from stdout on child
@@ -24,6 +26,7 @@
  */
 
 import type { StepSubprocessOverrides } from '@noetic-tools/types';
+import { isNoeticConfigError, isNoeticError, NoeticConfigError } from '@noetic-tools/types';
 import { lookupStep } from '../runtime/step-registry';
 import { AgentHarness } from './agent-harness';
 
@@ -109,6 +112,28 @@ function serializeErrorFor(err: unknown): SerializedErrorEnvelope {
   };
 }
 
+/**
+ * The error for a step that named an adapter here, when `err` is that
+ * failure. This harness has only its own unnamed adapters, so any unknown
+ * name is one the parent's harness had. The envelope carries no hint, so the
+ * message says what to do.
+ */
+function unreachedAdapter(stepId: string, err: unknown): NoeticConfigError | undefined {
+  let cause = err;
+  while (isNoeticError(cause) && cause.noeticError.kind === 'step_failed') {
+    cause = cause.noeticError.cause;
+  }
+  if (!isNoeticConfigError(cause) || cause.code !== 'ADAPTER_UNKNOWN') {
+    return undefined;
+  }
+  const advice = 'Run the step in-process, or name no adapter in it.';
+  return new NoeticConfigError({
+    code: 'ADAPTER_NOT_IN_CHILD',
+    message: `Step '${stepId}' ran out of process and named an adapter. Named adapters do not reach an out-of-process child, which has only its own in-memory fs, shell and subprocess adapters: ${cause.message} ${advice}`,
+    hint: advice,
+  });
+}
+
 function writeEnvelope(payload: Record<string, unknown>): void {
   // A single newline-terminated JSON line — matches the parent parser's
   // contract in `local-subprocess-adapter.ts`.
@@ -173,7 +198,7 @@ async function main(): Promise<number> {
   } catch (err) {
     writeEnvelope({
       kind: 'error',
-      error: serializeErrorFor(err),
+      error: serializeErrorFor(unreachedAdapter(parsed.stepId, err) ?? err),
     });
     return 1;
   }

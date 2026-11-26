@@ -211,3 +211,110 @@ describe('adapterSet — several by name', () => {
     }
   });
 });
+
+describe('adapterSet — the listing', () => {
+  it('cannot be changed by a caller', () => {
+    const laptop = shell('laptop');
+    const set = shells({
+      laptop: {
+        adapter: laptop,
+        default: true,
+      },
+      builder: {
+        adapter: shell('builder'),
+      },
+    });
+    const listing = frameworkCast<
+      Array<{
+        name: string;
+        default: boolean;
+      }>
+    >(set.list());
+    expect(() => {
+      listing[0].default = false;
+    }).toThrow(TypeError);
+    expect(() =>
+      listing.push({
+        name: 'cloud',
+        default: true,
+      }),
+    ).toThrow(TypeError);
+    expect(set.list().map((adapter) => adapter.default)).toEqual([
+      true,
+      false,
+    ]);
+    expect(set.get()).toBe(laptop);
+    expect(set.defaultName).toBe('laptop');
+  });
+});
+
+describe('adapterSet — telling an adapter from a set', () => {
+  it('fails a value that is both an adapter and a set', () => {
+    expect(
+      codeOf(() =>
+        shells({
+          exec: () => 'here',
+          local: {
+            adapter: shell('local'),
+            default: true,
+          },
+        }),
+      ),
+    ).toBe('ADAPTER_INVALID');
+  });
+
+  it('takes an adapter that carries plain data of its own', () => {
+    const only = {
+      ...shell('here'),
+      options: {
+        timeoutMs: 5,
+      },
+    };
+    expect(shells(only).get()).toBe(only);
+  });
+
+  it('fails a lone entry marked not the default', () => {
+    expect(
+      codeOf(() =>
+        shells({
+          laptop: {
+            adapter: shell('laptop'),
+            default: false,
+          },
+        }),
+      ),
+    ).toBe('ADAPTER_DEFAULT_MISSING');
+  });
+
+  it("fails an entry named 'default' that is not the default", () => {
+    expect(
+      codeOf(() =>
+        shells({
+          default: {
+            adapter: shell('a'),
+          },
+          builder: {
+            adapter: shell('b'),
+            default: true,
+          },
+        }),
+      ),
+    ).toBe('ADAPTER_INVALID');
+  });
+
+  it("takes an entry named 'default' that is the default", () => {
+    const a = shell('a');
+    const set = shells({
+      default: {
+        adapter: a,
+        default: true,
+      },
+      builder: {
+        adapter: shell('b'),
+      },
+    });
+    expect(set.get('default')).toBe(set.get());
+    expect(set.get()).toBe(a);
+    expect(set.defaultName).toBe('default');
+  });
+});

@@ -889,6 +889,7 @@ export type {
   AcpUsageUpdate,
   AcpWhenHostExits,
   ByteStream,
+  RunCodeGrant,
   Spawn,
   SpawnCommand,
   SpawnOptions,

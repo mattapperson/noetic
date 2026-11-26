@@ -27,18 +27,15 @@ const POSIX = process.platform !== 'win32';
 const HOST = fileURLToPath(new URL('./fixtures/keeper-host.ts', import.meta.url));
 const AGENT = fileURLToPath(new URL('./fixtures/keeper-agent.ts', import.meta.url));
 
-function keptAgent(kind: SubprocessKind) {
-  return customAcpAgent({
-    agentId: 'kept',
-    command: process.execPath,
-    args: [
-      AGENT,
-    ],
-    subprocess: subprocessFor(kind),
-  });
-}
+const agent = customAcpAgent({
+  agentId: 'kept',
+  command: process.execPath,
+  args: [
+    AGENT,
+  ],
+});
 
-const agent = keptAgent('local');
+const local = subprocessFor('local');
 
 interface Started {
   host: ChildProcess;
@@ -135,6 +132,7 @@ describe.skipIf(!POSIX)('a kept agent and a host that dies', () => {
     const connection = await agent.connect({
       host: secondHost(updates),
       reattach: handle,
+      subprocess: local,
     });
     try {
       assert(connection.attachSession);
@@ -169,6 +167,7 @@ describe.skipIf(!POSIX)('a kept agent and a host that dies', () => {
       .connect({
         host: secondHost([]),
         reattach: handle,
+        subprocess: local,
       })
       .then(
         () => undefined,
@@ -187,6 +186,7 @@ describe.skipIf(!POSIX)('a kept agent and a host that dies', () => {
     const connection = await agent.connect({
       host: secondHost(updates),
       reattach: handle,
+      subprocess: local,
     });
     try {
       assert(connection.attachSession);
@@ -211,6 +211,7 @@ describe.skipIf(!POSIX)('a kept agent and a host that dies', () => {
       .connect({
         host: secondHost([]),
         reattach: handle,
+        subprocess: local,
       })
       .then(
         () => undefined,
@@ -225,6 +226,7 @@ describe.skipIf(!POSIX)('a kept agent and a host that dies', () => {
     const declining = await agent.connect({
       host: secondHost([]),
       reattach: handle,
+      subprocess: local,
       whenHostExits: 'stop',
     });
     assert(declining.detach);
@@ -234,6 +236,7 @@ describe.skipIf(!POSIX)('a kept agent and a host that dies', () => {
     const adopting = await agent.connect({
       host: secondHost([]),
       reattach: handle,
+      subprocess: local,
     });
     try {
       assert(adopting.attachSession);
@@ -250,6 +253,7 @@ describe.skipIf(!POSIX)('a kept agent and a host that dies', () => {
     const connection = await agent.connect({
       host: secondHost([]),
       reattach: handle,
+      subprocess: local,
     });
     try {
       assert(connection.attachSession);
@@ -290,15 +294,16 @@ describe.skipIf(!POSIX)('a kept agent on a remote runner', () => {
     'stdio',
   ] satisfies SubprocessKind[]) {
     it(`over ${kind}: a new host reconnects and takes the turn over`, async () => {
-      const remote = keptAgent(kind);
+      const subprocess = subprocessFor(kind);
       const { host, handle, sessionId } = await firstHost('keep', 'ask', kind);
       // The host dies: its channel to the runner drops (and a stdio runner exits).
       await crash(host);
 
       const updates: AcpSessionNotification[] = [];
-      const connection = await remote.connect({
+      const connection = await agent.connect({
         host: secondHost(updates),
         reattach: handle,
+        subprocess,
       });
       try {
         assert(connection.attachSession);
@@ -311,10 +316,11 @@ describe.skipIf(!POSIX)('a kept agent on a remote runner', () => {
       } finally {
         await connection.close();
       }
-      const gone = await remote
+      const gone = await agent
         .connect({
           host: secondHost([]),
           reattach: handle,
+          subprocess,
         })
         .then(
           () => undefined,

@@ -15,13 +15,13 @@ import type {
   GrantedMcpServer,
   McpAllowlist,
   SecretResolver,
-  Spawn,
   SpawnOptions,
   WorkflowDocument,
   WorkflowMcpSecretValue,
   WorkflowMcpServer,
 } from '@noetic-tools/types';
 import { frameworkCast, isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
+import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
 import { dynamicWorkflow, parseAndRunWorkflow } from '../../src/builders/dynamic-workflow';
 import { checkMcpServers, mcpEntry, mcpPrompt } from '../../src/builders/workflow-mcp-servers';
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
@@ -1454,58 +1454,51 @@ describe("a document's own connections", () => {
 });
 
 describe('a stdio tools entry on an acp-agent node', () => {
-  it("starts through the agent's spawn, where the agent runs", async () => {
-    const host = recordingHost();
-    const record = recordingAgent();
-    const spawn: Spawn = async () => {
-      throw new Error('not started in this test');
-    };
-    const harness = harnessWithSecrets();
-    await parseAndRunWorkflow({
-      json: agentDoc([
-        DOCS_SERVER,
-      ]),
-      harness,
-      ctx: harness.createContext(),
-      tools: [],
-      acpAgents: new Map([
-        [
-          'fake',
-          {
-            ...record.agent,
-            spawn,
-          },
-        ],
-      ]),
-      mcp: {
-        ...DOCS_GRANT,
-        provider: host.provider,
-      },
-    });
-    expect(host.built).toEqual([
-      {
-        ...DOCS_SERVER,
-        spawn,
-      },
-    ]);
-  });
-});
+  const command = {
+    command: 'npx',
+  };
 
-describe('a stdio tools entry on an acp-agent node that names a subprocess adapter', () => {
-  it('starts through the adapter the node names', async () => {
-    const host = recordingHost();
+  /**
+   * Runs a document whose agent node lists a stdio server, on a harness with
+   * a `laptop` (the default) and a `builder` subprocess adapter, through a
+   * provider that starts the server with `spawn(command)` and forwards
+   * nothing. Returns what the agent's `spawn` was handed.
+   */
+  async function spawnOptions(subprocess?: string): Promise<{
+    given: Array<SpawnOptions | undefined>;
+    harness: AgentHarness;
+  }> {
     const record = recordingAgent();
     const given: Array<SpawnOptions | undefined> = [];
-    const harness = harnessWithSecrets();
+    const harness = new AgentHarness({
+      name: 'mcp-servers',
+      params: {},
+      environment: {
+        subprocess: {
+          laptop: {
+            adapter: createInMemorySubprocessAdapter(),
+            default: true,
+          },
+          builder: {
+            adapter: createInMemorySubprocessAdapter(),
+          },
+        },
+      },
+    });
     const doc = agentDoc([
       DOCS_SERVER,
     ]);
+    const inner = recordingHost();
     await parseAndRunWorkflow({
       json: {
         ...doc,
         root: {
           ...doc.root,
-          subprocess: 'default',
+          ...(subprocess === undefined
+            ? {}
+            : {
+                subprocess,
+              }),
         },
       },
       harness,
@@ -1526,38 +1519,50 @@ describe('a stdio tools entry on an acp-agent node that names a subprocess adapt
       acp: {
         fake: {
           subprocess: [
-            'default',
+            'builder',
           ],
         },
       },
       mcp: {
         ...DOCS_GRANT,
-        provider: host.provider,
+        provider: (server) => {
+          const provider = inner.provider(server);
+          return {
+            ...provider,
+            async connect(opts) {
+              assert('command' in server && server.spawn);
+              await server.spawn(command).catch(() => undefined);
+              return await provider.connect(opts);
+            },
+          };
+        },
       },
     });
-    const [built] = host.built;
-    assert(built && 'command' in built);
-    const spawn = built.spawn;
-    assert(spawn);
-    const command = {
-      command: 'npx',
+    return {
+      given,
+      harness,
     };
-    const adapters = harness.adapters.subprocess;
-    await spawn(command, {
-      subprocess: {
-        adapters,
-      },
-    }).catch(() => undefined);
-    await spawn(command).catch(() => undefined);
+  }
+
+  it("starts through the agent's spawn, where the agent runs", async () => {
+    const { given, harness } = await spawnOptions();
     expect(given).toEqual([
       {
         subprocess: {
-          adapters,
-          name: 'default',
+          adapters: harness.adapters.subprocess,
         },
       },
-      undefined,
     ]);
+  });
+
+  it('starts through the adapter the node names, whatever its provider forwards', async () => {
+    const { given, harness } = await spawnOptions('builder');
+    const [options] = given;
+    assert(options?.subprocess);
+    expect(options.subprocess.name).toBe('builder');
+    const adapters = harness.adapters.subprocess;
+    expect(options.subprocess.adapters.get(options.subprocess.name)).toBe(adapters.get('builder'));
+    expect(adapters.get('builder')).not.toBe(adapters.get());
   });
 });
 

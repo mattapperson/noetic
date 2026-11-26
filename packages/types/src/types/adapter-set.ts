@@ -12,7 +12,10 @@ export interface NamedAdapter<A> {
   displayName?: string;
   /** What sets this adapter apart: the host it reaches, what it is for. */
   description?: string;
-  /** Marks the adapter used when none is named. A set of several needs exactly one. */
+  /**
+   * Marks the adapter used when none is named. A set of several needs exactly
+   * one; a set of one is its own default and may leave the mark out.
+   */
   default?: boolean;
 }
 
@@ -38,7 +41,9 @@ export interface AdapterSet<A> {
    * @throws `NoeticConfigError` `ADAPTER_UNKNOWN` when the set has no adapter of that name.
    */
   get(name?: string): A;
-  /** Every adapter in the set, in the order the environment gave them. */
+  /** The name `get()` resolves to. */
+  readonly defaultName: string;
+  /** Every adapter in the set, in the order the environment gave them. Frozen. */
   list(): ReadonlyArray<AdapterInfo>;
 }
 
@@ -49,14 +54,16 @@ export interface AdapterSet<A> {
 /**
  * @public
  * Builds an {@link AdapterSet} from what an environment configures. One
- * adapter goes by {@link DEFAULT_ADAPTER_NAME}.
+ * adapter goes by {@link DEFAULT_ADAPTER_NAME}, so in a named set only the
+ * default entry may take that name.
  *
  * `method` is a method every adapter of this kind has. It tells an adapter
  * from a named set: a set's member of that name is an entry, never a function.
  *
- * @throws `NoeticConfigError` `ADAPTER_INVALID` for a value that is neither, or an entry with no adapter;
- * `ADAPTER_SET_EMPTY` for a set with no entries; `ADAPTER_DEFAULT_MISSING` for several with none marked
- * default; `ADAPTER_DEFAULT_AMBIGUOUS` for more than one marked.
+ * @throws `NoeticConfigError` `ADAPTER_INVALID` for a value that is neither or both, an entry with no
+ * adapter, or an entry named `default` that is not the default; `ADAPTER_SET_EMPTY` for a set with no
+ * entries; `ADAPTER_DEFAULT_MISSING` for several with none marked default, or one marked `default: false`;
+ * `ADAPTER_DEFAULT_AMBIGUOUS` for more than one marked.
  */
 export function adapterSet<A extends object>(opts: {
   /** The environment key, as error messages name it: `fs`, `shell`, `subprocess`. */
@@ -68,6 +75,15 @@ export function adapterSet<A extends object>(opts: {
   const isAdapter = (value: unknown): value is A =>
     typeof value === 'object' && value !== null && typeof Reflect.get(value, method) === 'function';
   if (isAdapter(config)) {
+    const entry = isPlainObject(config)
+      ? Object.keys(config).find((key) => isEntry(config[key], isAdapter))
+      : undefined;
+    if (entry !== undefined) {
+      throw invalid(
+        kind,
+        `\`environment.${kind}\` has both a \`${method}\` method, as a ${kind} adapter does, and the named adapter '${entry}'.`,
+      );
+    }
     return setOf(kind, [
       {
         name: DEFAULT_ADAPTER_NAME,
@@ -84,6 +100,7 @@ export function adapterSet<A extends object>(opts: {
   }
   const entries = namedEntries(kind, config, isAdapter);
   assertOneDefault(kind, entries);
+  assertDefaultName(kind, entries);
   return setOf(kind, entries);
 }
 
@@ -95,7 +112,10 @@ interface Entry<A> extends AdapterInfo {
   readonly adapter: A;
 }
 
-/** The entries of a named set, each checked to hold an adapter. A set of one is its own default. */
+/**
+ * The entries of a named set, each checked to hold an adapter. A set of one
+ * is its own default unless it says `default: false`, which leaves no default.
+ */
 function namedEntries<A>(
   kind: string,
   config: Record<string, unknown>,
@@ -111,8 +131,7 @@ function namedEntries<A>(
   }
   return names.map((name): Entry<A> => {
     const entry = config[name];
-    const adapter = isPlainObject(entry) ? entry.adapter : undefined;
-    if (!isPlainObject(entry) || !isAdapter(adapter)) {
+    if (!isEntry(entry, isAdapter)) {
       throw invalid(
         kind,
         `\`environment.${kind}.${name}\` has no ${kind} adapter under \`adapter\`.`,
@@ -120,10 +139,10 @@ function namedEntries<A>(
     }
     return {
       name,
-      adapter,
+      adapter: entry.adapter,
       ...textOf(entry, 'displayName'),
       ...textOf(entry, 'description'),
-      default: names.length === 1 || entry.default === true,
+      default: names.length === 1 ? entry.default !== false : entry.default === true,
     };
   });
 }
@@ -134,7 +153,10 @@ function assertOneDefault<A>(kind: string, entries: ReadonlyArray<Entry<A>>): vo
     throw new NoeticConfigError({
       code: 'ADAPTER_DEFAULT_MISSING',
       message: `\`environment.${kind}\` names ${listed(entries.map((entry) => entry.name))} and marks none as the default.`,
-      hint: 'Add `default: true` to the adapter that anything naming none should use.',
+      hint:
+        entries.length === 1
+          ? 'Drop `default: false`: a set of one is its own default.'
+          : 'Add `default: true` to the adapter that anything naming none should use.',
     });
   }
   if (marked.length > 1) {
@@ -146,6 +168,20 @@ function assertOneDefault<A>(kind: string, entries: ReadonlyArray<Entry<A>>): vo
   }
 }
 
+/**
+ * One unnamed adapter goes by `default`, so `get('default')` must be `get()`
+ * in a named set too.
+ */
+function assertDefaultName<A>(kind: string, entries: ReadonlyArray<Entry<A>>): void {
+  const taken = entries.find((entry) => entry.name === DEFAULT_ADAPTER_NAME && !entry.default);
+  if (taken) {
+    throw invalid(
+      kind,
+      `\`environment.${kind}.${DEFAULT_ADAPTER_NAME}\` is not the default adapter, and only the default may go by that name.`,
+    );
+  }
+}
+
 /** A set over checked entries, exactly one of them the default. */
 function setOf<A>(kind: string, entries: ReadonlyArray<Entry<A>>): AdapterSet<A> {
   const byName = new Map(
@@ -154,10 +190,15 @@ function setOf<A>(kind: string, entries: ReadonlyArray<Entry<A>>): AdapterSet<A>
       entry.adapter,
     ]),
   );
-  const fallback = entries.find((entry) => entry.default)?.name ?? DEFAULT_ADAPTER_NAME;
-  const infos = entries.map(({ adapter: _adapter, ...info }): AdapterInfo => info);
+  const defaultName = entries.find((entry) => entry.default)?.name ?? DEFAULT_ADAPTER_NAME;
+  // Frozen once, not copied per call: every caller shares the listing, and a
+  // write to it throws where a write to a copy would be lost in silence.
+  const infos = Object.freeze(
+    entries.map(({ adapter: _adapter, ...info }): AdapterInfo => Object.freeze(info)),
+  );
   return {
-    get(name = fallback) {
+    defaultName,
+    get(name = defaultName) {
       const adapter = byName.get(name);
       if (adapter === undefined) {
         throw new NoeticConfigError({
@@ -172,6 +213,16 @@ function setOf<A>(kind: string, entries: ReadonlyArray<Entry<A>>): AdapterSet<A>
     },
     list: () => infos,
   };
+}
+
+/** Whether `value` is a set's `{ adapter }` entry. */
+function isEntry<A>(
+  value: unknown,
+  isAdapter: (value: unknown) => value is A,
+): value is Record<string, unknown> & {
+  adapter: A;
+} {
+  return isPlainObject(value) && isAdapter(value.adapter);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

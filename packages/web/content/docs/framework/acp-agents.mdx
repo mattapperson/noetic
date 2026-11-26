@@ -69,7 +69,7 @@ customAcpAgent({                    // any other ACP-speaking binary
 });
 ```
 
-Every preset accepts `command`, `args`, and `env` overrides, a `subprocess` adapter — or the name of one of the harness's — to run the agent somewhere else (see [Where the agent runs](#where-the-agent-runs)), and a `transport` to attach to an agent someone else started.
+Every preset accepts `command`, `args`, and `env` overrides, `subprocess` — the name of one of the harness's subprocess adapters — to run the agent somewhere else (see [Where the agent runs](#where-the-agent-runs)), and a `transport` to attach to an agent someone else started.
 
 `claudeCode()` and `codex()` run the maintained `@agentclientprotocol` bridges; the retired `@zed-industries/claude-code-acp` and `@zed-industries/codex-acp` packages are never started. `args` are appended after the bridge's own, `env` is layered onto your environment (for Codex, `CODEX_PATH` picks the backend binary the bridge runs), and the session's `cwd` is the process's working directory. A preset never changes the model you or your environment selected.
 
@@ -105,7 +105,7 @@ Bridges usually start through a wrapper — `npx`, or a Node launcher that runs 
 To run the agent your own way — inside a sandbox, with an environment you built — keep the local subprocess adapter and rewrite the command instead of writing a transport:
 
 ```ts
-import { claudeCode } from '@noetic-tools/acp';
+import { AgentHarness } from '@noetic-tools/core';
 import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 import type { ToolBridgeAddress } from '@noetic-tools/types';
 
@@ -113,20 +113,26 @@ declare const profileFor: (bridges: ReadonlyArray<ToolBridgeAddress>) => string;
 declare const cleanEnv: (env: Readonly<Record<string, string>>) => Record<string, string>;
 declare const log: { debug(text: string): void };
 
-const agent = claudeCode({
-  subprocess: createLocalSubprocessAdapter({
-    // `command.env` is the full environment, `agentEnv` what the agent sets on top of yours;
-    // `bridges` the tool bridge addresses to let through.
-    wrap: (command, { bridges }) => ({
-      command: 'sandbox-exec',
-      args: ['-p', profileFor(bridges), command.command, ...(command.args ?? [])],
-      env: cleanEnv(command.env),
-      cwd: command.cwd,
+const harness = new AgentHarness({
+  name: 'sandboxed',
+  params: {},
+  environment: {
+    subprocess: createLocalSubprocessAdapter({
+      // `command.env` is the full environment, `agentEnv` what the agent sets on top of yours;
+      // `bridges` the tool bridge addresses to let through.
+      wrap: (command, { bridges }) => ({
+        command: 'sandbox-exec',
+        args: ['-p', profileFor(bridges), command.command, ...(command.args ?? [])],
+        env: cleanEnv(command.env),
+        cwd: command.cwd,
+      }),
+      onStderr: (chunk) => log.debug(chunk),
     }),
-    onStderr: (chunk) => log.debug(chunk),
-  }),
+  },
 });
 ```
+
+To sandbox some agents and not others, name the wrapped adapter beside a plain one and pick it with `subprocess: '<name>'` on the step or the preset.
 
 The wrapped command runs with exactly the `args`, `env` and `cwd` you return, with the same process-group shutdown, and with or without the keeper.
 
@@ -496,7 +502,9 @@ On a [durable](/docs/framework/durability) run, an ACP step that was cut off doe
 
 What the agent did with its own built-in tools is the agent's to remember: a reloaded session is how it knows.
 
-A step reattaches only through the subprocess adapter that started its agent. The step stores that adapter's name with the session, and a resumed step that now resolves to another name fails with `ACP_SESSION_ADAPTER_CONFLICT` without attaching anywhere, since the agent may still be working where it was started. Resume with the same name to take the turn.
+A step reattaches only through the subprocess adapter that started its agent. The step stores that adapter's name with the session, and a resumed step that now resolves to another name fails with `ACP_SESSION_ADAPTER_CONFLICT` without attaching anywhere, since the agent may still be working where it was started. That covers a step or preset that names another adapter, a default that moved to another entry, and an entry you renamed. Resume with the same name to take the turn.
+
+The check compares names, because a name is all the stored record holds. If you keep a name and put a different adapter behind it between runs, the step is not stopped: it reattaches through whatever the name now gives, and that adapter decides what the stored handle means to it. Keep a name on the adapter that started the agents still running under it.
 
 A tool call that is held, because it needs approval and no approver is set, or because the tool returned `hold()`, waits inside the agent's turn until a decision passed to `harness.execute()` answers it. The turn stays live while it waits, since the agent's process is waiting on the call.
 
@@ -719,46 +727,63 @@ const fake = defineAcpAgent({
 });
 ```
 
-Because the wire protocol really runs, this catches contract mistakes a hand-rolled stub would hide. An agent on a transport takes no tools, so to test a step with `tools`, stand the same agent up behind a subprocess adapter with `loopbackLink` and give it a command, as a preset has:
+Because the wire protocol really runs, this catches contract mistakes a hand-rolled stub would hide. An agent on a transport takes no tools, so to test a step with `tools`, give the agent a command, as a preset has, and stand it up behind the test harness's subprocess adapter with `loopbackLink`:
 
 ```ts
 import { claudeToolWiring, defineAcpAgent, loopbackLink } from '@noetic-tools/acp';
-import { createInMemorySubprocessAdapter } from '@noetic-tools/core';
+import { AgentHarness, createInMemorySubprocessAdapter } from '@noetic-tools/core';
 
 declare const fakeAgent: Parameters<typeof loopbackLink>[0];
 
 const withTools = defineAcpAgent({
   agentId: 'fake',
   command: { command: 'fake-agent' },
-  subprocess: createInMemorySubprocessAdapter({ open: loopbackLink(fakeAgent) }),
   tools: claudeToolWiring,
+});
+
+const harness = new AgentHarness({
+  name: 'test',
+  params: {},
+  environment: {
+    subprocess: createInMemorySubprocessAdapter({ open: loopbackLink(fakeAgent) }),
+  },
 });
 ```
 
 ## Where the agent runs
 
-A preset runs its command through a **subprocess adapter**: the harness's, unless the step or the preset names another. `createLocalSubprocessAdapter()` runs it on this machine. Give it another and the same preset — command, tool settings, and all — runs where that adapter runs processes, and its tools still behave exactly as on `callModel`:
+A preset runs its command through one of the harness's **subprocess adapters**: the default, unless the step or the preset names another. `createLocalSubprocessAdapter()` runs it on this machine. Give the harness another and the same preset — command, tool settings, and all — runs where that adapter runs processes, and its tools still behave exactly as on `callModel`:
 
 ```ts
-import { codex } from '@noetic-tools/acp';
+import { AgentHarness } from '@noetic-tools/core';
 import {
   createCommandSubprocessAdapter,
   createWebSocketSubprocessAdapter,
 } from '@noetic-tools/platform-node';
 
 // A runner listening on a build host, over TLS.
-const overWebSocket = codex({
-  subprocess: createWebSocketSubprocessAdapter({ url: 'wss://build-host:7000', token: process.env.RUNNER_TOKEN ?? '' }),
+const overWebSocket = new AgentHarness({
+  name: 'over-websocket',
+  params: {},
+  environment: {
+    subprocess: createWebSocketSubprocessAdapter({ url: 'wss://build-host:7000', token: process.env.RUNNER_TOKEN ?? '' }),
+  },
 });
 
 // A runner started over ssh, or in a container with `docker exec -i`.
-const overSsh = codex({
-  subprocess: createCommandSubprocessAdapter({
-    command: 'ssh',
-    args: ['build-host', 'npx', '-y', '@noetic-tools/acp', 'serve', '--stdio'],
-  }),
+const overSsh = new AgentHarness({
+  name: 'over-ssh',
+  params: {},
+  environment: {
+    subprocess: createCommandSubprocessAdapter({
+      command: 'ssh',
+      args: ['build-host', 'npx', '-y', '@noetic-tools/acp', 'serve', '--stdio'],
+    }),
+  },
 });
 ```
+
+Adapters are given once, on the harness. A step and a preset pick one by name and never take an adapter object, so the name a run stores for an agent always says which adapter started it.
 
 The far end is the **remote runner**, `noetic-acp serve`, from `@noetic-tools/acp`:
 
@@ -784,25 +809,7 @@ npx @noetic-tools/acp serve --stdio --agent claude-code \
 
 `--agent <id>` grants one preset's command with the environment names its tool settings set (`PRESET_ENV`). `--spawn` grants an MCP server's command line, word for word, so a step can start it with `agent.spawn`; without it a granted runner refuses every server. `--env` adds a name every grant may set, such as an API key you pass in a preset's `env`. With any grant, a start must match one exactly, may set only its names, so `NODE_OPTIONS`, `LD_PRELOAD`, `PATH` and the like are refused, and must run inside `--cwd` (the runner's own directory by default), with `..` and symlinks resolved first. Settings that name a command are held to the grants too: each `mcp_servers` command in a `CODEX_CONFIG` must be a `--spawn` grant whose names cover its `env`, and `notify` is refused; for `--agent pi` the runner sets `PI_ACP_PI_COMMAND` and `NOETIC_PI_COMMAND` itself (its own launcher, and `NOETIC_PI_COMMAND` or `pi` from its own environment), whatever the host sends. Grants bound what the runner starts, not what the agent does once started: it still runs what your permission answers allow. A runner trusts whoever holds its token, or its stdio, and says so when it starts: they can start whatever the grants allow, as the runner's user.
 
-A stdio MCP server that must run where the agent runs — one that reads its workspace — runs there too: `spawnOn(adapter)` starts it and hands back its stdio, so noetic stays its client. Every command agent carries one as `agent.spawn`; pass it to `mcp({ name, command, spawn: agent.spawn })`. It gets the environment the MCP SDK gives a local server — `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER` from the environment there, plus its own `env` — not the agent's.
-
-A host that runs every agent in one place says so once, on the harness's subprocess adapter, and leaves `subprocess` off the presets:
-
-```ts
-import { AgentHarness } from '@noetic-tools/core';
-import { createWebSocketSubprocessAdapter } from '@noetic-tools/platform-node';
-
-const harness = new AgentHarness({
-  name: 'builder',
-  params: {},
-  environment: {
-    subprocess: createWebSocketSubprocessAdapter({
-      url: 'wss://build-host:7000',
-      token: process.env.RUNNER_TOKEN ?? '',
-    }),
-  },
-});
-```
+A stdio MCP server that must run where the agent runs — one that reads its workspace — runs there too: `spawnOn(adapter)` starts it and hands back its stdio, so noetic stays its client. Every command agent carries one as `agent.spawn`, which starts it through the harness adapter the agent's step resolves to; pass it to `mcp({ name, command, spawn: agent.spawn })`. It gets the environment the MCP SDK gives a local server — `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER` from the environment there, plus its own `env` — not the agent's.
 
 The subprocess adapter is the one place a harness's processes run: its step children, the commands it runs to completion, and, through `open`, processes whose stdio it holds, such as its agents. An agent runs through the adapter its step names, else the one its preset names, else the harness's default. Nothing stands in for the adapter it lands on: one with no `open` fails the step with `SUBPROCESS_CANNOT_OPEN`. A resumed step reattaches through the same adapter, and `agent.spawn` starts an MCP server there too.
 
@@ -876,7 +883,22 @@ const onBuilder = claudeCode({ subprocess: 'builder' });
 
 The three are independent, so name each one the step needs. A name the harness lacks fails the step with `ADAPTER_UNKNOWN` before the agent starts, and the message lists the names there are. The adapter the agent lands on must have `open`. An adapter that reaches a remote runner runs no step children, so make one the default only on a harness whose steps spawn none.
 
-A stdio `mcp()` server started with `agent.spawn` follows the agent: a step that names a `subprocess` starts the servers its `tools` list through that adapter too, in TypeScript and in a JSON document alike.
+A stdio `mcp()` server started with `agent.spawn` follows the agent: a step that names a `subprocess` starts the servers its `tools` list through that adapter too, in TypeScript and in a JSON document alike. One entry is one connection, started in one place, so two steps that list the same entry must name the same `subprocess`; a second step under another name fails the turn with `CONNECTION_NAME_TAKEN`.
+
+`acpAgentTool()` takes the same three names and passes them to the step it runs:
+
+```ts
+import { acpAgentTool } from '@noetic-tools/core';
+import { claudeCode } from '@noetic-tools/acp';
+
+const delegate = acpAgentTool({
+  agent: claudeCode(),
+  subprocess: 'builder',
+  fs: 'builder',
+});
+```
+
+Names stay in the process that built the harness. A step that the local adapter runs out of process (`createLocalSubprocessAdapter({ registryEntry })`) gets a child harness with in-memory adapters only, so a step that names an adapter there fails with `ADAPTER_NOT_IN_CHILD`. Run such a step in-process. See [spawn](/docs/framework/operators/spawn#out-of-process-children).
 
 To attach to an agent someone else started, supply a `transport` — anything that yields a duplex byte stream:
 
@@ -917,13 +939,13 @@ Everything `@noetic-tools/acp` exports. It exports no subprocess adapter: those 
 | `opencode(opts?)` | Preset for opencode's native `opencode acp` command. |
 | `pi(opts?)` | Preset for pi, via the community `pi-acp` adapter (pinned to 0.0.32). |
 | `customAcpAgent(opts)` | Any other ACP-speaking binary. Needs a `command` (run through its `subprocess` adapter) or a `transport`. |
-| `AcpPresetOptions` | `command` / `args` / `env` / `subprocess` (an adapter, or a harness adapter's name) / `transport` overrides accepted by every preset. |
+| `AcpPresetOptions` | `command` / `args` / `env` / `subprocess` (a harness adapter's name) / `transport` overrides accepted by every preset. |
 | `PRESET_COMMANDS` | The command each preset starts, by agent id. |
 | `PRESET_ENV` | The environment names each preset's tool settings set, by agent id: what `noetic-acp serve --agent <id>` lets a host set. |
 | `GeminiOptions` | `gemini()`'s options: every preset option plus `trustWorkspace`. |
 | `AcpProcessSpec` | How to launch an agent as a local child process. |
 | `defineAcpAgent(opts)` | Build an `AcpAgent` from a command and a subprocess adapter, or a transport — the constructor behind every preset. |
-| `DefineAcpAgentOptions` | `agentId`, `command`, `subprocess` (an adapter, or a harness adapter's name), `transport`, `env`, `tools` (default `sessionToolWiring`). |
+| `DefineAcpAgentOptions` | `agentId`, `command`, `subprocess` (a harness adapter's name), `transport`, `env`, `tools` (default `sessionToolWiring`). |
 | `AcpToolWiring` | How an agent takes Noetic tools: where the bridge is declared (`'session'` or `'launch'`) and the launch settings that make the agent match `callModel`. |
 | `claudeToolWiring`, `codexToolWiring`, `geminiToolWiring`, `opencodeToolWiring`, `piToolWiring`, `sessionToolWiring` | The wiring each preset uses, for building your own agent with `defineAcpAgent`. |
 | `BridgedPermissionCheck`, `claudeBridgedPermission`, `codexBridgedPermission`, `geminiBridgedPermission` | How a wiring recognizes its agent's permission requests for bridged tools (`AcpToolWiring.permits`). |

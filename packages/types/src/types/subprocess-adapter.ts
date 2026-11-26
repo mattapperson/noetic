@@ -236,6 +236,24 @@ export interface SubprocessAdapter {
 
 //#endregion
 
+//#region Document grants
+
+/**
+ * @public
+ * The most a document's `runCode` nodes may ask
+ * (`dynamicWorkflow({ runCode })`, `parseAndRunWorkflow({ runCode })`). A
+ * node asking for more fails validation with `CONNECTION_NOT_ALLOWED`.
+ */
+export interface RunCodeGrant {
+  /**
+   * The harness subprocess adapters a node may name. A name moves the code
+   * to another host, so the default is none: a node runs on the default.
+   */
+  readonly subprocess?: ReadonlyArray<string>;
+}
+
+//#endregion
+
 //#region Processes whose stdio the caller holds
 
 /**
@@ -280,7 +298,7 @@ export interface SpawnCommand {
 export interface SubprocessChoice {
   /** The harness's `environment.subprocess`. */
   readonly adapters: AdapterSet<SubprocessAdapter>;
-  /** The adapter a step names. It comes before any the process's owner names. */
+  /** The adapter a step names. It comes before the one the process's owner names. */
   readonly name?: string;
 }
 
@@ -317,6 +335,7 @@ export type AcpTransport = ByteStream & {
   /**
    * Let go of the agent without stopping it, as a host that goes away does,
    * so a later host can still reattach. Present only with {@link reattach}.
+   * Closing the stream or its link afterwards leaves the agent running.
    */
   detach?(): Promise<void>;
 };
@@ -398,7 +417,10 @@ export interface SubprocessLink {
    * outlive their host.
    */
   attach?(handle: AcpReattachHandle): Promise<AcpTransport>;
-  /** Release the link and everything started through it. */
+  /**
+   * Release the link and everything started through it that it still holds:
+   * not an agent whose stream was let go of ({@link AcpTransport.detach}).
+   */
   close(): Promise<void>;
 }
 

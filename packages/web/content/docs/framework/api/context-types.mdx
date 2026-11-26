@@ -64,7 +64,7 @@ interface Context<TContext = ContextData, TState = unknown> {
 | `fs` | `FsAdapter` | Filesystem adapter delegated from `ctx.harness.fs`: the default one. Use for all filesystem operations inside steps and tools. |
 | `shell` | `ShellAdapter` | The default shell adapter, from `ctx.harness.shell`. |
 | `subprocess` | `SubprocessAdapter` | The default subprocess adapter, from `ctx.harness.subprocess`. |
-| `adapters` | `AdapterSets` | Every `fs`, `shell` and `subprocess` adapter the harness has, by name. `adapters.fs.get('builder')` returns a named one, `get()` the default, and `list()` each one's `{ name, displayName?, description?, default }`. See [Named adapters](/docs/framework/runtime#named-adapters). |
+| `adapters` | `AdapterSets` | Every `fs`, `shell` and `subprocess` adapter the harness has, by name. `adapters.fs.get('builder')` returns a named one, `get()` the default, `defaultName` its name, and `list()` each one's `{ name, displayName?, description?, default }`. See [Named adapters](/docs/framework/runtime#named-adapters). |
 | `itemLog` | `ItemLog` | Conversation history |
 | `lastStepMeta` | `StepMeta \| null` | Metadata from the last executed step |
 | `lastLayerUsage` | `LastLayerUsage \| undefined` | Per-context-layer breakdown of the context window from the most recent `callModel`. Undefined until the first LLM call completes. |

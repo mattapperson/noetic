@@ -13,6 +13,7 @@ import type {
   Context,
   ExecuteStepFn,
   McpAllowlist,
+  RunCodeGrant,
   SecretResolver,
   Span,
   Step,
@@ -33,6 +34,7 @@ import { checkConnectionAllowlist, globMatches } from './workflow-connections';
 import type { HydrationContext } from './workflow-hydrator';
 import { hydrateWorkflow } from './workflow-hydrator';
 import { checkMcpServers, mcpPrompt } from './workflow-mcp-servers';
+import { checkRunCode, runCodePrompt } from './workflow-run-code-grant';
 import { checkToolConnections } from './workflow-tool-entries';
 
 //#region Types
@@ -63,6 +65,13 @@ export interface DynamicWorkflowOpts {
    * validation with `CONNECTION_NOT_ALLOWED`. The planner is shown these limits.
    */
   acp?: AcpAllowlist;
+  /**
+   * The most a generated `runCode` node may ask: the harness subprocess
+   * adapters it may name (spec 26 § runCode). Without it a node may name
+   * none, and one that does fails validation with `CONNECTION_NOT_ALLOWED`.
+   * The planner is shown the granted names.
+   */
+  runCode?: RunCodeGrant;
   /**
    * The MCP servers a generated document may attach — `{ "mcp" }` entries in
    * `tools` or `connections` — with the secrets and policy each grant sets
@@ -167,6 +176,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
         `\nAvailable tools:\n${toolList}`,
         connectionsPrompt(opts.connections, plannerConnections(opts.connections, ctx)),
         acpPrompt(opts.acpAgents, opts.acp, cwd),
+        runCodePrompt(opts.runCode),
         mcpPrompt(opts.mcp),
         `\nTask: ${input}`,
       ]
@@ -197,6 +207,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
           allowlist: opts.connections ?? {},
           ranges: profileVersions(ctx),
           acp: opts.acp,
+          runCode: opts.runCode,
           cwd,
           mcp: opts.mcp,
           secrets: harnessInternal<SecretResolver>(harness, 'secrets'),
@@ -221,6 +232,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
           executeStep,
           acpAgents: opts.acpAgents,
           acpBounds: acpBounds(opts.acp, cwd),
+          runCodeBounds: opts.runCode ?? {},
           expressionLimits: opts.expressionLimits,
           allowlist: opts.connections ?? {},
           mcp: opts.mcp,
@@ -287,6 +299,12 @@ export interface ParseAndRunWorkflowOpts {
    */
   acp?: AcpAllowlist;
   /**
+   * The most the document's `runCode` nodes may ask: the harness subprocess
+   * adapters they may name (spec 26 § runCode). Without it a node may name
+   * none, and one that does fails validation with `CONNECTION_NOT_ALLOWED`.
+   */
+  runCode?: RunCodeGrant;
+  /**
    * The MCP servers the document may attach — `{ "mcp" }` entries in `tools`
    * or `connections` — with the secrets and policy each grant sets and
    * the `provider` that builds them (spec 26 § MCP servers). Unlike
@@ -315,7 +333,7 @@ export interface ParseAndRunWorkflowOpts {
  * @throws `NoeticConfigError` with code `INVALID_EXPRESSION_LIMITS` if `expressionLimits` holds a value that is not a positive integer or `Infinity`.
  * @throws `NoeticConfigError` with code `EXPRESSION_LIMIT_EXCEEDED` if an expression exceeds its limits.
  * @throws `NoeticConfigError` with code `CONNECTION_UNKNOWN` if a node uses a connection the document does not declare, or the allowlist names one the harness does not have.
- * @throws `NoeticConfigError` with code `CONNECTION_NOT_ALLOWED` if the document asks for more than `connections` grants (none when absent), an `acp-agent` node asks for more than `acp` grants, or the document names an MCP server `mcp` does not grant.
+ * @throws `NoeticConfigError` with code `CONNECTION_NOT_ALLOWED` if the document asks for more than `connections` grants (none when absent), an `acp-agent` node asks for more than `acp` grants, a `runCode` node names a subprocess adapter `runCode` does not grant, or the document names an MCP server `mcp` does not grant.
  * @throws `NoeticConfigError` with code `CONNECTION_INVALID` if an MCP server uses a `$secret` and the harness has no `environment.secrets`.
  */
 export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promise<string> {
@@ -325,6 +343,7 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
   const parseResult = tryParseWorkflow(opts.json, opts.maxDepth ?? DEFAULT_MAX_DEPTH, {
     allowlist,
     acp: opts.acp,
+    runCode: opts.runCode,
     cwd,
     mcp: opts.mcp,
     secrets: harnessInternal<SecretResolver>(opts.harness, 'secrets'),
@@ -348,6 +367,7 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
     workflows: opts.workflows,
     acpAgents: opts.acpAgents,
     acpBounds: acpBounds(opts.acp, cwd),
+    runCodeBounds: opts.runCode ?? {},
     maxRecursionDepth: opts.maxRecursionDepth,
     expressionLimits: opts.expressionLimits,
     allowlist,
@@ -421,7 +441,7 @@ interface ParseFail {
 
 /**
  * What the host lets a document use: `allowlist` the connections it grants,
- * and `acp` and `mcp`, undefined, their narrowest defaults.
+ * and `acp`, `runCode` and `mcp`, undefined, their narrowest defaults.
  */
 interface DocumentCheck {
   allowlist: ConnectionAllowlist;
@@ -433,6 +453,8 @@ interface DocumentCheck {
   ranges?: ProfileVersions;
   /** The most `acp-agent` nodes may ask of each agent. */
   acp?: AcpAllowlist;
+  /** The most `runCode` nodes may ask; undefined grants no adapter name. */
+  runCode?: RunCodeGrant;
   /** The harness's working directory: an `acp-agent` node's `cwd` without an `acp` grant. */
   cwd: string;
   /** The MCP servers the document may name; undefined grants none. */
@@ -551,7 +573,7 @@ function tryParseWorkflow(raw: unknown, maxDepth: number, check: DocumentCheck):
   };
 }
 
-/** The error a document has, checked against its manifest, the host connection allowlist, and what its `acp-agent` nodes may ask. */
+/** The error a document has, checked against its manifest, the host connection allowlist, and what its `acp-agent` and `runCode` nodes may ask. */
 function connectionErrorOf(
   doc: WorkflowDocument,
   check: DocumentCheck,
@@ -560,6 +582,7 @@ function connectionErrorOf(
     checkConnectionAllowlist(doc, check.allowlist);
     checkToolConnections(doc, check.allowlist);
     checkAcpAgents(doc, check.acp, check.cwd);
+    checkRunCode(doc, check.runCode);
     checkMcpServers(doc, check.mcp, check.secrets);
     return undefined;
   } catch (error) {

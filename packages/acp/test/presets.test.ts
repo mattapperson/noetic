@@ -10,11 +10,14 @@ import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLinkSubprocessAdapter } from '@noetic-tools/core';
-import type { AcpClientHost } from '@noetic-tools/types';
+import type { AcpClientHost, SubprocessAdapter } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
-import { claudeCode, codex, PRESET_COMMANDS } from '../src/agents';
+import type { AcpPresetOptions } from '../src/agents';
+import { claudeCode, codex, customAcpAgent, PRESET_COMMANDS } from '../src/agents';
+import { defineAcpAgent } from '../src/define';
 import { openLocalLink } from '../src/stdio';
 import { loopbackTransport } from '../src/transport-loopback';
+import { through } from './_helpers';
 
 const PRESETS = [
   {
@@ -36,6 +39,33 @@ function host(cwd: string): AcpClientHost {
     onSessionUpdate: () => undefined,
   });
 }
+
+describe('where a preset runs', () => {
+  it('is a harness adapter name, never an adapter', () => {
+    type Where = NonNullable<AcpPresetOptions['subprocess']>;
+    const takesAnAdapter: SubprocessAdapter extends Where ? true : false = false;
+    expect(takesAnAdapter).toBe(false);
+    for (const agent of [
+      claudeCode({
+        subprocess: 'builder',
+      }),
+      customAcpAgent({
+        agentId: 'own',
+        command: 'own-acp',
+        subprocess: 'builder',
+      }),
+      defineAcpAgent({
+        agentId: 'defined',
+        command: {
+          command: 'defined-acp',
+        },
+        subprocess: 'builder',
+      }),
+    ]) {
+      expect(agent.subprocess).toBe('builder');
+    }
+  });
+});
 
 describe('maintained bridge presets', () => {
   it('names only the maintained bridges, never the retired @zed-industries packages', () => {
@@ -80,11 +110,13 @@ describe('maintained bridge presets', () => {
               CODEX_PATH: '/chosen/codex',
               PRESET_FLAG: 'on',
             },
-            subprocess: createLinkSubprocessAdapter((options) => openLocalLink({}, options)),
           });
           expect(agent.agentId).toBe(id);
           const connection = await agent.connect({
             host: host(root),
+            subprocess: through(
+              createLinkSubprocessAdapter((options) => openLocalLink({}, options)),
+            ),
           });
           await connection.newSession({
             cwd: root,

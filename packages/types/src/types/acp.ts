@@ -711,9 +711,9 @@ export interface AcpConnectOptions {
   /** See {@link AcpWhenHostExits}. Default `'keep'`. */
   whenHostExits?: AcpWhenHostExits;
   /**
-   * Where an agent started by a command may run: through the adapter the
-   * step names, else the agent's own, else the harness's default. The one it
-   * lands on must have `open`.
+   * Where an agent started by a command may run: through the harness adapter
+   * the step names, else the one the agent names, else the default. The one
+   * it lands on must have `open`.
    */
   subprocess?: SubprocessChoice;
 }
@@ -735,7 +735,8 @@ export interface AcpAgent {
   /**
    * The harness subprocess adapter this agent names
    * (`claudeCode({ subprocess: 'builder' })`). A step's own `subprocess` comes
-   * before it.
+   * before it. A name only: adapters are given once, on the harness, so the
+   * name a session record stores is the adapter the agent was started on.
    */
   readonly subprocess?: string;
   /** Open a transport, run `initialize`, and return the negotiated connection. */

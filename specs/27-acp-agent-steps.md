@@ -250,9 +250,14 @@ claudeCode({ subprocess: 'builder' });                                 // a pres
 A command agent runs through the first of these:
 
 1. the harness adapter the step names (`step.acpAgent({ subprocess: 'builder' })`);
-2. the agent's own `subprocess`: an adapter (`claudeCode({ subprocess: adapter })`),
-   or the name of a harness adapter (`claudeCode({ subprocess: 'builder' })`);
+2. the harness adapter the agent names (`claudeCode({ subprocess: 'builder' })`);
 3. the harness's default subprocess adapter.
+
+A step, a preset, `customAcpAgent` and `defineAcpAgent` take a name only,
+never an adapter. Adapters are given once, on the harness's
+`environment.subprocess`, so the name a step resolves to always says which
+adapter its agent runs through — the name a session record stores
+(§ Resuming a step).
 
 A name the harness lacks fails the step with `ADAPTER_UNKNOWN`, before the
 agent starts; the message lists the names the harness has. The adapter the
@@ -260,9 +265,9 @@ order lands on is used as it is, and nothing stands in for it: one with no
 `open` — the in-memory default of a harness given no `environment.subprocess`
 — fails to connect with `SUBPROCESS_CANNOT_OPEN`, whose hint is to give the
 harness `environment.subprocess: createLocalSubprocessAdapter()` from
-`@noetic-tools/platform-node`, or to name another adapter. An agent connected
-by hand with no adapter of its own and no `SubprocessChoice` fails the same
-way.
+`@noetic-tools/platform-node`, or to name another adapter. An agent that
+names no adapter and is connected by hand with no `SubprocessChoice` fails
+the same way.
 
 The core passes `AcpAgent.connect` a `SubprocessChoice` as
 `AcpConnectOptions.subprocess`, on a first connection and on a reattach alike:
@@ -271,7 +276,7 @@ The core passes `AcpAgent.connect` a `SubprocessChoice` as
 interface SubprocessChoice {
   /** The harness's `environment.subprocess`. */
   readonly adapters: AdapterSet<SubprocessAdapter>;
-  /** The adapter a step names. It comes before any the process's owner names. */
+  /** The adapter a step names. It comes before the one the process's owner names. */
   readonly name?: string;
 }
 ```
@@ -298,11 +303,22 @@ connection provider is given the harness's adapters as
 `mcp({ command, spawn: agent.spawn })` and a JSON `acp-agent` node's stdio
 `{ "mcp" }` entries start where the agent runs. A step that names a
 `subprocess` carries that name to the stdio servers its `tools` list, on both
-paths: a JSON node passes it to its entries' `spawn`, and the turn connects a
-TypeScript step's `mcp()` entries with the step's name in their
-`ConnectOptions.subprocess`. An entry two steps list connects once, with the
-name of the first. A stdio `mcp()` server given no `spawn` is a local
+paths: the turn connects each entry with the step's name in its
+`ConnectOptions.subprocess`. `mcp()` passes that on to `spawn`; a JSON node's
+entries get a `spawn` already bound to it, so a host's own `mcp.provider`
+that forwards nothing still starts the server beside the agent
+(`26-json-workflow-runtime` § MCP servers). An entry two steps list connects
+once, so both must resolve it to the same place: a second step that lists it
+under another `subprocess` name fails the turn with `CONNECTION_NAME_TAKEN`
+before anything runs. A stdio `mcp()` server given no `spawn` is a local
 subprocess.
+
+**One link per connection.** A connection opens one `SubprocessLink` and
+closes it once, however connecting ends: a failed `reach`, `launch`,
+`initialize` or `attach` closes it, and so does closing the connection. A
+host that lets go of an agent (`AcpAgentConnection.detach`) detaches its
+stream once and then closes the link, which stops only what the link still
+holds: never the agent it let go of.
 
 `@noetic-tools/acp` exports no subprocess adapter. The adapters live in core
 and the platform packages; `@noetic-tools/acp` exports what they open links
@@ -1009,10 +1025,17 @@ the same agent id:
    the live session. A handle means something only to the adapter that made
    it, so the step must resolve to the stored adapter name. One that now
    resolves to another — its `subprocess`, its agent's, or the harness's
-   default changed — fails with `ACP_SESSION_ADAPTER_CONFLICT` before it
-   connects anywhere: the agent may still be working where it was started,
-   and starting its work again elsewhere could do it twice. The record stays,
-   so a resume that resolves to the first adapter still takes the turn. A
+   default changed, or the harness renamed the entry — fails with
+   `ACP_SESSION_ADAPTER_CONFLICT` before it connects anywhere: the agent may
+   still be working where it was started, and starting its work again
+   elsewhere could do it twice. The record stays, so a resume that resolves
+   to the first adapter still takes the turn. The check compares names, and
+   a name is all the record holds. A host that keeps the name and puts
+   another adapter behind it between runs is not caught: the step reattaches
+   through whatever the name now gives, and that adapter's `attach` decides
+   what the handle means to it — a keeper that is not there is
+   `gone: true`, and the step goes on as below. Keep a name on the adapter
+   that started the agents still running under it. A
    record with no adapter name, written before names were kept, is tried
    through the adapter the step resolves to. Its first turn collects
    the turn the dead host left running — every update of it as this step's
@@ -1255,6 +1278,9 @@ callModel({
   ],
 });
 ```
+
+`acpAgentTool` takes the step's `subprocess`, `fs` and `shell` names and
+passes them to the step it builds (§ The subprocess adapter).
 
 The tool takes `{ prompt }` and returns `{ text }`. Underneath it runs the same
 `step.acpAgent` through `harness.run` on the calling tool's context, so the

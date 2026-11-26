@@ -167,7 +167,8 @@ async function runStep(
   ).catch((e: unknown) => e);
 }
 
-function agentOn(subprocess?: SubprocessAdapter | string): AcpAgent {
+/** An agent that names the harness subprocess adapter `subprocess`, or none. */
+function agentOn(subprocess?: string): AcpAgent {
   return defineAcpAgent({
     agentId: 'placed',
     command: {
@@ -243,14 +244,6 @@ describe("the harness's subprocess adapter", () => {
     expect(environment.launched).toHaveLength(1);
   });
 
-  it('leaves an agent on the adapter it names', async () => {
-    const environment = seen();
-    const own = seen();
-    await runOn(recording(environment), agentOn(recording(own)));
-    expect(own.launched).toHaveLength(1);
-    expect(environment.launched).toHaveLength(0);
-  });
-
   it('is where a resumed step reaches the agent it left running', async () => {
     const environment = seen();
     const handle = {
@@ -275,9 +268,8 @@ describe("the harness's subprocess adapter", () => {
     ]);
   });
 
-  it('starts a process beside the agent, unless the agent names an adapter', async () => {
+  it('starts a process beside the agent', async () => {
     const environment = seen();
-    const own = seen();
     const cat = {
       command: 'cat',
     };
@@ -290,11 +282,6 @@ describe("the harness's subprocess adapter", () => {
     expect(environment.spawned).toEqual([
       cat,
     ]);
-    await agentOn(recording(own)).spawn?.(cat, options);
-    expect(own.spawned).toEqual([
-      cat,
-    ]);
-    expect(environment.spawned).toHaveLength(1);
   });
 });
 
@@ -322,14 +309,6 @@ describe('named subprocess adapters', () => {
     expect(builder.launched).toHaveLength(0);
   });
 
-  it("starts an agent through the adapter its step names, before the preset's own adapter", async () => {
-    const { builder, harness } = twoHosts();
-    const own = seen();
-    await runStep(harness, agentOn(recording(own)), 'builder');
-    expect(builder.launched).toHaveLength(1);
-    expect(own.launched).toHaveLength(0);
-  });
-
   it('fails a name the harness lacks, listing the names it has', async () => {
     const { laptop, builder, harness } = twoHosts();
     const error = await runStep(harness, agentOn('cloud'));
@@ -352,6 +331,20 @@ describe('named subprocess adapters', () => {
       .catch((e: unknown) => e);
     assert(error instanceof NoeticConfigError);
     expect(error.code).toBe('SUBPROCESS_NAME_WITHOUT_HARNESS');
+  });
+
+  it('fails an agent that names none with no harness adapters to start through', async () => {
+    const error = await agentOn()
+      .connect({
+        host: frameworkCast<AcpClientHost>({
+          cwd: '/work',
+          threadId: 'named-subprocess',
+          onSessionUpdate: () => undefined,
+        }),
+      })
+      .catch((e: unknown) => e);
+    assert(error instanceof NoeticConfigError);
+    expect(error.code).toBe('SUBPROCESS_CANNOT_OPEN');
   });
 
   it('starts a process beside the agent through the named adapter', async () => {

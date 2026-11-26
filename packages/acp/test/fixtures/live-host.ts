@@ -6,7 +6,7 @@
  * argv: agent id ('claude-code' | 'codex'), working directory.
  */
 
-import { askToEcho, echoHost, isLiveAgentId, liveAgent } from './live-agents';
+import { askToEcho, connectLive, echoHost, isLiveAgentId } from './live-agents';
 
 const id = process.argv[2] ?? '';
 const cwd = process.argv[3] ?? process.cwd();
@@ -14,7 +14,7 @@ if (!isLiveAgentId(id)) {
   throw new Error(`unknown live agent '${id}'`);
 }
 const calls: string[] = [];
-const connection = await liveAgent(id).connect({
+const connection = await connectLive(id, {
   host: echoHost('host1', calls, cwd),
 });
 const session = await connection.newSession({

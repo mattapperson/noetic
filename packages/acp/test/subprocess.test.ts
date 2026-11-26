@@ -23,6 +23,7 @@ import { defineAcpAgent } from '../src/define';
 import { openLocalLink } from '../src/stdio';
 import { claudeToolWiring, codexToolWiring } from '../src/tool-wiring';
 import { loopbackLink } from '../src/transport-loopback';
+import { through } from './_helpers';
 
 const echo = tool({
   name: 'echo',
@@ -122,16 +123,19 @@ async function runWithTools(
           '--acp',
         ],
       },
-      subprocess,
       tools: wiring,
     }),
+    subprocess,
   );
 }
 
-async function runAgent(agent: AcpAgent): Promise<void> {
+async function runAgent(agent: AcpAgent, subprocess: SubprocessAdapter): Promise<void> {
   const ctx = new AgentHarness({
     name: 'subprocess',
     params: {},
+    environment: {
+      subprocess,
+    },
   }).createContext();
   await execute(
     step.acpAgent({
@@ -177,20 +181,16 @@ describe('an agent subprocess adapter', () => {
 
   it('trusts the Gemini workspace only when asked, and refuses tools without it', async () => {
     const untrusted = seen();
-    const refusal = await runAgent(
-      gemini({
-        subprocess: marking(untrusted),
-      }),
-    ).catch((e: unknown) => e);
+    const refusal = await runAgent(gemini(), marking(untrusted)).catch((e: unknown) => e);
     assert(isNoeticConfigError(refusal));
     expect(refusal.code).toBe('ACP_AGENT_CANNOT_TAKE_TOOLS');
     expect(untrusted.commands).toHaveLength(0);
     const trusted = seen();
     await runAgent(
       gemini({
-        subprocess: marking(trusted),
         trustWorkspace: true,
       }),
+      marking(trusted),
     );
     expect(trusted.commands[0]?.env?.GEMINI_CLI_TRUST_WORKSPACE).toBe('true');
     expect(trusted.servers.map((server) => server.name)).toContain('noetic');
@@ -275,14 +275,16 @@ describe('openLocalLink', () => {
 });
 
 describe('AcpAgent.spawn', () => {
-  it("starts a process through the agent's own adapter, and none for an attached agent", async () => {
+  it("starts a process through the harness's adapter, and none for an attached agent", async () => {
     const spawned: SpawnCommand[] = [];
     const agent = defineAcpAgent({
       agentId: 'spawning',
       command: {
         command: 'agent',
       },
-      subprocess: createLinkSubprocessAdapter(async (opts) => {
+    });
+    const subprocess = through(
+      createLinkSubprocessAdapter(async (opts) => {
         const link = await openLocalLink({}, opts);
         return {
           ...link,
@@ -292,11 +294,16 @@ describe('AcpAgent.spawn', () => {
           },
         };
       }),
-    });
+    );
     assert(agent.spawn);
-    const process = await agent.spawn({
-      command: 'cat',
-    });
+    const process = await agent.spawn(
+      {
+        command: 'cat',
+      },
+      {
+        subprocess,
+      },
+    );
     const writer = process.writable.getWriter();
     await writer.write(new TextEncoder().encode('pong\n'));
     const reader = process.readable.getReader();

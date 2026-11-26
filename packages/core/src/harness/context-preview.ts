@@ -235,6 +235,7 @@ function readOnlyAdapters(adapters: AdapterSets): AdapterSets {
   return {
     fs: {
       get: (name) => readOnlyFs(adapters.fs.get(name)),
+      defaultName: adapters.fs.defaultName,
       list: () => adapters.fs.list(),
     },
     shell: {
@@ -242,10 +243,12 @@ function readOnlyAdapters(adapters: AdapterSets): AdapterSets {
         adapters.shell.get(name);
         return readOnlyShell;
       },
+      defaultName: adapters.shell.defaultName,
       list: () => adapters.shell.list(),
     },
     subprocess: {
       get: (name) => readOnlySubprocess(adapters.subprocess.get(name)),
+      defaultName: adapters.subprocess.defaultName,
       list: () => adapters.subprocess.list(),
     },
   };
