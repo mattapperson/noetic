@@ -330,11 +330,11 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-Each tick is one message: thread `cron:<name>`, message id `cron:<name>:<scheduledTime>`. Pass `options: { threadId }` to put the ticks on another thread, such as the one your requests use, and a function as `input` to build the message from the tick.
+Each tick uses `cron:<name>:<scheduledTime>` as both its thread and message ID. HTTP requests and scheduled turns share the harness. Each tick gets its own checkpoint. Pass a function as `input` to build the message from the tick.
 
-- **A tick runs once.** The harness's stored record knows the message id. A tick delivered twice starts one turn, and one delivered again after its turn finished is answered from the record.
-- **An evicted object loses nothing.** The turn is in the object's SQLite. Its alarm, or the next tick, brings it back in the next isolate, and it runs to its end before the next tick's turn starts.
-- **A failed turn does not fail the handler.** The failure is on the turn's response. The alarm runs a [cut](/docs/framework/durability#one-writer-per-turn) turn again; the same tick delivered again resumes a failed one.
+- **Duplicate ticks.** The preset queues delivery. A duplicate joins the active turn or replays its stored answer. Replay works for as long as you keep the tick's thread.
+- **Eviction and backoff.** The alarm, or a later tick, resumes due work from the object's SQLite. A new tick can run while an older thread waits to retry.
+- **Failed turns.** The handler rejects with the tick's failure. If the host retries, send the same tick to reuse its record. Parked and cut turns stay on the harness's alarm path.
 
 A tick whose `cron` is not the handler's is ignored, so one `tick` method can pass every tick to several `cronTurn` handlers.
 

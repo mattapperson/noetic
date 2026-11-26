@@ -6,7 +6,7 @@
 
 import type {
   AgentHarness,
-  ExecuteArgument,
+  ExecuteInput,
   ExecuteOptions,
   StorageAdapter,
 } from '@noetic-tools/core';
@@ -23,16 +23,16 @@ export interface CronTick {
 /** @public Options for a harness turn per cron tick. */
 export interface CronTurnOptions {
   cron: string;
-  /** Unique among the harness's cron jobs. Its turns run on the thread `cron:<name>`. */
+  /** Unique among the harness's cron jobs. */
   name: string;
   /** The harness the object's other messages go to. */
-  harness: Pick<AgentHarness, 'execute' | 'waitForIdle'>;
+  harness: Pick<AgentHarness, 'execute' | 'getAgentResponse'>;
   /** The object's alarm preset, over the same harness. */
   wake: Pick<AlarmWake, 'alarm'>;
   /** What the turn is given. */
-  input: ExecuteArgument | ((tick: CronTick) => ExecuteArgument);
-  /** `execute()` options for the turn. A `threadId` here replaces `cron:<name>`. */
-  options?: Omit<ExecuteOptions, 'messageId'>;
+  input: ExecuteInput | ((tick: CronTick) => ExecuteInput);
+  /** `execute()` options other than the identity and delivery mode the preset sets. */
+  options?: Omit<ExecuteOptions, 'threadId' | 'messageId' | 'deliveryMode'>;
 }
 
 /** @public Options for a periodic scan of durable work. */
@@ -57,13 +57,12 @@ export interface CronWakeOptions<Env> {
  * the same `harness.execute()` the object's requests use. Route the Worker's
  * `scheduled` handler to a method of the named object, and call this there.
  *
- * The message id is `cron:<name>:<scheduledTime>`, so the harness's own record is
- * what makes a tick run once: a tick delivered twice, or again after its turn
- * finished, starts nothing. A turn the object was evicted in is brought back
- * first, by `wake.alarm()`, since a new message would otherwise replace it. The
- * handler stays until every turn has finished or parked. It does not throw for a
- * turn that failed: the failure is on the turn, the alarm runs a cut turn again,
- * and the same tick delivered again runs a failed one again.
+ * Each tick owns the thread and message id `cron:<name>:<scheduledTime>`. A later
+ * tick cannot replace its checkpoint or evict its completed receipt. Queued delivery
+ * lets a duplicate join the active turn. The alarm pass wakes due work before
+ * delivery. The tick's own response keeps the handler alive until it settles,
+ * parks or cuts. A failed response rejects the handler so its caller can report
+ * or retry that tick.
  *
  * @example
  * ```ts
@@ -104,12 +103,16 @@ export function cronTurn(options: CronTurnOptions): (tick: CronTick) => Promise<
       return;
     }
     await wake.alarm();
+    const id = `cron:${options.name}:${tick.scheduledTime}`;
     await harness.execute(typeof input === 'function' ? input(tick) : input, {
-      threadId: `cron:${options.name}`,
       ...options.options,
-      messageId: `cron:${options.name}:${tick.scheduledTime}`,
+      threadId: id,
+      messageId: id,
+      deliveryMode: 'next-turn',
     });
-    await harness.waitForIdle();
+    await harness.getAgentResponse({
+      threadId: id,
+    });
   };
 }
 

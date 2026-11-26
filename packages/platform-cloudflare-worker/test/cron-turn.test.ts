@@ -20,9 +20,9 @@ const tickAt = (scheduledTime: number): CronTick => ({
   scheduledTime,
 });
 
-const digestThread = {
-  threadId: 'cron:digest',
-};
+const digestThread = (at = 6e4) => ({
+  threadId: `cron:digest:${at}`,
+});
 
 interface FakeObject {
   harness: AgentHarness;
@@ -35,10 +35,13 @@ interface FakeObject {
 function objectOver(
   db: Database,
   call: (request: CallModelRequest) => Promise<LLMResponse>,
+  now = Date.now,
 ): FakeObject {
   const harness = new AgentHarness({
     name: 'object',
     params: {},
+    defaultDeliveryMode: 'interrupt',
+    now,
     agentGraph: callModel<ContextData, string, string>({
       id: 'respond',
       model: 'test/model',
@@ -57,6 +60,7 @@ function objectOver(
   const wake = alarmWake({
     harness,
     alarms: alarm,
+    now,
   });
   return {
     harness,
@@ -131,7 +135,7 @@ describe('cronTurn', () => {
         })
       ).text,
     ).toBe('a-1');
-    const digest = await object.harness.getAgentResponse(digestThread);
+    const digest = await object.harness.getAgentResponse(digestThread());
     expect(digest.text).toBe('a-2');
     expect(JSON.stringify(digest.items)).toContain('digest for 60000');
     await object.harness.close();
@@ -145,11 +149,11 @@ describe('cronTurn', () => {
       scheduledTime: 6e4,
     });
     expect(m.calls).toBe(0);
-    expect(await object.harness.getStoredThread('cron:digest')).toBeUndefined();
+    expect(await object.harness.getStoredThread(digestThread().threadId)).toBeUndefined();
     await object.harness.close();
   });
 
-  it('runs a tick delivered twice, at once or later, as one turn', async () => {
+  it('deduplicates a tick even when the harness defaults to interrupt', async () => {
     const m = model('a');
     const object = objectOver(new Database(':memory:'), m.call);
     await Promise.all([
@@ -158,14 +162,64 @@ describe('cronTurn', () => {
     ]);
     await object.tick(tickAt(6e4));
     expect(m.calls).toBe(1);
-    const again = await object.harness.getAgentResponse(digestThread);
+    const again = await object.harness.getAgentResponse(digestThread());
     expect(again.replayed).toBe(true);
     expect(again.text).toBe('a-1');
 
-    // The next tick is a new message on the same thread.
+    // The next tick has its own thread.
     await object.tick(tickAt(12e4));
     expect(m.calls).toBe(2);
-    expect((await object.harness.getAgentResponse(digestThread)).text).toBe('a-2');
+    expect((await object.harness.getAgentResponse(digestThread(12e4))).text).toBe('a-2');
+    await object.harness.close();
+  });
+
+  it('still replays an old tick after more than 20 later ticks', async () => {
+    const m = model('a');
+    const object = objectOver(new Database(':memory:'), m.call);
+    await object.tick(tickAt(6e4));
+    for (let index = 2; index <= 22; index += 1) {
+      await object.tick(tickAt(index * 6e4));
+    }
+    await object.tick(tickAt(6e4));
+    expect(m.calls).toBe(22);
+    expect((await object.harness.getAgentResponse(digestThread())).replayed).toBe(true);
+    await object.harness.close();
+  });
+
+  it('keeps a cut checkpoint while a newer tick runs during its backoff', async () => {
+    const db = new Database(':memory:');
+    const m = model('a');
+    let now = 1e6;
+    const object = objectOver(db, m.call, () => now);
+    await object.wake.alarm();
+    db.run(`
+      CREATE TRIGGER refuse_ledger BEFORE INSERT ON noetic_storage
+      WHEN NEW.key LIKE '%:ledger:%'
+      BEGIN SELECT RAISE(ABORT, 'ledger unavailable'); END
+    `);
+
+    await object.tick(tickAt(6e4));
+    const { cut } = await object.harness.getAgentResponse(digestThread());
+    expect(cut).toMatchObject({
+      reason: 'ledger_write_failed',
+      wakeAt: now + 1e3,
+    });
+    db.run('DROP TRIGGER refuse_ledger');
+
+    await object.tick(tickAt(12e4));
+    expect(
+      (await object.harness.getStoredThread(digestThread().threadId))?.turn?.cut,
+    ).toBeDefined();
+    expect(object.alarm.at).toBe(now + 1e3);
+
+    now += 1e3;
+    expect(await object.wake.alarm()).toEqual([
+      digestThread().threadId,
+    ]);
+    const recovered = await object.harness.getAgentResponse(digestThread());
+    expect(recovered.cut).toBeUndefined();
+    expect(JSON.stringify(recovered.items)).toContain('digest for 60000');
+    expect(object.alarm.at).toBeUndefined();
     await object.harness.close();
   });
 
@@ -179,7 +233,7 @@ describe('cronTurn', () => {
     const second = objectOver(db, m.call);
     await second.tick(tickAt(6e4));
     expect(m.calls).toBe(0);
-    const again = await second.harness.getAgentResponse(digestThread);
+    const again = await second.harness.getAgentResponse(digestThread());
     expect(again.replayed).toBe(true);
     expect(again.text).toBe('a-1');
     await second.harness.close();
@@ -189,7 +243,7 @@ describe('cronTurn', () => {
     const db = new Database(':memory:');
     const lost = model('lost');
     const first = objectOver(db, hanging(lost));
-    void first.tick(tickAt(6e4));
+    const lostTick = first.tick(tickAt(6e4)).catch(() => undefined);
     while (lost.calls === 0) {
       await new Promise((resolve) => setTimeout(resolve, 1));
     }
@@ -201,14 +255,16 @@ describe('cronTurn', () => {
     const second = objectOver(db, m.call);
     await second.tick(tickAt(12e4));
     expect(m.calls).toBe(2);
-    const response = await second.harness.getAgentResponse(digestThread);
+    const old = await second.harness.getAgentResponse(digestThread());
+    expect(old.text).toBe('b-1');
+    expect(JSON.stringify(old.items)).toContain('digest for 60000');
+    const response = await second.harness.getAgentResponse(digestThread(12e4));
     expect(response.text).toBe('b-2');
-    const history = JSON.stringify(response.items);
-    expect(history).toContain('digest for 60000');
-    expect(history).toContain('b-1');
-    expect(history).toContain('digest for 120000');
+    expect(JSON.stringify(response.items)).toContain('digest for 120000');
     expect(second.alarm.at).toBeUndefined();
     await second.harness.close();
+    await first.harness.abort(digestThread());
+    await lostTick;
     await first.harness.close();
   });
 
@@ -216,7 +272,7 @@ describe('cronTurn', () => {
     const db = new Database(':memory:');
     const lost = model('lost');
     const first = objectOver(db, hanging(lost));
-    void first.tick(tickAt(6e4));
+    const lostTick = first.tick(tickAt(6e4)).catch(() => undefined);
     while (lost.calls === 0) {
       await new Promise((resolve) => setTimeout(resolve, 1));
     }
@@ -225,12 +281,14 @@ describe('cronTurn', () => {
     const second = objectOver(db, m.call);
     await second.tick(tickAt(6e4));
     expect(m.calls).toBe(1);
-    expect((await second.harness.getAgentResponse(digestThread)).text).toBe('b-1');
+    expect((await second.harness.getAgentResponse(digestThread())).text).toBe('b-1');
     await second.harness.close();
+    await first.harness.abort(digestThread());
+    await lostTick;
     await first.harness.close();
   });
 
-  it('does not throw for a turn that failed, and runs it again when its tick comes again', async () => {
+  it('rejects a failed tick and lets the caller retry it', async () => {
     const m = model('a');
     let offline = true;
     const object = objectOver(new Database(':memory:'), async (request) => {
@@ -239,15 +297,14 @@ describe('cronTurn', () => {
       }
       return m.call(request);
     });
-    await object.tick(tickAt(6e4));
-    await expect(object.harness.getAgentResponse(digestThread)).rejects.toThrow('model offline');
+    await expect(object.tick(tickAt(6e4))).rejects.toThrow('model offline');
     // A failed turn is not the alarm's to run again.
     expect(object.alarm.at).toBeUndefined();
 
     offline = false;
     await object.tick(tickAt(6e4));
     expect(m.calls).toBe(1);
-    expect((await object.harness.getAgentResponse(digestThread)).text).toBe('a-1');
+    expect((await object.harness.getAgentResponse(digestThread())).text).toBe('a-1');
     await object.harness.close();
   });
 
@@ -260,11 +317,11 @@ describe('cronTurn', () => {
       }
       return m.call(request);
     });
-    await object.tick(tickAt(6e4));
+    await expect(object.tick(tickAt(6e4))).rejects.toThrow('model offline');
     offline = false;
     await object.tick(tickAt(12e4));
     expect(m.calls).toBe(1);
-    const response = await object.harness.getAgentResponse(digestThread);
+    const response = await object.harness.getAgentResponse(digestThread(12e4));
     expect(response.text).toBe('a-1');
     const history = JSON.stringify(response.items);
     expect(history).toContain('digest for 120000');

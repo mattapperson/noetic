@@ -393,6 +393,8 @@ describe('a turn cut by a failed durable write', () => {
       assert(isNoeticError(error));
       expect(error.noeticError.kind).toBe('ledger_write_failed');
     }
+    // A reader arriving after the retry failed must see the error too.
+    await expect(harness.getAgentResponse(scope)).rejects.toThrow();
     const stored = await storage.get<StoredSession>('session:t');
     expect(stored?.turn?.stopped).toBeDefined();
     expect(stored?.turn?.cut).toBeUndefined();
