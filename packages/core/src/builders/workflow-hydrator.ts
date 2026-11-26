@@ -93,9 +93,9 @@ export interface HydrationContext {
    */
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   /**
-   * Resolves a named subprocess adapter ref declared on a `runCode` node's
-   * `subprocess` field. When a node omits the ref, the step falls back to
-   * `ctx.subprocess` at execution time.
+   * Resolves the name a `runCode` node's `subprocess` field gives. A name it
+   * does not know is looked up among the harness's subprocess adapters; a
+   * node that names none runs through `ctx.subprocess`.
    */
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
   /**
@@ -268,6 +268,7 @@ function hydrateInvokeToolNode(
           harness: execCtx.harness,
           fs: execCtx.fs,
           shell: execCtx.shell,
+          adapters: execCtx.adapters,
           context: layerState,
           assembledView: execCtx.itemLog.items,
           lastStepMeta: execCtx.lastStepMeta,

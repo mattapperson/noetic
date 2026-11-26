@@ -63,6 +63,8 @@ interface AcpAgent {
   readonly specificationVersion: 'acp-v1';
   /** Free-form, e.g. 'claude-code'. An OPEN set — no enum. */
   readonly agentId: string;
+  /** The harness subprocess adapter the agent names, when it names one. */
+  readonly subprocess?: string;
   connect(opts: AcpConnectOptions): Promise<AcpAgentConnection>;
 }
 
@@ -95,7 +97,9 @@ interface AcpSession {
 ```
 
 `AcpConnectOptions` carries `reattach` (reach that agent instead of starting
-one) and `whenHostExits` (`'keep'`, the default, or `'stop'`); a
+one), `whenHostExits` (`'keep'`, the default, or `'stop'`) and `subprocess`
+(the harness's subprocess adapters and the one the step names, § The
+subprocess adapter); a
 `SubprocessLink` may offer `attach(handle)`, and an `AcpTransport` its
 `reattach` handle.
 
@@ -205,32 +209,83 @@ new AgentHarness({
 });
 ```
 
+A harness may name several subprocess adapters, one of them the default
+(`08-runtime` § Named Adapters). A step and an agent preset pick one by name:
+
+```ts
+new AgentHarness({
+  environment: {
+    subprocess: {
+      laptop: { adapter: localSubprocess(), default: true },
+      builder: { adapter: webSocketSubprocess({ url, token }), displayName: 'Build host' },
+    },
+    fs: {
+      laptop: { adapter: createLocalFsAdapter(), default: true },
+      builder: { adapter: hostFs },
+    },
+  },
+});
+
+step.acpAgent({ agent: claudeCode(), prompt });                        // the defaults
+step.acpAgent({ agent: claudeCode(), prompt, subprocess: 'builder', fs: 'builder' });
+claudeCode({ subprocess: 'builder' });                                 // a preset names one
+```
+
 A command agent runs through the first of these:
 
-1. the `subprocess` adapter the agent names (`claudeCode({ subprocess })`);
-2. the harness's `environment.subprocess`, when that adapter has `open`;
-3. `localSubprocess()`, a local process.
+1. the harness adapter the step names (`step.acpAgent({ subprocess: 'builder' })`);
+2. the agent's own `subprocess`: an adapter (`claudeCode({ subprocess: adapter })`),
+   or the name of a harness adapter (`claudeCode({ subprocess: 'builder' })`);
+3. the harness's default subprocess adapter, when that adapter has `open`;
+4. `localSubprocess()`, a local process.
 
-An agent given an adapter with no `open` fails to connect with
-`ACP_SUBPROCESS_CANNOT_OPEN`.
+A name the harness lacks fails the step with `ADAPTER_UNKNOWN`, before the
+agent starts; the message lists the names the harness has. A named adapter is
+used as it is: one with no `open` fails to connect with
+`ACP_SUBPROCESS_CANNOT_OPEN`, as an adapter the agent brings does. Only the
+unnamed default falls through to a local process.
 
-The core passes the harness's adapter to `AcpAgent.connect` as
-`AcpConnectOptions.subprocess`, on a first connection and on a reattach alike,
-so a resumed step reaches the agent it left running through the same adapter
-(§ Resuming a step) and a host names it once, not on every agent.
+The core passes `AcpAgent.connect` a `SubprocessChoice` as
+`AcpConnectOptions.subprocess`, on a first connection and on a reattach alike:
+
+```ts
+interface SubprocessChoice {
+  /** The harness's `environment.subprocess`. */
+  readonly adapters: AdapterSet<SubprocessAdapter>;
+  /** The adapter a step names. It comes before any the process's owner names. */
+  readonly name?: string;
+}
+```
+
+The agent resolves the order above against it, so a host names its adapters
+once, not on every agent. An agent that names an adapter says so as
+`AcpAgent.subprocess`, which is how the core knows where the step's agent runs
+(§ Session reuse and lifetime, § Resuming a step). An agent that names an
+adapter and is connected with no `SubprocessChoice` — by hand, outside a step
+— fails with `ACP_SUBPROCESS_NAME_WITHOUT_HARNESS`.
+
+**The agent's filesystem and shell.** The client host that serves the agent's
+`fs/*` and `terminal/*` calls (§ Client-side capabilities) takes the harness's
+default `fs` and `shell`, or the ones the step names with `fs` and `shell`.
+The three names are independent: a step may run its agent on the build host
+and serve it files from there with `subprocess: 'builder', fs: 'builder',
+shell: 'builder'`, or name only one.
 
 A process started beside the agent follows it. A `Spawn` takes
-`{ subprocess }` as its second argument, and `agent.spawn` starts the process
-through the agent's own adapter, else the one it is given when that has
-`open`, else locally. A connection provider is given the harness's as
+`{ subprocess }`, the same `SubprocessChoice`, as its second argument, and
+`agent.spawn` starts the process through the adapter the order above gives. A
+connection provider is given the harness's adapters as
 `ConnectOptions.subprocess`, and `mcp()` hands it to its server's `spawn`, so
 `mcp({ command, spawn: agent.spawn })` and a JSON `acp-agent` node's stdio
-`{ "mcp" }` entries start where the agent runs. A stdio `mcp()` server given
-no `spawn` is a local subprocess.
+`{ "mcp" }` entries start where the agent runs. A JSON node that names a
+`subprocess` passes that name to its entries' `spawn`. A TypeScript step's
+`subprocess` name does not reach an `mcp()` entry, which connects with the
+turn and not the step: such a server follows the agent's own adapter or the
+default. A stdio `mcp()` server given no `spawn` is a local subprocess.
 
-An adapter with no `open` — the in-memory adapter, and
-`@noetic-tools/platform-node`'s local one — leaves every agent a local
-process.
+A default adapter with no `open` — the in-memory adapter, and
+`@noetic-tools/platform-node`'s local one — leaves every agent that names
+none a local process.
 
 The adapters `@noetic-tools/acp` builds are `AgentSubprocessAdapter`s: `open`
 is always there, and they run agents and the processes beside them, and no
@@ -484,13 +539,15 @@ the whole environment.
 ## Client-side capabilities
 
 `@noetic-tools/acp` implements the ACP `Client` interface against an
-`AcpClientHost` the runtime builds from `Context`:
+`AcpClientHost` the runtime builds from `Context`. Its `fs` and `shell` are
+the harness adapters the step names (`fs`, `shell`), else the defaults
+`ctx.fs` and `ctx.shell` (§ The subprocess adapter):
 
 | ACP client method | Backing |
 |---|---|
-| `fs/read_text_file` | `ctx.fs.readFileText`, with the spec's 1-indexed `line`/`limit` window |
-| `fs/write_text_file` | `ctx.fs.writeFile`, parent directories via `ctx.fs.mkdir` |
-| `terminal/create`·`output`·`wait_for_exit`·`kill`·`release` | A terminal registry over `ctx.shell.exec`: `onData` feeds an `outputByteLimit` ring buffer, one `AbortController` per terminal backs `kill`, and `ShellExecResult.exitCode` becomes the exit status |
+| `fs/read_text_file` | `fs.readFileText`, with the spec's 1-indexed `line`/`limit` window |
+| `fs/write_text_file` | `fs.writeFile`, parent directories via `fs.mkdir` |
+| `terminal/create`·`output`·`wait_for_exit`·`kill`·`release` | A terminal registry over `shell.exec`: `onData` feeds an `outputByteLimit` ring buffer, one `AbortController` per terminal backs `kill`, and `ShellExecResult.exitCode` becomes the exit status |
 | `session/request_permission` | The permission resolver (below) |
 | `elicitation/create` | A held question (§ Questions the agent asks) |
 | `session/update` | The event bridge (below) |
@@ -615,8 +672,15 @@ const review = step.acpAgent({
   permissions: { default: 'deny', allow: [{ kind: 'read' }] },
   clientCapabilities: { writeTextFile: false },
   output: ReviewSchema, // optional structured output
+  subprocess: 'builder', // optional: harness adapters by name
+  fs: 'builder',
+  shell: 'builder',
 });
 ```
+
+`subprocess`, `fs` and `shell` each name one of the harness's adapters of that
+kind (§ The subprocess adapter). They are plain strings, fixed when the step
+is built, and checked against the harness when the step runs.
 
 `executeAcpAgent` mirrors `executeCallModel`: it appends the prompt as a user
 item, opens (or reuses) a connection and session, applies `mode`/`model`, drives
@@ -881,6 +945,15 @@ session: { reuse: 'bugfix', keepAlive: 'run' }
 session: { reuse: 'assistant', keepAlive: 'harness' }
 ```
 
+**A session is on one set of adapters.** A connection is one agent process,
+served by one filesystem and one shell, so the adapters a step resolves to —
+its `subprocess` (the step's name, else the agent's, else the default), `fs`
+and `shell` — are part of what a `reuse` key names. Steps that share a key and
+resolve to the same three share one connection; a step that resolves to a
+different one gets a connection of its own under the same key, and steps that
+agree with it share that. A step that names the default and a step that names
+nothing resolve to the same adapter.
+
 `session.load` resumes an existing ACP session id via `session/load` instead of
 creating a new one. The agent replays the loaded conversation as
 `session/update` notifications before it answers; see § Output → harness events
@@ -893,15 +966,24 @@ durable run (`23a-step-level-resume`) the step keeps two things so a resume does
 not start the agent's work over.
 
 **The agent's session.** When the step opens a session it stores the session id,
-its fingerprint (§ Instructions) — and, when the agent can outlive its host,
-its reattach handle — with the run's
+its fingerprint (§ Instructions), the name of the subprocess adapter the step
+resolved to (§ The subprocess adapter) — and, when the agent can outlive its
+host, its reattach handle — with the run's
 pending entries, under `execution:<root id>:pending:<step path>/acp-session`,
 and removes it when the step finishes. A resumed step that finds one, written by
 the same agent id:
 
 0. with a reattach handle, reaches the agent that kept working (§ A local agent
-   outlives its host), through the adapter a first connection would use (§ The
-   subprocess adapter), and attaches to the live session. Its first turn collects
+   outlives its host), through the adapter that started it, and attaches to
+   the live session. A handle means something only to the adapter that made
+   it, so the step must resolve to the stored adapter name. One that now
+   resolves to another — its `subprocess`, its agent's, or the harness's
+   default changed — fails with `ACP_SESSION_ADAPTER_CONFLICT` before it
+   connects anywhere: the agent may still be working where it was started,
+   and starting its work again elsewhere could do it twice. The record stays,
+   so a resume that resolves to the first adapter still takes the turn. A
+   record with no adapter name, written before names were kept, is tried
+   through the adapter the step resolves to. Its first turn collects
    the turn the dead host left running — every update of it as this step's
    output, the requests the agent still waits on answered by this host, then its
    result — instead of prompting. Only when no turn was running does it prompt,
@@ -1211,9 +1293,15 @@ One node kind, with the agent named by a registry key:
   "prompt": "Review the diff",
   "instructions": "Never push to main.",
   "mode": "plan",
-  "permissions": { "default": "deny", "allow": [{ "kind": "read" }] }
+  "permissions": { "default": "deny", "allow": [{ "kind": "read" }] },
+  "subprocess": "builder",
+  "fs": "builder",
+  "shell": "builder"
 }
 ```
+
+`subprocess`, `fs` and `shell` are optional names of harness adapters, as on a
+TypeScript step (§ The subprocess adapter).
 
 `instructions` is a string (§ Instructions); a document cannot set the
 adapter's `sessionMeta`. The hydrator resolves `agent` from `HydrationContext.acpAgents`, an **open**
@@ -1235,10 +1323,10 @@ not grant is refused with `CONNECTION_NOT_ALLOWED` before the agent starts
 Because a node decides what the agent can reach on the host — `terminal`
 alone hands it a shell — `parseAndRunWorkflow` and `dynamicWorkflow` also hold
 a document they run to the host's `acp` allowlist: the most a node may ask of
-each agent in `permissions`, `mode`, `model`, `cwd`, `clientCapabilities` and
-`session` (narrowest by default: deny-only permissions, no `mode`, any
-`model`, the harness's cwd, `readTextFile` only, `keepAlive` up to `run`, no
-`load`). Anything more is `CONNECTION_NOT_ALLOWED` before the agent starts. A
+each agent in `permissions`, `mode`, `model`, `subprocess`, `fs`, `shell`,
+`cwd`, `clientCapabilities` and `session` (narrowest by default: deny-only
+permissions, no `mode`, any `model`, no adapter names, the harness's cwd,
+`readTextFile` only, `keepAlive` up to `run`, no `load`). Anything more is `CONNECTION_NOT_ALLOWED` before the agent starts. A
 document's `session.reuse` keys live in a namespace of their own per run, so
 its nodes never join a session the host opened
 (`26-json-workflow-runtime` § What a document may ask of an agent).
@@ -1261,6 +1349,12 @@ serves it). Runtime import graph clean; install graph not.
 
 ## Future Considerations
 
+- **A step's `subprocess` name for its `mcp()` entries.** A TypeScript step's
+  stdio `mcp()` entry starts through `agent.spawn` with the harness's
+  adapters and no step name, because an entry connects with the turn. Passing
+  the name would need the entry to know the step that lists it.
+- **`fs` and `shell` on resume.** A resumed step is held to the subprocess
+  adapter that started its agent, not to the `fs` and `shell` it named.
 - **MCP over ACP.** The ACP RFD `mcp-over-acp` (draft, request-scoped since
   2026-09) offers an `{ "type": "acp", "name", "serverId" }` MCP server whose
   messages travel as `mcp/message` requests on the ACP connection itself

@@ -7,7 +7,7 @@ import type {
   EventStreamMessage,
   NoeticError,
   SteeringDecision,
-  SubprocessAdapter,
+  SubprocessChoice,
 } from '@noetic-tools/types';
 import {
   defineProfile,
@@ -19,7 +19,6 @@ import {
   secret,
 } from '@noetic-tools/types';
 import { z } from 'zod';
-import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
 import type { GateHooks } from '../../src/connections/gates';
 import type { InMemoryConnectionOptions } from '../../src/connections/in-memory-connection';
 import {
@@ -33,7 +32,7 @@ import type {
 import { createConnectionRuntime } from '../../src/connections/registry';
 import type { ConnectionScope, GatedCallOptions } from '../../src/connections/registry-types';
 import { createInMemoryArtifactStore } from '../../src/runtime/in-memory-artifact-store';
-import { makeMockContext, makeStorage, sleep } from '../_helpers';
+import { makeAdapterSets, makeMockContext, makeStorage, sleep } from '../_helpers';
 
 //#region Fixtures
 
@@ -369,10 +368,12 @@ describe('resolve', () => {
     expect(isNoeticConfigError(e) && e.code).toBe('CONNECTION_UNKNOWN');
   });
 
-  test("hands a provider the harness's subprocess adapter", async () => {
-    const subprocess = createInMemorySubprocessAdapter();
+  test("hands a provider the harness's subprocess adapters", async () => {
+    const subprocess: SubprocessChoice = {
+      adapters: makeAdapterSets().subprocess,
+    };
     const inner = createInMemoryConnection(appOptions());
-    let given: SubprocessAdapter | undefined;
+    let given: SubprocessChoice | undefined;
     const runtime = createConnectionRuntime({
       connections: {
         app: {

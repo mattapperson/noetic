@@ -3185,6 +3185,18 @@
                 }
               },
               "additionalProperties": false
+            },
+            "subprocess": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fs": {
+              "type": "string",
+              "minLength": 1
+            },
+            "shell": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [

@@ -10,6 +10,7 @@ export * from './schemas/held-call';
 export * from './schemas/item';
 export * from './schemas/workflow';
 export * from './types/acp';
+export * from './types/adapter-set';
 export * from './types/artifact-store';
 export * from './types/channel';
 export * from './types/common';

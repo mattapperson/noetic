@@ -25,6 +25,7 @@ import {
   SteeringAction,
 } from '@noetic-tools/types';
 import { assertAgentTakesTools } from '../builders/acp-agent-checks';
+import { acpAdapterNames } from './acp-adapters';
 import { AcpEventBridge } from './acp-events';
 import { withHistoryPrompt } from './acp-history';
 import type { HostBindingOptions } from './acp-host';
@@ -96,6 +97,20 @@ async function resolveServedTools<TContext, I, O>(
   return undefined;
 }
 
+/**
+ * A resumed step that now runs through another subprocess adapter than the one
+ * its agent was started through. The agent may still be working where it was
+ * started, so the step fails and attaches to nothing: starting its work again
+ * elsewhere could do it twice.
+ */
+function movedAgent(stepId: string, started: string, now: string): NoeticConfigError {
+  return new NoeticConfigError({
+    code: 'ACP_SESSION_ADAPTER_CONFLICT',
+    message: `step.acpAgent(${JSON.stringify(stepId)}) resumes an agent started through the subprocess adapter '${started}', but now runs through '${now}'.`,
+    hint: `Resume with the step, its agent and \`environment.subprocess\` resolving to '${started}', as in the run that started the agent.`,
+  });
+}
+
 /** Whether a step setting may name anything: a getter, or a non-empty array. */
 function gives(setting: unknown): boolean {
   return typeof setting === 'function' || (Array.isArray(setting) && setting.length > 0);
@@ -158,6 +173,7 @@ async function runAcpStep<TContext, I, O>(params: {
     });
   }
 
+  const adapters = acpAdapterNames(step, agent, baseCtx);
   const cwd = (await resolveLazy(step.cwd, ctx)) ?? baseCtx.cwdState.cwd;
   const settings = await resolveSessionSettings(step, ctx);
   const tools = await resolveServedTools(step, ctx, layers, agent);
@@ -181,6 +197,13 @@ async function runAcpStep<TContext, I, O>(params: {
   const sameAgent = recorded?.agentId === agent.agentId;
   const resumeId = sameAgent ? recorded?.sessionId : undefined;
   const reattach = sameAgent ? recorded?.reattach : undefined;
+  if (
+    reattach &&
+    recorded?.subprocess !== undefined &&
+    recorded.subprocess !== adapters.subprocess
+  ) {
+    throw movedAgent(step.id, recorded.subprocess, adapters.subprocess);
+  }
   const fingerprint = sameAgent ? recorded?.fingerprint : undefined;
   // `session/load` replays the session's conversation as updates. They are the
   // agent's history, not this turn's work: they reach raw-event consumers
@@ -250,6 +273,7 @@ async function runAcpStep<TContext, I, O>(params: {
     reattach,
     fingerprint,
     settings,
+    adapters,
   })
     .catch((cause: unknown) => {
       throw stepFailure(step, cause, baseCtx);
@@ -269,6 +293,7 @@ async function runAcpStep<TContext, I, O>(params: {
       // How a resumed run reaches this agent if it outlives this host.
       reattach: resolution.live.connection.reattach,
       fingerprint: resolution.live.session.fingerprint,
+      subprocess: adapters.subprocess,
     });
   }
 

@@ -125,12 +125,14 @@ export interface AcpPresetOptions {
   /** Environment overrides for the agent process — API keys, feature flags. */
   env?: Record<string, string | undefined>;
   /**
-   * Where the agent runs — a remote runner, a sandbox. The preset's command
-   * runs there, with its tool settings. Without one the agent runs through
-   * the harness's `environment.subprocess` when that adapter has `open`, and
-   * as a local process otherwise.
+   * Where the agent runs — a remote runner, a sandbox: an adapter, or the
+   * name of one of the harness's `environment.subprocess` adapters. The
+   * preset's command runs there, with its tool settings. A step's own
+   * `subprocess` name comes first. Without either the agent runs through the
+   * harness's default when that adapter has `open`, and as a local process
+   * otherwise.
    */
-  subprocess?: SubprocessAdapter;
+  subprocess?: SubprocessAdapter | string;
   /** Attach to an agent this package does not start, in place of the preset's command. */
   transport?: AcpTransportFactory;
   /**
@@ -343,7 +345,7 @@ export function customAcpAgent(opts: {
   args?: ReadonlyArray<string>;
   env?: Record<string, string | undefined>;
   /** See {@link AcpPresetOptions.subprocess}. */
-  subprocess?: SubprocessAdapter;
+  subprocess?: SubprocessAdapter | string;
   /** See {@link AcpPresetOptions.transport}. */
   transport?: AcpTransportFactory;
 }): AcpAgent {

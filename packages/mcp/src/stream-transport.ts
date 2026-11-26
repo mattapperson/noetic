@@ -8,7 +8,7 @@
 import { ReadBuffer, serializeMessage } from '@modelcontextprotocol/sdk/shared/stdio.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
-import type { ByteStream, Spawn, SpawnCommand, SubprocessAdapter } from '@noetic-tools/types';
+import type { ByteStream, Spawn, SpawnCommand, SubprocessChoice } from '@noetic-tools/types';
 
 //#region Public API
 
@@ -27,7 +27,7 @@ export class SpawnedTransport implements Transport {
   constructor(
     private readonly spawn: Spawn,
     private readonly command: SpawnCommand,
-    private readonly subprocess?: SubprocessAdapter,
+    private readonly subprocess?: SubprocessChoice,
   ) {}
 
   async start(): Promise<void> {

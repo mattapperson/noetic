@@ -16,6 +16,7 @@ import type {
   McpAllowlist,
   SecretResolver,
   Spawn,
+  SpawnOptions,
   WorkflowDocument,
   WorkflowMcpSecretValue,
   WorkflowMcpServer,
@@ -1486,6 +1487,76 @@ describe('a stdio tools entry on an acp-agent node', () => {
         ...DOCS_SERVER,
         spawn,
       },
+    ]);
+  });
+});
+
+describe('a stdio tools entry on an acp-agent node that names a subprocess adapter', () => {
+  it('starts through the adapter the node names', async () => {
+    const host = recordingHost();
+    const record = recordingAgent();
+    const given: Array<SpawnOptions | undefined> = [];
+    const harness = harnessWithSecrets();
+    const doc = agentDoc([
+      DOCS_SERVER,
+    ]);
+    await parseAndRunWorkflow({
+      json: {
+        ...doc,
+        root: {
+          ...doc.root,
+          subprocess: 'default',
+        },
+      },
+      harness,
+      ctx: harness.createContext(),
+      tools: [],
+      acpAgents: new Map([
+        [
+          'fake',
+          {
+            ...record.agent,
+            spawn: async (_command, options) => {
+              given.push(options);
+              throw new Error('not started in this test');
+            },
+          },
+        ],
+      ]),
+      acp: {
+        fake: {
+          subprocess: [
+            'default',
+          ],
+        },
+      },
+      mcp: {
+        ...DOCS_GRANT,
+        provider: host.provider,
+      },
+    });
+    const [built] = host.built;
+    assert(built && 'command' in built);
+    const spawn = built.spawn;
+    assert(spawn);
+    const command = {
+      command: 'npx',
+    };
+    const adapters = harness.adapters.subprocess;
+    await spawn(command, {
+      subprocess: {
+        adapters,
+      },
+    }).catch(() => undefined);
+    await spawn(command).catch(() => undefined);
+    expect(given).toEqual([
+      {
+        subprocess: {
+          adapters,
+          name: 'default',
+        },
+      },
+      undefined,
     ]);
   });
 });

@@ -1,4 +1,9 @@
-import type { ContextObservation, ContextStreamEvent, ContextWindow } from '@noetic-tools/types';
+import type {
+  AdapterSets,
+  ContextObservation,
+  ContextStreamEvent,
+  ContextWindow,
+} from '@noetic-tools/types';
 import type { HeldAnswerRequest } from '../runtime/held-calls';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
 import { ConnectionGate } from './connection-gate';
@@ -253,6 +258,8 @@ export class AgentHarness<
   readonly fs: FsAdapter;
   readonly shell: ShellAdapter;
   readonly subprocess: SubprocessAdapter;
+  /** Every filesystem, shell and subprocess adapter, by name. */
+  readonly adapters: AdapterSets;
   /**
    * Optional durable-execution store. When present, `checkpoint(ctx)` writes
    * a `CheckpointSnapshot`; when absent, it's a no-op.
@@ -403,10 +410,11 @@ export class AgentHarness<
       killAgentsOnExit: opts.killAgentsOnExit,
     };
     this.outputStorage = this.config.storage ?? createInMemoryStorage();
-    const adapters = resolveEnvironmentAdapters(environment);
-    this.fs = adapters.fs;
-    this.shell = adapters.shell;
-    this.subprocess = adapters.subprocess;
+    const { adapters, artifacts } = resolveEnvironmentAdapters(environment);
+    this.adapters = adapters;
+    this.fs = adapters.fs.get();
+    this.shell = adapters.shell.get();
+    this.subprocess = adapters.subprocess.get();
     this.checkpointStore = resolveCheckpointStore(storageEnv, opts.durability);
     this.stepLedgerStore = this.checkpointStore
       ? createStepLedgerStore({
@@ -470,7 +478,7 @@ export class AgentHarness<
     this.rootCwdState = {
       cwd: opts.initialCwd ?? '/',
     };
-    this.artifacts = adapters.artifacts;
+    this.artifacts = artifacts;
     this.#connections = new ConnectionGate({
       harness: this,
       connections: opts.connections,
@@ -479,7 +487,9 @@ export class AgentHarness<
       storage: this.config.storage ?? createInMemoryStorage(),
       artifacts: this.artifacts,
       secrets: environment?.secrets,
-      subprocess: adapters.subprocess,
+      subprocess: {
+        adapters: adapters.subprocess,
+      },
       verifier: opts.verification,
       broadcasters: () =>
         [

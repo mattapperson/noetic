@@ -42,7 +42,7 @@ import type {
   SecretResolver,
   StorageAdapter,
   StreamChangedEventData,
-  SubprocessAdapter,
+  SubprocessChoice,
   TriggerGaveUpEventData,
 } from '@noetic-tools/types';
 import type { AttachedEntry, AttachedScope } from '../types/connection-entry';
@@ -98,8 +98,8 @@ export interface ConnectionRuntimeOptions {
   readonly storage: StorageAdapter;
   readonly artifacts: ArtifactStore;
   readonly secrets?: SecretResolver;
-  /** The harness's `environment.subprocess`, handed to providers as they connect. */
-  readonly subprocess?: SubprocessAdapter;
+  /** The harness's subprocess adapters, handed to providers as they connect. */
+  readonly subprocess?: SubprocessChoice;
   readonly hooks?: GateHooks;
   readonly onFrameworkEvent?: (event: ConnectionFrameworkEventRecord) => void;
   /** Profiles known up front (from the graph's handles); handles add theirs when they resolve. */

@@ -284,6 +284,36 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Omit the field to take the default, pass a positive number, or pass `Infinity` to remove the cap.
 
+#### ADAPTER_INVALID
+
+**Cause:** `environment.fs`, `environment.shell` or `environment.subprocess` is neither an adapter of that kind nor a set of named ones, or an entry of a named set holds no adapter under `adapter`.
+
+**Fix:** Pass one adapter, or `{ <name>: { adapter, displayName?, description?, default? } }`. See [Named adapters](/docs/framework/runtime#named-adapters).
+
+#### ADAPTER_SET_EMPTY
+
+**Cause:** A named adapter set in `environment` has no entries.
+
+**Fix:** Give it at least one `{ adapter }` entry, or leave the field out for the in-memory adapter.
+
+#### ADAPTER_DEFAULT_MISSING
+
+**Cause:** A named adapter set has several entries and none is marked `default: true`.
+
+**Fix:** Add `default: true` to the adapter that anything naming none should use.
+
+#### ADAPTER_DEFAULT_AMBIGUOUS
+
+**Cause:** A named adapter set marks more than one entry `default: true`.
+
+**Fix:** Leave `default: true` on one entry only.
+
+#### ADAPTER_UNKNOWN
+
+**Cause:** Something asked for an adapter by a name the harness lacks: `ctx.adapters.fs.get(name)`, an ACP step's or `acp-agent` node's `subprocess`, `fs` or `shell`, or a preset's `subprocess` name. The message lists the names the harness has.
+
+**Fix:** Use one of those names, or add the name to that kind in `environment`.
+
 #### CHECKPOINT_SCHEMA_MISMATCH
 
 **Cause:** `harness.restore()` found a checkpoint written by a runtime version whose snapshot schema this version does not recognize.
@@ -554,9 +584,9 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### UNKNOWN_SUBPROCESS_REFERENCE
 
-**Cause:** A `run` node names a subprocess adapter that `HydrationContext.resolveSubprocess` cannot resolve.
+**Cause:** A `runCode` node names a subprocess adapter that neither `HydrationContext.resolveSubprocess` nor the harness's `environment.subprocess` has. The message lists the harness's names.
 
-**Fix:** Map the reference in `resolveSubprocess(ref)`, or omit `subprocess` to use the harness default.
+**Fix:** Name one of the harness's adapters, map the name in `resolveSubprocess(ref)`, or omit `subprocess` to use the harness default.
 
 #### INVALID_FORK_INPUT
 
@@ -650,6 +680,12 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Give every step that shares a `session.reuse` key the same `cwd`, `instructions`, agent and `tools`, or use a separate session. A resumed step must resolve the same instructions and settings as the run that started it.
 
+#### ACP_SESSION_ADAPTER_CONFLICT
+
+**Cause:** A resumed step would reattach to an agent that outlived its host, but the step now resolves to another subprocess adapter than the one that started the agent: its `subprocess` name, its agent's, or the harness's default changed. The agent may still be working where it was started, so the step attaches nowhere and fails.
+
+**Fix:** Resume with the step, its agent and `environment.subprocess` resolving to the adapter name the message gives, as in the run that started the agent.
+
 #### AGENT_CAPABILITY_MISSING
 
 **Cause:** A step asks an agent for something it did not advertise: `instructions` to an agent with no system prompt support and no adapter fallback, a `mode` or `model` it does not offer, or prompt content (images, audio, embedded resources) it does not accept. The message names the capability.
@@ -673,6 +709,12 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 **Cause:** An ACP agent was given a `subprocess` adapter with no `open`, or `spawnOn()` was. Such an adapter hands back no stdio, so no agent can run there.
 
 **Fix:** Use an adapter with `open` — `localSubprocess()` from `@noetic-tools/acp/stdio`, or `webSocketSubprocess()` / `commandSubprocess()` from `@noetic-tools/acp/remote` — or add `open` to yours.
+
+#### ACP_SUBPROCESS_NAME_WITHOUT_HARNESS
+
+**Cause:** An agent that names a harness subprocess adapter (`claudeCode({ subprocess: 'builder' })`) was connected with no harness adapters to find the name among, usually by calling `agent.connect()` by hand.
+
+**Fix:** Run the agent as a step, so the harness passes its `environment.subprocess`, or give the agent the adapter itself.
 
 #### ACP_SUBPROCESS_RUNS_NO_STEPS
 

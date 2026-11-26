@@ -173,8 +173,8 @@ export function buildHost<TContext, I, O>(
 ): AcpClientHost {
   const host: AcpClientHost = {
     cwd: opts.cwd,
-    fs: opts.ctx.fs,
-    shell: opts.ctx.shell,
+    fs: opts.ctx.adapters.fs.get(opts.step.fs),
+    shell: opts.ctx.adapters.shell.get(opts.step.shell),
     threadId: opts.ctx.threadId,
     signal: abortSignalOf(opts.ctx),
     // Connection-level: ACP negotiates the capability set once, in `initialize`.

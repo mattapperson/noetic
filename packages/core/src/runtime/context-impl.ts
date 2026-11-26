@@ -319,6 +319,10 @@ export class ContextImpl implements Context<ContextData> {
     return this.harness.subprocess;
   }
 
+  get adapters(): AgentHarnessContract['adapters'] {
+    return this.harness.adapters;
+  }
+
   get context(): ContextData {
     if (!this._contextData) {
       this._contextData = this.layers ? buildContextData(this.layers, this) : EMPTY_CONTEXT;

@@ -887,6 +887,7 @@ export type {
   Spawn,
   SpawnCommand,
   SpawnOptions,
+  SubprocessChoice,
   ToolBridgeAddress,
 } from '@noetic-tools/types';
 /** @public */
@@ -898,6 +899,22 @@ export {
   isAcpCapabilityError,
   isAcpConnectError,
 } from '@noetic-tools/types';
+
+//#endregion
+
+//#region Types — Named adapters
+
+/** @public */
+export type {
+  AdapterConfig,
+  AdapterInfo,
+  AdapterSet,
+  AdapterSets,
+  NamedAdapter,
+  NamedAdapters,
+} from '@noetic-tools/types';
+/** @public */
+export { adapterSet, adapterSets, DEFAULT_ADAPTER_NAME } from '@noetic-tools/types';
 
 //#endregion
 

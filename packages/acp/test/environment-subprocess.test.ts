@@ -14,10 +14,11 @@ import type {
   AcpReattachHandle,
   SpawnCommand,
   SubprocessAdapter,
+  SubprocessChoice,
   SubprocessLink,
   SubprocessOpenOptions,
 } from '@noetic-tools/types';
-import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
+import { AcpConnectError, adapterSet, frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import type { AgentSubprocessAdapter } from '../src/agent-subprocess';
 import { agentSubprocess } from '../src/agent-subprocess';
 import { defineAcpAgent } from '../src/define';
@@ -90,7 +91,76 @@ function recording(log: Seen): AgentSubprocessAdapter {
   });
 }
 
-function agentOn(subprocess?: SubprocessAdapter): AcpAgent {
+/** The harness's subprocess adapters by name, the first the default, and the one a step names. */
+function among(adapters: Record<string, SubprocessAdapter>, name?: string): SubprocessChoice {
+  const [first] = Object.keys(adapters);
+  return {
+    adapters: adapterSet({
+      kind: 'subprocess',
+      method: 'spawn',
+      config: Object.fromEntries(
+        Object.entries(adapters).map(([key, adapter]) => [
+          key,
+          {
+            adapter,
+            default: key === first,
+          },
+        ]),
+      ),
+    }),
+    name,
+  };
+}
+
+/** A harness whose subprocess adapters are `laptop` (the default) and `builder`, each recording. */
+function twoHosts(): {
+  laptop: Seen;
+  builder: Seen;
+  harness: AgentHarness;
+} {
+  const laptop = seen();
+  const builder = seen();
+  const harness = new AgentHarness({
+    name: 'named-subprocess',
+    params: {},
+    environment: {
+      subprocess: {
+        laptop: {
+          adapter: recording(laptop),
+          default: true,
+        },
+        builder: {
+          adapter: recording(builder),
+          displayName: 'Build host',
+        },
+      },
+    },
+  });
+  return {
+    laptop,
+    builder,
+    harness,
+  };
+}
+
+async function runStep(
+  harness: AgentHarness,
+  agent: AcpAgent,
+  subprocess?: string,
+): Promise<unknown> {
+  return await execute(
+    step.acpAgent({
+      id: 'placed',
+      agent,
+      prompt: 'go',
+      subprocess,
+    }),
+    undefined,
+    harness.createContext(),
+  ).catch((e: unknown) => e);
+}
+
+function agentOn(subprocess?: SubprocessAdapter | string): AcpAgent {
   return defineAcpAgent({
     agentId: 'placed',
     command: {
@@ -183,7 +253,9 @@ describe("the harness's subprocess adapter", () => {
           onSessionUpdate: () => undefined,
         }),
         reattach: handle,
-        subprocess: recording(environment),
+        subprocess: among({
+          environment: recording(environment),
+        }),
       })
       .catch((e: unknown) => e);
     assert(gone instanceof AcpConnectError);
@@ -199,7 +271,9 @@ describe("the harness's subprocess adapter", () => {
       command: 'cat',
     };
     const options = {
-      subprocess: recording(environment),
+      subprocess: among({
+        environment: recording(environment),
+      }),
     };
     await agentOn().spawn?.(cat, options);
     expect(environment.spawned).toEqual([
@@ -210,5 +284,83 @@ describe("the harness's subprocess adapter", () => {
       cat,
     ]);
     expect(environment.spawned).toHaveLength(1);
+  });
+});
+
+describe('named subprocess adapters', () => {
+  it('starts an agent that names none through the default', async () => {
+    const { laptop, builder, harness } = twoHosts();
+    await runStep(harness, agentOn());
+    expect(laptop.launched).toHaveLength(1);
+    expect(builder.launched).toHaveLength(0);
+  });
+
+  it("starts an agent through the adapter its preset names, before the harness's default", async () => {
+    const { laptop, builder, harness } = twoHosts();
+    const agent = agentOn('builder');
+    expect(agent.subprocess).toBe('builder');
+    await runStep(harness, agent);
+    expect(builder.launched).toHaveLength(1);
+    expect(laptop.launched).toHaveLength(0);
+  });
+
+  it("starts an agent through the adapter its step names, before the preset's name", async () => {
+    const { laptop, builder, harness } = twoHosts();
+    await runStep(harness, agentOn('builder'), 'laptop');
+    expect(laptop.launched).toHaveLength(1);
+    expect(builder.launched).toHaveLength(0);
+  });
+
+  it("starts an agent through the adapter its step names, before the preset's own adapter", async () => {
+    const { builder, harness } = twoHosts();
+    const own = seen();
+    await runStep(harness, agentOn(recording(own)), 'builder');
+    expect(builder.launched).toHaveLength(1);
+    expect(own.launched).toHaveLength(0);
+  });
+
+  it('fails a name the harness lacks, listing the names it has', async () => {
+    const { laptop, builder, harness } = twoHosts();
+    const error = await runStep(harness, agentOn('cloud'));
+    assert(error instanceof NoeticConfigError);
+    expect(error.code).toBe('ADAPTER_UNKNOWN');
+    expect(error.message).toContain("'laptop', 'builder'");
+    expect(laptop.launched).toHaveLength(0);
+    expect(builder.launched).toHaveLength(0);
+  });
+
+  it('fails a named adapter with no harness adapters to find it among', async () => {
+    const error = await agentOn('builder')
+      .connect({
+        host: frameworkCast<AcpClientHost>({
+          cwd: '/work',
+          threadId: 'named-subprocess',
+          onSessionUpdate: () => undefined,
+        }),
+      })
+      .catch((e: unknown) => e);
+    assert(error instanceof NoeticConfigError);
+    expect(error.code).toBe('ACP_SUBPROCESS_NAME_WITHOUT_HARNESS');
+  });
+
+  it('starts a process beside the agent through the named adapter', async () => {
+    const laptop = seen();
+    const builder = seen();
+    const hosts = {
+      laptop: recording(laptop),
+      builder: recording(builder),
+    };
+    const cat = {
+      command: 'cat',
+    };
+    await agentOn('builder').spawn?.(cat, {
+      subprocess: among(hosts),
+    });
+    expect(builder.spawned).toHaveLength(1);
+    await agentOn('builder').spawn?.(cat, {
+      subprocess: among(hosts, 'laptop'),
+    });
+    expect(laptop.spawned).toHaveLength(1);
+    expect(builder.spawned).toHaveLength(1);
   });
 });

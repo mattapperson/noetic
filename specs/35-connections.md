@@ -710,8 +710,9 @@ interface ConnectionIdentity { surface: string; instance: string; epoch?: number
 
 `ConnectOptions` carries `redact(value)`: a provider calls it with every
 credential it holds (a bearer token, an OAuth token), and the harness scrubs
-that value as it scrubs resolved secrets. It carries `subprocess` too, the
-harness's `environment.subprocess`, which `mcp()` hands to its `spawn`.
+that value as it scrubs resolved secrets. It carries `subprocess` too, a
+`SubprocessChoice` holding the harness's subprocess adapters
+(`08-runtime` § Named Adapters), which `mcp()` hands to its `spawn`.
 
 Each `ConnectionOperationInfo` in a manifest may carry `annotations` — the
 server's hints about the operation: `title`, `readOnlyHint`,

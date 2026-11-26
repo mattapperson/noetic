@@ -30,7 +30,7 @@ import type {
   AcpTransport,
   AcpWhenHostExits,
   Spawn,
-  SubprocessAdapter,
+  SubprocessChoice,
 } from './subprocess-adapter';
 import type { ToolIdentity } from './tool-activity';
 
@@ -711,10 +711,11 @@ export interface AcpConnectOptions {
   /** See {@link AcpWhenHostExits}. Default `'keep'`. */
   whenHostExits?: AcpWhenHostExits;
   /**
-   * The harness's `environment.subprocess`. An agent started by a command
-   * that names no adapter of its own runs here when this one has `open`.
+   * Where an agent started by a command may run: through the adapter the
+   * step names, else the agent's own, else the harness's default when that
+   * one has `open`.
    */
-  subprocess?: SubprocessAdapter;
+  subprocess?: SubprocessChoice;
 }
 
 /**
@@ -731,6 +732,12 @@ export interface AcpAgent {
    * observability, and error messages.
    */
   readonly agentId: string;
+  /**
+   * The harness subprocess adapter this agent names
+   * (`claudeCode({ subprocess: 'builder' })`). A step's own `subprocess` comes
+   * before it.
+   */
+  readonly subprocess?: string;
   /** Open a transport, run `initialize`, and return the negotiated connection. */
   connect(opts: AcpConnectOptions): Promise<AcpAgentConnection>;
   /**
@@ -875,6 +882,15 @@ export interface AcpAgentGrant {
   readonly modes?: ReadonlyArray<string>;
   /** The models a node may select. Default: any, since a model changes no permission. */
   readonly models?: ReadonlyArray<string>;
+  /**
+   * The harness subprocess adapters a node may name. A name moves the agent
+   * to another host, so the default is none: a node runs on the default.
+   */
+  readonly subprocess?: ReadonlyArray<string>;
+  /** The harness filesystem adapters a node may name. Default: none. */
+  readonly fs?: ReadonlyArray<string>;
+  /** The harness shell adapters a node may name. Default: none. */
+  readonly shell?: ReadonlyArray<string>;
 }
 
 /** @public The widest permission policy a node may set. */

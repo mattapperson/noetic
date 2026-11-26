@@ -23,6 +23,7 @@ function makeToolCtxWithHarness(harness: AgentHarnessContract): ToolExecutionCon
     harness,
     fs: harness.fs,
     shell: harness.shell,
+    adapters: harness.adapters,
     context: toolContext,
     assembledView: ctx.itemLog.items,
     lastStepMeta: null,

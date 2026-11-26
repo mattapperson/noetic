@@ -33,6 +33,12 @@ const AcpSessionRecordSchema = z.object({
    * record written before fingerprints were kept: such a session is accepted.
    */
   fingerprint: z.string().optional(),
+  /**
+   * The harness subprocess adapter the agent was started through, by name: a
+   * reattach handle means something to that adapter only. Absent on a record
+   * written before names were kept: such a handle is tried as it is.
+   */
+  subprocess: z.string().optional(),
 });
 
 /** The agent session a step opened, as stored. */

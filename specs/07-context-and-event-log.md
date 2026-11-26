@@ -23,6 +23,13 @@ interface Context<TState = unknown> {
   readonly span: Span;           // OpenTelemetry trace span (see 10-observability)
   readonly harness: AgentHarness;   // reference to the owning agent harness (see 08-runtime)
 
+  // The harness's adapters (see 08-runtime § Named Adapters). `fs`, `shell`
+  // and `subprocess` are each kind's default; `adapters` has all of them by name.
+  readonly fs: FsAdapter;
+  readonly shell: ShellAdapter;
+  readonly subprocess: SubprocessAdapter;
+  readonly adapters: AdapterSets;   // adapters.fs.get('builder'), adapters.shell.list()
+
   // Identifiers for context layer scope resolution (see 11-context-layer-system)
   readonly threadId: string;     // stable across calls in the same conversation
   readonly resourceId?: string;  // user, entity, or resource identifier

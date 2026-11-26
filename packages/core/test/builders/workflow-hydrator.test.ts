@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import type { ContextLayer } from '@noetic-tools/context';
 import type {
   AcpAgent,
+  Context,
   OutputCodec,
   ProcessSubprocessRequest,
   SpawnedSubprocess,
@@ -11,11 +12,14 @@ import type {
   Tool,
 } from '@noetic-tools/types';
 import {
+  adapterSets,
   frameworkCast,
   hashString,
   isNoeticConfigError,
   isServerToolSpec,
 } from '@noetic-tools/types';
+import { createInMemoryFsAdapter } from '../../src/adapters/in-memory-fs-adapter';
+import { createInMemoryShellAdapter } from '../../src/adapters/in-memory-shell-adapter';
 import type { HydrationContext } from '../../src/builders/workflow-hydrator';
 import { hydrateNode, hydrateWorkflow } from '../../src/builders/workflow-hydrator';
 import type { WorkflowDocument, WorkflowNode } from '../../src/schemas/workflow';
@@ -1464,6 +1468,36 @@ describe('hydrateNode — acp-agent', () => {
     expect(result.permissions?.allow).toHaveLength(1);
   });
 
+  test('carries the adapter names through to the step', () => {
+    const node: WorkflowNode = {
+      kind: 'acp-agent',
+      id: 'placed',
+      agent: 'claude-code',
+      prompt: 'go',
+      subprocess: 'builder',
+      fs: 'scratch',
+      shell: 'sandbox',
+    };
+    const result = hydrateNode(node, ctxWithAgent('claude-code'));
+    assert(result.kind === 'acp-agent');
+    expect(result.subprocess).toBe('builder');
+    expect(result.fs).toBe('scratch');
+    expect(result.shell).toBe('sandbox');
+    const plain = hydrateNode(
+      {
+        kind: 'acp-agent',
+        id: 'unplaced',
+        agent: 'claude-code',
+        prompt: 'go',
+      },
+      ctxWithAgent('claude-code'),
+    );
+    assert(plain.kind === 'acp-agent');
+    expect(plain.subprocess).toBeUndefined();
+    expect(plain.fs).toBeUndefined();
+    expect(plain.shell).toBeUndefined();
+  });
+
   test('throws UNKNOWN_ACP_AGENT_REFERENCE when no adapter is registered', () => {
     const node: WorkflowNode = {
       kind: 'acp-agent',
@@ -1703,6 +1737,76 @@ describe('hydrateNode — run', () => {
     const out = await result.execute('in', makeMockContext());
     expect(out).toBe('OUT:code-body|in');
     expect(calls).toHaveLength(1);
+  });
+
+  /** A context whose harness names `sandbox` (the given adapter) beside its default. */
+  function ctxWithSandbox(sandbox: SubprocessAdapter): Context {
+    return makeMockContext({
+      adapters: adapterSets({
+        fs: createInMemoryFsAdapter(),
+        shell: createInMemoryShellAdapter(),
+        subprocess: {
+          local: {
+            adapter: makeMockSubprocess().adapter,
+            default: true,
+          },
+          sandbox: {
+            adapter: sandbox,
+          },
+        },
+      }),
+    });
+  }
+
+  const sandboxed: WorkflowNode = {
+    kind: 'runCode',
+    id: 'compute-named',
+    execute: 'code-body',
+    subprocess: 'sandbox',
+  };
+
+  test("falls back to the harness's subprocess adapter of that name", async () => {
+    const { adapter, calls } = makeMockSubprocess();
+    const result = hydrateNode(sandboxed, makeHydrationContext());
+    assert(result.kind === 'runCode');
+    const out = await result.execute('in', ctxWithSandbox(adapter));
+    expect(out).toBe('OUT:code-body|in');
+    expect(calls).toHaveLength(1);
+  });
+
+  test("asks resolveSubprocess before the harness's adapters", async () => {
+    const hosts = makeMockSubprocess();
+    const harness = makeMockSubprocess();
+    const result = hydrateNode(sandboxed, {
+      ...makeHydrationContext(),
+      resolveSubprocess: (ref) => (ref === 'sandbox' ? hosts.adapter : undefined),
+    });
+    assert(result.kind === 'runCode');
+    await result.execute('in', ctxWithSandbox(harness.adapter));
+    expect(hosts.calls).toHaveLength(1);
+    expect(harness.calls).toHaveLength(0);
+  });
+
+  test("lists the harness's names when neither knows the ref", async () => {
+    const result = hydrateNode(
+      {
+        ...sandboxed,
+        subprocess: 'missing',
+      },
+      {
+        ...makeHydrationContext(),
+        resolveSubprocess: () => undefined,
+      },
+    );
+    assert(result.kind === 'runCode');
+    try {
+      await result.execute('in', ctxWithSandbox(makeMockSubprocess().adapter));
+      expect.unreachable('should have thrown');
+    } catch (e) {
+      assert(isNoeticConfigError(e));
+      expect(e.code).toBe('UNKNOWN_SUBPROCESS_REFERENCE');
+      expect(e.message).toContain("'local', 'sandbox'");
+    }
   });
 
   test('throws UNKNOWN_SUBPROCESS_REFERENCE when the named ref cannot be resolved', async () => {

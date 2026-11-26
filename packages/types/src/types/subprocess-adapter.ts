@@ -1,3 +1,5 @@
+import type { AdapterSet } from './adapter-set';
+
 //#region Status
 
 /** @public Lifecycle states for a subprocess handle. */
@@ -264,13 +266,25 @@ export interface SpawnCommand {
   readonly cwd?: string;
 }
 
+/**
+ * @public
+ * Where a process may run: the harness's subprocess adapters, and the one a
+ * step names among them.
+ */
+export interface SubprocessChoice {
+  /** The harness's `environment.subprocess`. */
+  readonly adapters: AdapterSet<SubprocessAdapter>;
+  /** The adapter a step names. It comes before any the process's owner names. */
+  readonly name?: string;
+}
+
 /** @public What the caller of a {@link Spawn} knows about where processes run. */
 export interface SpawnOptions {
   /**
-   * The harness's `environment.subprocess`. A `Spawn` bound to no adapter of
-   * its own starts the process here when this one has `open`.
+   * A `Spawn` bound to no adapter of its own starts the process through the
+   * named adapter, else the default when that one has `open`.
    */
-  readonly subprocess?: SubprocessAdapter;
+  readonly subprocess?: SubprocessChoice;
 }
 
 /**

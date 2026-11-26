@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { PassThrough, Readable, Writable } from 'node:stream';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import type { Spawn, SpawnCommand, SubprocessAdapter } from '@noetic-tools/types';
+import type { Spawn, SpawnCommand, SubprocessChoice } from '@noetic-tools/types';
 import { frameworkCast, isNoeticConfigError } from '@noetic-tools/types';
 import type { McpConfig } from '../src/config';
 import { mcp } from '../src/provider';
@@ -139,10 +139,10 @@ describe('stdio over spawn', () => {
     expect(fake.closed()).toBe(1);
   });
 
-  it("hands the spawn the harness's subprocess adapter", async () => {
-    const given: Array<SubprocessAdapter | undefined> = [];
+  it("hands the spawn the harness's subprocess adapters", async () => {
+    const given: Array<SubprocessChoice | undefined> = [];
     const fake = inProcessSpawn(echoServer());
-    const subprocess = frameworkCast<SubprocessAdapter>({});
+    const subprocess = frameworkCast<SubprocessChoice>({});
     const provider = mcp({
       command: 'issues-mcp',
       spawn: async (command, options) => {
