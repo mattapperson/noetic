@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.19 (2026-11-26)
+
+* feat(core): store a JSON workflow with each turn and resume on it (#184) ([3a8b17a](https://github.com/mattapperson/noetic/commit/3a8b17a)), closes [#184](https://github.com/mattapperson/noetic/issues/184)
+
 ## @noetic-tools/core-v5.22.0-next.18 (2026-11-26)
 
 * feat!: one subprocess adapter concept, and named fs, shell and subprocess adapters (#182) ([096c64d](https://github.com/mattapperson/noetic/commit/096c64d)), closes [#182](https://github.com/mattapperson/noetic/issues/182)
