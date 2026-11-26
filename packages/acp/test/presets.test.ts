@@ -108,7 +108,7 @@ describe('maintained bridge presets', () => {
     );
 
     it(`${id} charges each turn its own usage, unless told another reader or none`, async () => {
-      const turnOf = async (usageOf?: false | (() => undefined)) => {
+      const turnOf = async (usageOf?: false | (() => undefined), quotaOnly = false) => {
         const agent = make({
           ...(usageOf === undefined
             ? {}
@@ -126,10 +126,23 @@ describe('maintained bridge presets', () => {
             }),
             prompt: async () => ({
               stopReason: 'end_turn',
-              usage: {
-                inputTokens: 10,
-                outputTokens: 5,
-                totalTokens: 15,
+              ...(quotaOnly
+                ? {}
+                : {
+                    usage: {
+                      inputTokens: 10,
+                      outputTokens: 5,
+                      totalTokens: 15,
+                    },
+                  }),
+              _meta: {
+                quota: {
+                  token_count: {
+                    inputTokens: 40,
+                    outputTokens: 7,
+                    cachedInputTokens: 30,
+                  },
+                },
               },
             }),
             cancel: async () => undefined,
@@ -156,6 +169,15 @@ describe('maintained bridge presets', () => {
         inputTokens: 10,
         outputTokens: 5,
       });
+      expect(await turnOf(undefined, true)).toEqual(
+        id === 'codex'
+          ? {
+              inputTokens: 40,
+              outputTokens: 7,
+              cachedTokens: 30,
+            }
+          : undefined,
+      );
       expect(await turnOf(false)).toBeUndefined();
       expect(await turnOf(() => undefined)).toBeUndefined();
     });
