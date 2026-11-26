@@ -6,6 +6,8 @@
  * Neither package imports the other.
  */
 
+import type { AcpMachineFactory } from './acp';
+
 /**
  * A duplex byte stream: a process's stdio, or a socket.
  * @public
@@ -34,8 +36,17 @@ export interface SpawnCommand {
   readonly cwd?: string;
 }
 
+/** @public What the caller of a {@link Spawn} knows about where processes run. */
+export interface SpawnOptions {
+  /**
+   * Where the harness runs processes (`environment.subprocess.open`). A
+   * `Spawn` bound to no machine of its own starts the process here.
+   */
+  readonly machine?: AcpMachineFactory;
+}
+
 /**
  * Starts a process and returns its stdio as a byte stream.
  * @public
  */
-export type Spawn = (command: SpawnCommand) => Promise<ByteStream>;
+export type Spawn = (command: SpawnCommand, options?: SpawnOptions) => Promise<ByteStream>;

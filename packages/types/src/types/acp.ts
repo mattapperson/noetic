@@ -798,6 +798,11 @@ export interface AcpConnectOptions {
   reattach?: AcpReattachHandle;
   /** See {@link AcpWhenHostExits}. Default `'keep'`. */
   whenHostExits?: AcpWhenHostExits;
+  /**
+   * Where the harness runs processes (`environment.subprocess.open`). An agent
+   * started by a command that names no machine of its own starts here.
+   */
+  machine?: AcpMachineFactory;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type {
+  AcpMachineFactory,
   ConnectionEvent,
   ConnectionProvider,
   ConnectionsConfig,
@@ -365,6 +366,34 @@ describe('resolve', () => {
       }),
     );
     expect(isNoeticConfigError(e) && e.code).toBe('CONNECTION_UNKNOWN');
+  });
+
+  test('hands a provider the place the harness runs processes', async () => {
+    const machine: AcpMachineFactory = async () => {
+      throw new Error('not opened');
+    };
+    const inner = createInMemoryConnection(appOptions());
+    let given: AcpMachineFactory | undefined;
+    const runtime = createConnectionRuntime({
+      connections: {
+        app: {
+          name: 'app',
+          async connect(opts) {
+            given = opts.machine;
+            return await inner.connect(opts);
+          },
+        },
+      },
+      storage: makeStorage(),
+      artifacts: createInMemoryArtifactStore(),
+      machine,
+    });
+    opened.push(runtime);
+    await runtime.resolve({
+      name: 'app',
+      scope: scope(),
+    });
+    expect(given).toBe(machine);
   });
 
   test('connects lazily, reports status and emits connection_changed', async () => {

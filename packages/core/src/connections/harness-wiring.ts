@@ -9,6 +9,7 @@
  */
 
 import type {
+  AcpMachineFactory,
   ArtifactStore,
   ConnectionEntries,
   ConnectionTrigger,
@@ -73,6 +74,7 @@ export interface HarnessConnectionsOptions {
   readonly storage: StorageAdapter;
   readonly artifacts: ArtifactStore;
   readonly secrets?: SecretResolver;
+  readonly machine?: AcpMachineFactory;
   /** Every session broadcaster, for events that concern no one context. */
   readonly broadcasters: () => Iterable<EventBroadcaster>;
 }
@@ -276,6 +278,7 @@ export function createHarnessConnections(options: HarnessConnectionsOptions): Ha
     storage: options.storage,
     artifacts: options.artifacts,
     secrets: options.secrets,
+    machine: options.machine,
     hooks: gateHooks(options.harness),
     onFrameworkEvent: (event) => broadcast(options, event),
   });

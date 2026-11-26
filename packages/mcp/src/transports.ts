@@ -16,6 +16,7 @@ import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import type { AcpMachineFactory } from '@noetic-tools/types';
 import type { McpAuth, McpFetch, McpHttpServer, McpServerTarget, McpStdioServer } from './config';
 import { isStdioTarget, isTransportTarget, namedRecord } from './config';
 import type { HttpTransportOptions } from './sse-transport';
@@ -104,6 +105,8 @@ export function originAwareFetch(
 export interface TransportHooks {
   /** Registers a credential so the harness scrubs it (`ConnectOptions.redact`). */
   readonly redact?: (value: string) => void;
+  /** Where the harness runs processes (`ConnectOptions.machine`), passed to a stdio server's `spawn`. */
+  readonly machine?: AcpMachineFactory;
 }
 
 function redactTokens(
@@ -297,24 +300,28 @@ export async function createTransport(
     redactConfigured(target, hooks.redact);
   }
   if (isStdioTarget(target) && target.spawn) {
-    return new SpawnedTransport(target.spawn, {
-      command: target.command,
-      ...(target.args === undefined
-        ? {}
-        : {
-            args: target.args,
-          }),
-      ...(target.env === undefined
-        ? {}
-        : {
-            env: namedRecord(target.env),
-          }),
-      ...(target.cwd === undefined
-        ? {}
-        : {
-            cwd: target.cwd,
-          }),
-    });
+    return new SpawnedTransport(
+      target.spawn,
+      {
+        command: target.command,
+        ...(target.args === undefined
+          ? {}
+          : {
+              args: target.args,
+            }),
+        ...(target.env === undefined
+          ? {}
+          : {
+              env: namedRecord(target.env),
+            }),
+        ...(target.cwd === undefined
+          ? {}
+          : {
+              cwd: target.cwd,
+            }),
+      },
+      hooks.machine,
+    );
   }
   if (isStdioTarget(target)) {
     return new StdioClientTransport({

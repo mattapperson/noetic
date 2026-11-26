@@ -621,6 +621,8 @@ interface SubprocessAdapter {
 - `listLive()` enumerates every handle the adapter currently treats as live. Used by host recovery to rediscover running children on startup.
 - `reattach(handleId)` rebinds to a persisted handle, returning `null` when the id is unknown or the underlying execution is gone.
 
+Those two cover a child the adapter ran to completion. A process whose stdio the caller holds — an ACP agent — goes through the adapter's `open`, which returns a machine: its `launch` hands back the stream and a reattach handle, the step stores that handle with its pending entries, and a resumed step gives it to the machine's `attach` (`27-acp-agent-steps` § The harness's machine, § Resuming a step).
+
 ### Manifest shape (local adapter)
 
 The local OS-process adapter persists one manifest entry per live handle:

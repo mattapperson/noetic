@@ -138,9 +138,8 @@ interface AcpTransport {
 }
 ```
 
-This is deliberately **not** built on `SubprocessAdapter` — that contract returns
-a durable handle with no attached stdio — nor on `ShellAdapter`, which is
-one-shot.
+`ShellAdapter` cannot carry it: a shell command runs once and returns. The
+harness's `SubprocessAdapter` can, through `open` (§ The harness's machine).
 
 An agent is reached one of two ways:
 
@@ -172,6 +171,42 @@ An agent is reached one of two ways:
   `gemini()` without `trustWorkspace: true` refuses tools the same way, with
   `ACP_AGENT_CANNOT_TAKE_TOOLS`: Gemini starts no MCP server in a folder it
   does not trust (`38-acp-tools` § Gemini CLI and folder trust).
+
+### The harness's machine
+
+Where processes run is the harness's to say, like its storage and its
+filesystem. `SubprocessAdapter.open` is an `AcpMachineFactory`: the place that
+adapter's processes run, for a process whose stdio the caller holds.
+
+```ts
+new AgentHarness({
+  environment: {
+    subprocess: { ...createInMemorySubprocessAdapter(), open: webSocketMachine({ url, token }) },
+  },
+});
+```
+
+A command agent runs on the first of these that is given:
+
+1. the `machine` the agent names (`claudeCode({ machine })`);
+2. the harness's `environment.subprocess.open`;
+3. this machine (`localMachine`).
+
+The core passes the harness's to `AcpAgent.connect` as
+`AcpConnectOptions.machine`, on a first connection and on a reattach alike, so
+a resumed step reaches the agent it left running through the same place
+(§ Resuming a step) and a host writes that place once, not on every agent.
+
+A process started beside the agent follows it. A `Spawn` takes
+`{ machine }` as its second argument, and `agent.spawn` starts the process on
+the agent's own machine, else on the one it is given, else here. A connection
+provider is given the harness's as `ConnectOptions.machine`, and `mcp()` hands
+it to its server's `spawn`, so `mcp({ command, spawn: agent.spawn })` and a
+JSON `acp-agent` node's stdio `{ "mcp" }` entries start where the agent runs.
+A stdio `mcp()` server given no `spawn` is a local subprocess, as before.
+
+An adapter with no `open` — the in-memory and local adapters — leaves every
+agent on this machine.
 
 | Machine or transport | Use |
 |---|---|
@@ -833,7 +868,8 @@ and removes it when the step finishes. A resumed step that finds one, written by
 the same agent id:
 
 0. with a reattach handle, reaches the agent that kept working (§ A local agent
-   outlives its host) and attaches to the live session. Its first turn collects
+   outlives its host), on the machine a first connection would use (§ The
+   harness's machine), and attaches to the live session. Its first turn collects
    the turn the dead host left running — every update of it as this step's
    output, the requests the agent still waits on answered by this host, then its
    result — instead of prompting. Only when no turn was running does it prompt,

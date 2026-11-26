@@ -43,7 +43,11 @@ export interface DefineAcpAgentOptions {
   agentId: string;
   /** Starts the agent: this command, run on {@link machine}. */
   command?: SpawnCommand;
-  /** Where {@link command} runs. This machine by default. */
+  /**
+   * Where {@link command} runs. Without one it runs where the harness runs
+   * processes (`environment.subprocess.open`), and on this machine when the
+   * harness names no such place.
+   */
   machine?: AcpMachineFactory;
   /**
    * Opens the byte stream to an agent this package does not start. Used in
@@ -104,7 +108,9 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
     specificationVersion: 'acp-v1',
     agentId: def.agentId,
     refusesTools: def.command ? undefined : attachedRefusal(def.tools ?? sessionToolWiring),
-    spawn: def.command ? spawnOn(def.machine ?? lazyLocalMachine(def.agentId)) : undefined,
+    spawn: def.command
+      ? (command, options) => spawnOn(machineOf(def, options?.machine))(command)
+      : undefined,
     ...(def.toolIdOf
       ? {
           toolIdOf: def.toolIdOf,
@@ -120,6 +126,7 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
         cwd: opts.host.cwd,
         signal,
         whenHostExits,
+        machine: opts.machine,
       });
       let bridge: ToolBridge | undefined;
       try {
@@ -182,10 +189,12 @@ async function openTarget(
     cwd,
     signal,
     whenHostExits,
+    machine: given,
   }: {
     cwd: string;
     signal: AbortSignal | undefined;
     whenHostExits: AcpWhenHostExits;
+    machine: AcpMachineFactory | undefined;
   },
 ): Promise<Opened> {
   const command = def.command;
@@ -214,7 +223,10 @@ async function openTarget(
       close: async () => undefined,
     };
   }
-  const machine: AcpMachine = await (def.machine ?? lazyLocalMachine(def.agentId))({
+  const machine: AcpMachine = await machineOf(
+    def,
+    given,
+  )({
     signal,
     whenHostExits,
   });
@@ -232,6 +244,17 @@ async function openTarget(
     reach: (bridge) => machine.reach(bridge),
     close: () => machine.close(),
   };
+}
+
+/**
+ * Where a command agent runs: the machine it names, else the one the harness
+ * runs processes on, else this machine.
+ */
+function machineOf(
+  def: DefineAcpAgentOptions,
+  given: AcpMachineFactory | undefined,
+): AcpMachineFactory {
+  return def.machine ?? given ?? lazyLocalMachine(def.agentId);
 }
 
 /**
@@ -290,7 +313,10 @@ async function reattachTo(
       message: `ACP agent '${def.agentId}' attaches through a transport and cannot be reattached.`,
     });
   }
-  const machine = await (def.machine ?? lazyLocalMachine(def.agentId))({
+  const machine = await machineOf(
+    def,
+    opts.machine,
+  )({
     signal,
     whenHostExits,
   });

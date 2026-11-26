@@ -19,6 +19,7 @@
  */
 
 import type {
+  AcpMachineFactory,
   AnyProfile,
   ArtifactStore,
   Connection,
@@ -97,6 +98,8 @@ export interface ConnectionRuntimeOptions {
   readonly storage: StorageAdapter;
   readonly artifacts: ArtifactStore;
   readonly secrets?: SecretResolver;
+  /** Where the harness runs processes (`environment.subprocess.open`), handed to providers as they connect. */
+  readonly machine?: AcpMachineFactory;
   readonly hooks?: GateHooks;
   readonly onFrameworkEvent?: (event: ConnectionFrameworkEventRecord) => void;
   /** Profiles known up front (from the graph's handles); handles add theirs when they resolve. */
@@ -895,6 +898,7 @@ class Runtime implements ConnectionRuntime {
         ],
         redact: this.redact,
         secrets: this.options.secrets,
+        machine: this.options.machine,
       });
       if (entry.state === 'closed') {
         await runEvery(connections.map((connection) => () => connection.release()));
@@ -1047,6 +1051,7 @@ class Runtime implements ConnectionRuntime {
         ],
         redact: this.redact,
         secrets: this.options.secrets,
+        machine: this.options.machine,
       }),
       onLease: (lease, change) => this.emitLease(name, lease, change),
     });

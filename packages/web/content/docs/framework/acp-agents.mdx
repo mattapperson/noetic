@@ -758,6 +758,26 @@ npx @noetic-tools/acp serve --stdio --agent claude-code \
 
 A stdio MCP server that depends on the agent's machine — one that reads its workspace — runs there too: `spawnOn(machine)` starts it and hands back its stdio, so noetic stays its client. Every command agent carries one as `agent.spawn`; pass it to `mcp({ name, command, spawn: agent.spawn })`. It gets the environment the MCP SDK gives a local server — that machine's `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER`, plus its own `env` — not the agent's.
 
+A host that runs every agent in one place says so once, on the harness, and leaves `machine` off the presets:
+
+```ts
+import { AgentHarness, createInMemorySubprocessAdapter } from '@noetic-tools/core';
+import { webSocketMachine } from '@noetic-tools/acp/remote';
+
+const harness = new AgentHarness({
+  name: 'builder',
+  params: {},
+  environment: {
+    subprocess: {
+      ...createInMemorySubprocessAdapter(),
+      open: webSocketMachine({ url: 'wss://build-host:7000', token: process.env.RUNNER_TOKEN ?? '' }),
+    },
+  },
+});
+```
+
+`environment.subprocess.open` is where the harness runs processes. An agent runs on the `machine` it names, else there, else on this machine. A resumed step reattaches through the same place, and `agent.spawn` starts an MCP server there too.
+
 To attach to an agent someone else started, supply a `transport` — anything that yields a duplex byte stream:
 
 ```ts
@@ -819,6 +839,7 @@ Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, 
 | `loopbackMachine(toAgent)` | The same agent as a machine, so a test step can give it tools. |
 | `localMachine()` | This machine: the default for every preset. Lives at `@noetic-tools/acp/stdio`. |
 | `spawnOn(machine)` | A `Spawn` that starts a process on `machine` and returns its stdio; a command agent's `agent.spawn`. |
+| `SubprocessAdapter.open` | The harness's machine (`environment.subprocess.open`): where an agent that names no `machine` runs and reattaches. |
 | `webSocketMachine(opts)`, `commandMachine(opts)`, `runnerMachine(openLink)` | A remote runner over WebSocket, over a command's stdio, or over any `FrameLink`. Live at `@noetic-tools/acp/remote`. |
 | `listenAcpRunner(opts)`, `serveAcpRunner(link)`, `serveAcpRunnerOverStdio()` | The runner itself, as the `noetic-acp serve` bin uses it. Live at `@noetic-tools/acp/remote`. |
 | `AcpRunnerGrant` | One entry of `AcpRunnerOptions.allow`: a `command`, its exact `args`, and the `env` names a host may set for it. Lives at `@noetic-tools/acp/remote`. |

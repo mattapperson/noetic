@@ -1,3 +1,5 @@
+import type { AcpMachineFactory } from './acp';
+
 //#region Status
 
 /** @public Lifecycle states for a subprocess handle. */
@@ -222,6 +224,14 @@ export interface SubprocessAdapter {
    * persisted manifest.
    */
   listLive(): Promise<ReadonlyArray<SubprocessHandle>>;
+  /**
+   * Opens the place this adapter's processes run, for a process whose stdio
+   * the caller holds: an ACP agent, and a stdio MCP server beside it. An agent
+   * that names no machine of its own starts here, and a resumed step reaches
+   * the agent it left running through the machine's `attach`. Absent on an
+   * adapter that hands back no stdio; such an agent starts on this machine.
+   */
+  open?: AcpMachineFactory;
 }
 
 //#endregion

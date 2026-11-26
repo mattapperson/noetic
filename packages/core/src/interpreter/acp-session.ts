@@ -329,6 +329,7 @@ export async function openSession<TContext, I, O>(opts: {
       host: opts.host,
       signal: abortSignalOf(opts.baseCtx),
       whenHostExits: whenHostExitsOf(opts.baseCtx),
+      machine: opts.baseCtx.subprocess.open,
     };
     const kept = await reattachTo(opts.agent, connectOptions, {
       reattach: opts.reattach,

@@ -490,7 +490,7 @@ The report is `{ executionId, reason, durationMs, finished, cutOff }`, the same 
 
 `{name}:drain_started` lists the calls in flight when the drain begins.
 
-The `subprocess` adapter is the companion surface: it persists handle manifests for every long-lived child so a restarted host can call `harness.subprocess.listLive()` + `harness.restore(executionId)` per live child to rejoin the execution. Full durable-execution model, storage layout, and IPC protocol live on the [Durability](/docs/framework/durability) page.
+The `subprocess` adapter is the companion surface: it persists handle manifests for every long-lived child so a restarted host can call `harness.subprocess.listLive()` + `harness.restore(executionId)` per live child to rejoin the execution. Its optional `open` is where the harness runs a process whose stdio it holds, such as an [ACP agent](/docs/framework/acp-agents#where-the-agent-runs). Full durable-execution model, storage layout, and IPC protocol live on the [Durability](/docs/framework/durability) page.
 
 ## Tracing
 

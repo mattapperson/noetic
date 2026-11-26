@@ -888,6 +888,7 @@ export type {
   ByteStream,
   Spawn,
   SpawnCommand,
+  SpawnOptions,
   ToolBridgeAddress,
 } from '@noetic-tools/types';
 /** @public */

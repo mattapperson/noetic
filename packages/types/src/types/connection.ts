@@ -11,6 +11,7 @@
 
 import { z } from 'zod';
 import type { Expression } from '../schemas/expression';
+import type { AcpMachineFactory } from './acp';
 import type { ArtifactStore } from './artifact-store';
 import type {
   AnyExtension,
@@ -409,6 +410,11 @@ export interface ConnectOptions {
   readonly redact?: (value: string) => void;
   /** The harness's `environment.secrets`, for a provider that reads its credentials by name. */
   readonly secrets?: SecretResolver;
+  /**
+   * Where the harness runs processes (`environment.subprocess.open`), for a
+   * provider that starts one through a {@link Spawn}.
+   */
+  readonly machine?: AcpMachineFactory;
 }
 
 /** @public A live connection, as a provider implements it. Steps and tools never hold one directly. */
