@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.17 (2026-11-26)
+
+* Run Cloudflare cron work on durable Noetic harnesses (#183) ([0e97b35](https://github.com/mattapperson/noetic/commit/0e97b35)), closes [#183](https://github.com/mattapperson/noetic/issues/183)
+
 ## @noetic-tools/core-v5.22.0-next.16 (2026-11-26)
 
 * feat(core): stream context windows from the harness (#181) ([1695950](https://github.com/mattapperson/noetic/commit/1695950)), closes [#181](https://github.com/mattapperson/noetic/issues/181)
