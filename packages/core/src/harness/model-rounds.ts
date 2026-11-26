@@ -32,6 +32,8 @@ import { isFunctionCall } from '../interpreter/typeguards';
 import type { StepLedger } from '../runtime/durable/step-ledger';
 import { hashStepInput } from '../runtime/durable/step-ledger';
 import type { ToolCallResult } from '../runtime/tool-call';
+import type { Bill } from './call-spend';
+import { noBill } from './call-spend';
 import { ContextImpl } from './deps/runtime';
 
 //#region Types
@@ -429,3 +431,139 @@ export function roundPath(path: string, round: number): string {
 }
 
 //#endregion
+
+interface RoundJournal {
+  readonly enabled: boolean;
+  mark(round: number): void;
+  marked(round: number): boolean;
+  checkpoint(items: Item[]): void;
+  wait(): Promise<void>;
+  record(bill: Bill): Promise<void>;
+  drop(): Promise<void>;
+  check<
+    T extends {
+      kind: 'continue' | 'ok';
+    },
+  >(check: () => T): Promise<T>;
+}
+
+/** Queue stream checkpoints in order, then keep or drop the finished round. */
+export function openRoundJournal({
+  roundLedger,
+  allItems,
+  conversationInput,
+  signal,
+  emit,
+}: {
+  roundLedger: RoundLedger | undefined;
+  allItems: Item[];
+  conversationInput: unknown[];
+  signal: AbortSignal | undefined;
+  emit: (eventType: string, data: Record<string, unknown>) => void;
+}): RoundJournal {
+  // Where the loop's lists stood when the current round began, for its record.
+  let marks = {
+    round: -1,
+    log: 0,
+    input: 0,
+    items: 0,
+  };
+  const markRound = (round: number): void => {
+    marks = {
+      round,
+      log: roundLedger?.mark() ?? 0,
+      input: conversationInput.length,
+      items: allItems.length,
+    };
+  };
+  // The current round's checkpoint writes, in order. Its own record waits for
+  // them, so a late checkpoint never replaces it.
+  let checkpoints: Promise<void> = Promise.resolve();
+  const writeRound = async (record: RoundRecord): Promise<void> => {
+    if (!roundLedger || signal?.aborted) {
+      return;
+    }
+    if (!(await roundLedger.record(marks.round, marks.log, record))) {
+      return;
+    }
+    emit('model_round_recorded', {
+      round: marks.round,
+      itemIds: itemIds(record.items),
+      done: !record.cut,
+    });
+  };
+  // A rejected round is asked again on the conversation it was asked on, or fails
+  // the call, so a resume must not go on from the items it streamed. The same goes
+  // for the round that ends the loop.
+  const dropCheckpoints = async (): Promise<void> => {
+    await checkpoints;
+    await roundLedger?.drop(marks.round);
+  };
+  const rejectRound = async <
+    T extends {
+      kind: 'continue' | 'ok';
+    },
+  >(
+    check: () => T,
+  ): Promise<T> => {
+    let result: T;
+    try {
+      result = check();
+    } catch (error: unknown) {
+      await dropCheckpoints();
+      throw error;
+    }
+    if (result.kind === 'continue') {
+      await dropCheckpoints();
+    }
+    return result;
+  };
+  // Record a round the loop goes on from, so a resumed loop can replay it.
+  const recordRound = async (bill: Bill): Promise<void> => {
+    await checkpoints;
+    await writeRound({
+      items: allItems.slice(marks.items),
+      input: conversationInput.slice(marks.input),
+      ...bill,
+    });
+  };
+  // Record the output items a round has finished while it still streams, so a
+  // resume goes on from them rather than making them again. The input holds only
+  // what the round began with: the tool round adds each function call with its
+  // output, as it does for a round that finishes.
+  const checkpoint = (finished: Item[]): void => {
+    if (!roundLedger) {
+      return;
+    }
+    const record: RoundRecord = {
+      items: [
+        ...allItems.slice(marks.items),
+        ...finished,
+      ],
+      input: conversationInput.slice(marks.input),
+      ...noBill,
+      cut: true,
+    };
+    checkpoints = checkpoints.then(() => writeRound(record));
+  };
+  return {
+    enabled: roundLedger !== undefined,
+    mark: markRound,
+    marked: (round: number) => marks.round === round,
+    checkpoint,
+    wait: () => checkpoints,
+    record: recordRound,
+    drop: dropCheckpoints,
+    check: rejectRound,
+  };
+}
+
+function itemIds(items: ReadonlyArray<Item>): string[] {
+  return items.flatMap((item) =>
+    'id' in item && typeof item.id === 'string'
+      ? [
+          item.id,
+        ]
+      : [],
+  );
+}

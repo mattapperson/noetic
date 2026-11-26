@@ -270,13 +270,72 @@ async function runInvokeTool<TContext, I, O>(
     }
   }
 
+  const effect = await armEffect({
+    tool: step.tool,
+    baseCtx,
+    harness,
+    held,
+    refuse,
+  });
+  if (effect.kind === 'answered') {
+    emitCompleted(false, JSON.stringify(effect.output), effect.output);
+    return frameworkCast<O>(effect.output);
+  }
+  // The tool reported back with an error: its outcome is known, and it may be tried
+  // again. A result is another matter. It is on record only once the step's own
+  // ledger entry is written, after this returns, so the intent stays until the
+  // run's records are cleared: a host that dies in between resumes to a held
+  // call, not to the tool running a second time unasked.
+  const disarm = effect.disarm;
+
+  return runApprovedTool({
+    step,
+    baseCtx,
+    harness,
+    held,
+    parsedArgs,
+    disarm,
+    emitCompleted,
+  });
+}
+
+/** Settle a prior intent or record this attempt before the tool can take effect. */
+async function armEffect({
+  tool,
+  baseCtx,
+  harness,
+  held,
+  refuse,
+}: {
+  tool: Tool;
+  baseCtx: Context<ContextData>;
+  harness: AgentHarnessContract;
+  held: {
+    callId: string;
+    name: string;
+    args: unknown;
+    argsHash: string;
+  };
+  refuse: (decision: SteeringDecision) => never;
+}): Promise<
+  | {
+      kind: 'answered';
+      output: unknown;
+    }
+  | {
+      kind: 'run';
+      disarm: () => Promise<void>;
+    }
+> {
+  const holds = heldCallsOf(harness);
+  const holdScope = heldScopeOf(baseCtx);
   // A durable tool is not repeated unasked (spec 23a § Tool calls in a round). An
   // intent with no result means a host died while it ran: a person says what happened.
-  const durable = step.tool.durable === true;
+  const durable = tool.durable === true;
   if (durable && baseCtx instanceof ContextImpl) {
     baseCtx.ledger?.noteEffect(baseCtx.currentDispatch()?.path);
   }
-  if (durable && (await holds.wasStarted(holdScope, holdId, held.argsHash))) {
+  if (durable && (await holds.wasStarted(holdScope, held.callId, held.argsHash))) {
     const answer = await holdAndWait({
       harness,
       ctx: baseCtx,
@@ -286,8 +345,10 @@ async function runInvokeTool<TContext, I, O>(
       },
     });
     if (answer.resolution?.hasOutput) {
-      emitCompleted(false, JSON.stringify(answer.resolution.output), answer.resolution.output);
-      return frameworkCast<O>(answer.resolution.output);
+      return {
+        kind: 'answered',
+        output: answer.resolution.output,
+      };
     }
     const action = answer.resolution?.action ?? SteeringAction.Deny;
     if (action !== SteeringAction.Allow) {
@@ -298,19 +359,42 @@ async function runInvokeTool<TContext, I, O>(
     }
   }
   if (durable && mayWriteHolds(baseCtx)) {
-    await holds.arm(holdScope, holdId, held.argsHash);
+    await holds.arm(holdScope, held.callId, held.argsHash);
   }
-  // The tool reported back with an error: its outcome is known, and it may be tried
-  // again. A result is another matter. It is on record only once the step's own
-  // ledger entry is written, after this returns, so the intent stays until the
-  // run's records are cleared: a host that dies in between resumes to a held
-  // call, not to the tool running a second time unasked.
-  const disarm = async (): Promise<void> => {
-    if (durable && mayWriteHolds(baseCtx)) {
-      await holds.disarm(holdScope, holdId);
-    }
-  };
 
+  return {
+    kind: 'run',
+    disarm: async () => {
+      if (durable && mayWriteHolds(baseCtx)) {
+        await holds.disarm(holdScope, held.callId);
+      }
+    },
+  };
+}
+
+/** Run the approved call and keep its intent until the step records its result. */
+async function runApprovedTool<TContext, I, O>({
+  step,
+  baseCtx,
+  harness,
+  held,
+  parsedArgs,
+  disarm,
+  emitCompleted,
+}: {
+  step: StepInvokeTool<TContext, I, O>;
+  baseCtx: Context<ContextData>;
+  harness: AgentHarnessContract;
+  held: {
+    callId: string;
+    name: string;
+    args: unknown;
+    argsHash: string;
+  };
+  parsedArgs: I;
+  disarm: () => Promise<void>;
+  emitCompleted: (error: boolean, output?: string, result?: unknown) => void;
+}): Promise<O> {
   emitToolUi({
     ctx: baseCtx,
     tool: step.tool,
@@ -321,7 +405,7 @@ async function runInvokeTool<TContext, I, O>(
   try {
     // The step's place in the run is its key: a resumed step sends the same one.
     const toolCtx = buildToolExecutionContext(baseCtx, harness, {
-      recordId: holdId,
+      recordId: held.callId,
     });
     const execResult = step.tool.execute(parsedArgs, toolCtx);
 

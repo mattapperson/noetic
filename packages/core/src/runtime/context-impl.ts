@@ -105,7 +105,7 @@ export class ContextImpl implements Context<ContextData> {
   /**
    * Shared channel store for cross-context communication. Inherited by
    * `inParallel` / `spawn` children so channels published by a sibling are visible
-   * to peers — see `executeInParallel` and `executeSpawn` in `interpreter/execute-action.ts`
+   * to peers — see `executeInParallel` and `executeSpawn` in the interpreter
    * and `interpreter/execute-control.ts`.
    * @internal
    */

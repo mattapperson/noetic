@@ -21,7 +21,7 @@ import { convertTools, toolsOnWire } from '../src/adapters/openrouter';
 import { callModel, invokeTool } from '../src/builders/step-builders';
 import { tool } from '../src/builders/tool-builder';
 import { AgentHarness } from '../src/harness/agent-harness';
-import { executeCallModel } from '../src/interpreter/execute-action';
+import { executeCallModel } from '../src/interpreter/execute-call-model';
 import { executeInvokeTool } from '../src/interpreter/execute-invoke-tool';
 import { executeToolCall, resolveWireJsonSchema } from '../src/runtime/tool-call';
 import {

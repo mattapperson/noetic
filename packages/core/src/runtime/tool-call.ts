@@ -28,7 +28,7 @@ import {
   validateSchema,
 } from '@noetic-tools/types';
 import { z } from 'zod';
-import { sanitizeToolNameForWire } from '../util/tool-name';
+import { findTool } from '../util/tool-name';
 import type { HeldRecord, HoldDue } from './held-calls';
 import {
   HoldSignal,
@@ -200,9 +200,7 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
   // `plan/updatePrd` used by steering whitelists, skill docs, and the
   // `plan()` layer's `beforeToolCall` hook) stays intact while the wire name is
   // provider-compliant.
-  const matchedTool = params.tools.find(
-    (t) => t.name === params.toolName || sanitizeToolNameForWire(t.name) === params.toolName,
-  );
+  const matchedTool = findTool(params.tools, params.toolName);
   if (!matchedTool) {
     return {
       output: `Error: unknown tool '${params.toolName}'`,
@@ -215,18 +213,10 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
   const scope = heldScopeOf(params.context);
   const recordId = recordIdOf(params);
   const prior = recordId === undefined ? undefined : await holds.load(scope, recordId);
-  if (!prior && params.layers && params.layers.length > 0) {
-    // The tool's own name, as the approver below gets it: a layer's allowlist
-    // names `plan/updatePrd`, never the `plan_updatePrd` the wire carries.
-    const decision = await params.harness.beforeToolCall(
-      params.layers,
-      matchedTool.name,
-      params.args,
-      params.context,
-      params.callId,
-    );
-    if (decision.action !== SteeringAction.Allow) {
-      return refusedResult(decision);
+  if (!prior) {
+    const refusal = await checkToolLayers(params, matchedTool);
+    if (refusal) {
+      return refusal;
     }
   }
 
@@ -245,51 +235,99 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
   // A person may answer an unknown outcome with "run it again".
   const rerun = held?.reason === 'outcome' && held.resolution?.action === SteeringAction.Allow;
   if (held && held.reason !== 'approval' && !rerun) {
-    if (held.resolution?.hasOutput) {
-      return {
-        output: toolOutputText(held.resolution.output),
-        result: held.resolution.output,
-        settled: true,
-      };
-    }
-    const refusal = held.resolution?.action;
-    if (refusal !== undefined) {
-      return {
-        ...refusedResult({
-          action: refusal,
-          guidance: held.resolution?.guidance,
-        }),
-        settled: true,
-      };
-    }
-    if (isOverdue(held, holds.now())) {
-      return {
-        output: `Error: nobody answered '${matchedTool.name}' before the hold ran out`,
-        error: true,
-        settled: true,
-      };
-    }
-    // Still held, asked again by this host: the hold names who asks as this
-    // host sees it.
-    const current =
-      params.scope !== undefined && mayWriteHolds(params.context)
-        ? await holds.rescope(heldScopeOf(params.context), held.callId, params.scope)
-        : undefined;
-    return {
-      output: '',
-      held: toHeldCall(current ?? held),
-    };
+    return resumeHeldCall(params, matchedTool, held);
   }
 
+  const approval = await approveCall(params, {
+    tool: matchedTool,
+    args: parsedArgs,
+    recordId,
+    rerun,
+    wasHeld,
+  });
+  if (approval.kind === 'stop') {
+    return approval.result;
+  }
+  // A durable tool must not be repeated unasked. An intent record says it started;
+  // finding one with no result means a host died while it ran, and only a person
+  // can say whether its effect landed.
+  const armed = matchedTool.durable === true && recordId !== undefined;
+  if (armed) {
+    const waiting = await armToolCall({
+      params,
+      tool: matchedTool,
+      args: parsedArgs,
+      recordId,
+      rerun,
+    });
+    if (waiting) {
+      return waiting;
+    }
+  }
+  const executed = await runMatchedTool(params, matchedTool, parsedArgs);
+  return {
+    ...executed,
+    approval: approval.outcome,
+    settled: wasHeld && !rerun && executed.held === undefined,
+    armed,
+  };
+}
+
+async function checkToolLayers(
+  params: ExecuteToolCallParams,
+  tool: Tool,
+): Promise<ToolCallResult | undefined> {
+  if (!params.layers?.length) {
+    return;
+  }
+  // Layer rules see the tool's own name, not its wire name.
+  const decision = await params.harness.beforeToolCall(
+    params.layers,
+    tool.name,
+    params.args,
+    params.context,
+    params.callId,
+  );
+  if (decision.action !== SteeringAction.Allow) {
+    return refusedResult(decision);
+  }
+}
+
+/** Ask for approval before arming an effect, unless this rerun was already approved. */
+async function approveCall(
+  params: ExecuteToolCallParams,
+  {
+    tool,
+    args,
+    recordId,
+    rerun,
+    wasHeld,
+  }: {
+    tool: Tool;
+    args: unknown;
+    recordId: string | undefined;
+    rerun: boolean;
+    wasHeld: boolean;
+  },
+): Promise<
+  | {
+      kind: 'run';
+      outcome?: ApprovalOutcome;
+    }
+  | {
+      kind: 'stop';
+      result: ToolCallResult;
+    }
+> {
   let approval: ToolApproval | undefined;
   try {
     // A call a person just said to run again was approved the first time it ran.
     approval =
-      matchedTool.needsApproval && !rerun
+      tool.needsApproval && !rerun
         ? await askApproval({
             harness: params.harness,
-            toolName: matchedTool.name,
-            toolArgs: parsedArgs,
+            toolName: tool.name,
+            toolArgs: args,
             callId: params.callId,
             recordId,
             ctx: params.context,
@@ -299,51 +337,113 @@ export async function executeToolCall(params: ExecuteToolCallParams): Promise<To
     if (!(e instanceof HoldSignal) || recordId === undefined) {
       throw e;
     }
-    return holdCall(params, {
+    const result = await holdCall(params, {
       callId: recordId,
-      tool: matchedTool,
-      args: parsedArgs,
+      tool: tool,
+      args: args,
       reason: 'approval',
       due: e.due,
     });
+    return {
+      kind: 'stop',
+      result,
+    };
   }
   if (approval && approval.decision.action !== SteeringAction.Allow) {
     return {
-      ...refusedResult(approval.decision),
-      approval: approval.outcome,
-      settled: wasHeld,
+      kind: 'stop',
+      result: {
+        ...refusedResult(approval.decision),
+        approval: approval.outcome,
+        settled: wasHeld,
+      },
     };
   }
-  // A durable tool must not be repeated unasked. An intent record says it started;
-  // finding one with no result means a host died while it ran, and only a person
-  // can say whether its effect landed.
-  const armed = matchedTool.durable === true && recordId !== undefined;
-  if (armed && recordId !== undefined) {
-    const argsHash = heldArgsHash(matchedTool.name, parsedArgs);
-    if (!rerun && (await holds.wasStarted(scope, recordId, argsHash))) {
-      return holdCall(params, {
-        callId: recordId,
-        tool: matchedTool,
-        args: parsedArgs,
-        reason: 'outcome',
-        due: {},
-      });
-    }
-    if (mayWriteHolds(params.context)) {
-      if (rerun) {
-        // Answered: if this attempt is cut off too, the question is asked afresh.
-        await holds.close(scope, recordId);
-      }
-      await holds.arm(scope, recordId, argsHash);
-    }
-  }
-  const executed = await runMatchedTool(params, matchedTool, parsedArgs);
   return {
-    ...executed,
-    approval: approval?.outcome,
-    settled: wasHeld && !rerun && executed.held === undefined,
-    armed,
+    kind: 'run',
+    outcome: approval?.outcome,
   };
+}
+
+/** Read an answered call's result or report that it is still waiting. */
+async function resumeHeldCall(
+  params: ExecuteToolCallParams,
+  tool: Tool,
+  held: HeldRecord,
+): Promise<ToolCallResult> {
+  if (held.resolution?.hasOutput) {
+    return {
+      output: toolOutputText(held.resolution.output),
+      result: held.resolution.output,
+      settled: true,
+    };
+  }
+  const refusal = held.resolution?.action;
+  if (refusal !== undefined) {
+    return {
+      ...refusedResult({
+        action: refusal,
+        guidance: held.resolution?.guidance,
+      }),
+      settled: true,
+    };
+  }
+  if (isOverdue(held, heldCallsOf(params.harness).now())) {
+    return {
+      output: `Error: nobody answered '${tool.name}' before the hold ran out`,
+      error: true,
+      settled: true,
+    };
+  }
+  // Still held, asked again by this host: the hold names who asks as this
+  // host sees it.
+  const current =
+    params.scope !== undefined && mayWriteHolds(params.context)
+      ? await heldCallsOf(params.harness).rescope(
+          heldScopeOf(params.context),
+          held.callId,
+          params.scope,
+        )
+      : undefined;
+  return {
+    output: '',
+    held: toHeldCall(current ?? held),
+  };
+}
+
+/** Record a durable call's intent before it can take effect. */
+async function armToolCall({
+  params,
+  tool,
+  args,
+  recordId,
+  rerun,
+}: {
+  params: ExecuteToolCallParams;
+  tool: Tool;
+  args: unknown;
+  recordId: string;
+  rerun: boolean;
+}): Promise<ToolCallResult | undefined> {
+  const holds = heldCallsOf(params.harness);
+  const scope = heldScopeOf(params.context);
+  const argsHash = heldArgsHash(tool.name, args);
+  if (!rerun && (await holds.wasStarted(scope, recordId, argsHash))) {
+    return holdCall(params, {
+      callId: recordId,
+      tool,
+      args,
+      reason: 'outcome',
+      due: {},
+    });
+  }
+  if (mayWriteHolds(params.context)) {
+    if (rerun) {
+      // If this attempt is cut off too, the question must be asked again.
+      await holds.close(scope, recordId);
+    }
+    await holds.arm(scope, recordId, argsHash);
+  }
 }
 
 /** Write the record of a call that is now held, and report it as held. */

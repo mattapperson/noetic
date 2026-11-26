@@ -11,7 +11,6 @@ import type {
   StorageAdapter,
 } from './context-layer';
 import type { DecideRequest, DecideResponse, DecisionRecord } from './decide';
-import type { DetachedHandle } from './detached';
 import type { ApproveRequest } from './harness-judgment';
 import type { HarnessPlatform } from './harness-platform';
 import type { HarnessResponse, StreamEvent, StreamingItem } from './harness-result';
@@ -20,6 +19,7 @@ import type { Span, TraceExporter } from './observability';
 import type {
   AgentHooks,
   CancelOptions,
+  DetachedHandle,
   DrainReport,
   ExecutionScope,
   ExecutionStatus,

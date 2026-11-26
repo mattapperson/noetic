@@ -37,9 +37,9 @@ import type { ApprovalOutcome } from '../runtime/tool-approval';
 import type { ToolCallResult } from '../runtime/tool-call';
 import { createToolResultItem, executeToolCall } from '../runtime/tool-call';
 import { emitToolUi } from '../runtime/tool-ui';
+import { findTool } from '../util/tool-name';
 import type { CallSpanCollector } from './call-span-collector';
 import type { PreparedModelRequest } from './model-request';
-import { findTool } from './model-request';
 import type { CallLedger } from './model-rounds';
 import type { SteerInbox } from './steer-inbox';
 
@@ -160,27 +160,7 @@ export async function runToolRound(
   return true;
 }
 
-async function executeToolRound(
-  scope: ToolRoundScope,
-  params: {
-    functionCalls: Extract<
-      Item,
-      {
-        type: 'function_call';
-      }
-    >[];
-    request: CallModelRequest;
-    allowedTools: Tool[];
-    allItems: Item[];
-    conversationInput: ReturnType<typeof itemsToInput>;
-    round: number;
-    emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
-    spans: CallSpanCollector;
-    modelSpan: Span | null;
-    steers: SteerInbox | undefined;
-    calls?: CallLedger;
-  },
-): Promise<void> {
+async function executeToolRound(scope: ToolRoundScope, params: ToolRound): Promise<void> {
   const {
     functionCalls,
     request,
@@ -251,6 +231,49 @@ async function executeToolRound(
     }
     spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false, call.approval);
   }
+  await finishHeldCalls({
+    scope,
+    params,
+    heldCalls,
+    announcedAs,
+  });
+  params.emitIfAllowed('tool_round_completed', {
+    round: params.round,
+    toolCount: functionCalls.length,
+  });
+}
+
+type ToolRound = {
+  functionCalls: Extract<
+    Item,
+    {
+      type: 'function_call';
+    }
+  >[];
+  request: CallModelRequest;
+  allowedTools: Tool[];
+  allItems: Item[];
+  conversationInput: ReturnType<typeof itemsToInput>;
+  round: number;
+  emitIfAllowed: (eventType: string, data: Record<string, unknown>) => void;
+  spans: CallSpanCollector;
+  modelSpan: Span | null;
+  steers: SteerInbox | undefined;
+  calls?: CallLedger;
+};
+
+async function finishHeldCalls({
+  scope,
+  params,
+  heldCalls,
+  announcedAs,
+}: {
+  scope: ToolRoundScope;
+  params: ToolRound;
+  heldCalls: FunctionCallItem[];
+  announcedAs: Map<string, HeldCall['reason']>;
+}): Promise<void> {
+  const { request, allowedTools, allItems, conversationInput, spans, modelSpan, steers } = params;
   // Calls held for a person: the round goes no further until each has an answer.
   while (heldCalls.length > 0) {
     // A message that arrives while calls are held is a steer like any other: the
@@ -299,10 +322,6 @@ async function executeToolRound(
       spans.recordToolSpan(modelSpan, fc.name, toolForCall?.needsApproval ?? false, call.approval);
     }
   }
-  params.emitIfAllowed('tool_round_completed', {
-    round: params.round,
-    toolCount: functionCalls.length,
-  });
 }
 
 async function executeFunctionCall(

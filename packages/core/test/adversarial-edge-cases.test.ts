@@ -17,7 +17,7 @@ import {
   NoeticErrorImpl,
   runCode,
 } from '../src/index';
-import { executeCallModel } from '../src/interpreter/execute-action';
+import { executeCallModel } from '../src/interpreter/execute-call-model';
 import {
   executeConditional,
   executeInParallel,

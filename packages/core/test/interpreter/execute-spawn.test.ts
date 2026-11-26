@@ -6,7 +6,7 @@ import type { Context, Item, StepSpawn } from '@noetic-tools/types';
 import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { channel } from '../../src/builders/channel-builder';
-import { executeSpawn } from '../../src/interpreter/execute-action';
+import { executeSpawn } from '../../src/interpreter/execute-spawn';
 import { ChannelStore } from '../../src/runtime/channel-store';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { getItemId, makeLayer, makeMessage, makeMockHarness, simpleExecute } from '../_helpers';

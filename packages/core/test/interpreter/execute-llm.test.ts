@@ -5,7 +5,7 @@ import { history, projectHistoryLayers } from '@noetic-tools/context';
 import type { CallModelRequest, StepCallModel } from '@noetic-tools/types';
 import { frameworkCast, isNoeticError, SteeringAction } from '@noetic-tools/types';
 import { z } from 'zod';
-import { executeCallModel } from '../../src/interpreter/execute-action';
+import { executeCallModel } from '../../src/interpreter/execute-call-model';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import {
   makeLLMResponse,

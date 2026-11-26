@@ -12,14 +12,13 @@ import type { Context, ExecuteInput, Item, SessionUsage } from '@noetic-tools/ty
 import { NoeticErrorImpl } from '@noetic-tools/types';
 import type { SessionRecord } from '../runtime/durable/session-store';
 import type { LedgerFence } from '../runtime/durable/turn-lease';
-import type {
-  QueuedMessage,
-  RestoreCheckpointOptions,
-  SessionStore,
-  TurnUsage,
-} from './deps/runtime';
+import type { TurnUsage } from '../runtime/session-runner';
+import type { QueuedMessage, RestoreCheckpointOptions, SessionStore } from './deps/runtime';
 
 //#region Types
+
+/** A thread’s turn in flight, as its record stores it. */
+export type StoredTurnRecord = NonNullable<Awaited<ReturnType<ThreadRecord['turn']>>>;
 
 /** @internal The harness surface a thread record needs. */
 export interface ThreadRecordHost {

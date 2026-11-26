@@ -21,6 +21,10 @@ export function isContextImpl(ctx: Context<ContextData>): ctx is ContextImpl {
   return ctx instanceof ContextImpl;
 }
 
+export function abortSignalOf(ctx: Context<ContextData>): AbortSignal | undefined {
+  return isContextImpl(ctx) ? ctx.abortSignal : undefined;
+}
+
 /**
  * Co-located with `isContextImpl` so the import of `ContextImpl` flows through
  * the same module other interpreters pull it from, sidestepping a circular

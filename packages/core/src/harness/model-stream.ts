@@ -1,12 +1,317 @@
-import type { Item } from '@noetic-tools/types';
-import { emitFrameworkEvent } from '../runtime/broadcaster-utils';
-import type { EventBroadcaster } from '../runtime/event-broadcaster';
-import type { Dispatch } from './spend';
+/** Send a model round and manage its response stream, usage, and checkpoints. */
 
-/**
- * Reading a model response stream: piping SDK events to the broadcaster,
- * spotting the generation id and terminal errors, and racing awaits against abort.
- */
+import type { CallModelRequest, Item, ItemSchemaRegistry, Span } from '@noetic-tools/types';
+import { frameworkCast, SpendKind, SteerPoint } from '@noetic-tools/types';
+import type * as OpenRouterAgent from '@openrouter/agent';
+import type { OpenRouter } from '@openrouter/agent';
+import { extractUsage, toolsOnWire } from '../adapters/openrouter';
+import { emitFrameworkEvent } from '../runtime/broadcaster-utils';
+import type { drainsOf } from '../runtime/drain';
+import type { EventBroadcaster } from '../runtime/event-broadcaster';
+import type { CallSpanCollector } from './call-span-collector';
+import type { CallSpend } from './call-spend';
+import type { buildTextFormat, prepareModelRequest } from './model-request';
+import type { openRoundJournal } from './model-rounds';
+import type { Dispatch, Spend } from './spend';
+import type { SteerInbox } from './steer-inbox';
+
+//#region Dispatch types
+
+interface DispatchRound {
+  request: CallModelRequest;
+  client: OpenRouter;
+  round: number;
+  prepared: ReturnType<typeof prepareModelRequest>;
+  modelInput: OpenRouterAgent.Item[];
+  textFormat: ReturnType<typeof buildTextFormat> | undefined;
+  recoveryContinuation: boolean;
+  agentName: string;
+  idleTimeoutMs: number;
+  billing: Spend | undefined;
+  drains: ReturnType<typeof drainsOf>;
+  spans: CallSpanCollector;
+  spend: CallSpend;
+  steers: SteerInbox | undefined;
+  replaySchemas: ItemSchemaRegistry;
+  journal: Pick<ReturnType<typeof openRoundJournal>, 'enabled' | 'checkpoint' | 'wait'>;
+}
+
+interface DispatchedRound {
+  sdkResponse?: Awaited<ReturnType<ReturnType<OpenRouter['callModel']>['getResponse']>>;
+  finishedItems: unknown[];
+  modelSpan: Span;
+}
+
+//#endregion
+
+//#region Round dispatch
+
+export async function dispatchRound({
+  request,
+  client,
+  round,
+  prepared,
+  modelInput,
+  textFormat,
+  recoveryContinuation,
+  agentName,
+  idleTimeoutMs,
+  billing,
+  drains,
+  spans,
+  spend,
+  steers,
+  replaySchemas,
+  journal,
+}: DispatchRound): Promise<DispatchedRound> {
+  const roundController = new AbortController();
+  const roundSignal = request.signal
+    ? AbortSignal.any([
+        request.signal,
+        roundController.signal,
+      ])
+    : roundController.signal;
+  let firstEventSeen = false;
+  let idleStalled = false;
+  const watchdog = createStreamIdleWatchdog(idleTimeoutMs, roundController, () => {
+    idleStalled = true;
+    prepared.emitIfAllowed('model_call_stalled', {
+      round,
+      idleTimeoutMs: idleTimeoutMs,
+    });
+  });
+  prepared.emitIfAllowed('model_call_started', {
+    round,
+    messageCount: modelInput.length,
+    toolCount: prepared.sdkTools?.length ?? 0,
+    recoveryContinuation,
+  });
+
+  const modelSpan = spans.startModelSpan(request.model);
+  const dispatch = await billing?.open({
+    ctx: request.ctx ?? request._billTo,
+    kind: SpendKind.Model,
+    model: request.model,
+    body: {
+      model: request.model,
+      instructions: prepared.instructions,
+      input: modelInput,
+      tools: prepared.sdkTools && toolsOnWire(prepared.sdkTools),
+      text: textFormat,
+    },
+    maxOutputTokens: request.params?.maxTokens,
+    round,
+  });
+  if (request.signal?.aborted) {
+    // Aborted while the record was written: the call was never sent.
+    await dispatch?.settle();
+    modelSpan.end();
+    return {
+      finishedItems: [],
+      modelSpan,
+    };
+  }
+
+  const roundFinished = drains?.track(
+    request.ctx,
+    {
+      kind: 'model_round',
+      model: request.model,
+      round,
+    },
+    dispatch?.record,
+  );
+  const callResult = client.callModel(
+    {
+      model: request.model,
+      input: modelInput,
+      instructions: prepared.instructions,
+      tools: prepared.sdkTools,
+      toolChoice: round === 0 ? prepared.toolChoice.first : prepared.toolChoice.rest,
+      temperature: request.params?.temperature,
+      maxOutputTokens: request.params?.maxTokens,
+      topP: request.params?.topP,
+      // The agent's bundled SDK types an older tier list (no `fast` or
+      // `ultrafast`); the field is an open enum, so newer tiers pass through.
+      serviceTier: frameworkCast<OpenRouterAgent.CallModelInput['serviceTier']>(
+        request.params?.serviceTier,
+      ),
+      ...(textFormat
+        ? {
+            text: textFormat,
+          }
+        : {}),
+    },
+    {
+      signal: roundSignal,
+      ...(dispatch
+        ? {
+            headers: dispatch.headers,
+          }
+        : {}),
+    },
+  );
+
+  // Output items the stream has finished, kept so a steer can stop the
+  // round early without losing them.
+  const finishedItems: unknown[] = [];
+  // Parsed for the round ledger; none once the stream has failed, since a call
+  // that has thrown must write nothing more.
+  const parsedItems: Item[] = [];
+  let streaming = true;
+  let steered = false;
+  const pipePromise = pipeStreamEventsToBroadcaster({
+    stream: callResult.getFullResponsesStream(),
+    broadcaster: prepared.broadcaster,
+    agentName: agentName,
+    signal: roundSignal,
+    onEvent: (event) => {
+      watchdog.reset();
+      noteStreamGeneration(dispatch, event);
+      if (!firstEventSeen) {
+        firstEventSeen = true;
+        prepared.emitIfAllowed('model_call_first_event', {
+          round,
+        });
+      }
+    },
+    onItemDone: async (item) => {
+      finishedItems.push(item);
+      if (streaming && journal.enabled) {
+        try {
+          parsedItems.push(
+            ...replaySchemas.parseMany(
+              frameworkCast<Item[]>([
+                item,
+              ]),
+            ),
+          );
+          journal.checkpoint(parsedItems);
+        } catch {
+          // The round fails on this item when it ends; nothing after it can be
+          // gone on from.
+          streaming = false;
+        }
+      }
+      if (!steers?.hasQueued() || !(await steers.offer(SteerPoint.ItemDone))) {
+        return;
+      }
+      steered = true;
+      roundController.abort(new Error('steered'));
+    },
+  });
+
+  // A dropped connection rejects the response and the event pipe together; the
+  // response's rejection is the one that propagates. Unobserved, the pipe's would
+  // surface as an unhandled rejection and take the host process down with it.
+  pipePromise.catch(() => {});
+  let sdkResponse: Awaited<ReturnType<typeof callResult.getResponse>> | undefined;
+  try {
+    sdkResponse = await awaitWithAbort(callResult.getResponse(), roundSignal);
+    watchdog.stop();
+    // Counted before its record goes and before the recovery checks: a round
+    // rejected below and asked again was billed all the same. Once counted, the
+    // call charges its context with this bill however it ends, so a drain that
+    // reports from here on lists the round finished with it.
+    const roundUsage = extractUsage(sdkResponse.usage);
+    const roundCost = sdkResponse.usage?.cost ?? 0;
+    spend.count(roundUsage, roundCost);
+    roundFinished?.({
+      cost: roundCost,
+      usage: roundUsage,
+    });
+    spans.finishModelSpan(modelSpan, roundUsage, roundCost > 0 ? roundCost : undefined);
+    await dispatch?.settle();
+    await awaitWithAbort(pipePromise, roundSignal);
+  } catch (err: unknown) {
+    streaming = false;
+    await journal.wait();
+    if (dispatch?.wasRefused(err)) {
+      await dispatch.settle();
+    }
+    if (idleStalled) {
+      throw roundSignal.reason instanceof Error
+        ? roundSignal.reason
+        : new Error(`model stream idle timeout after ${idleTimeoutMs}ms`);
+    }
+    if (!steered && !request.signal?.aborted) {
+      throw err;
+    }
+  } finally {
+    watchdog.stop();
+    dispatch?.end();
+    if (!sdkResponse) {
+      roundFinished?.();
+    }
+  }
+
+  return {
+    sdkResponse,
+    finishedItems,
+    modelSpan,
+  };
+}
+
+//#endregion
+
+//#region Idle watchdog
+
+interface StreamIdleWatchdog {
+  /** Bump the deadline because a stream event just arrived. */
+  reset: () => void;
+  /** Clear the pending timer. Safe to call multiple times. */
+  stop: () => void;
+}
+
+/** @internal Create a watchdog that aborts `controller` when no
+ *  {@link StreamIdleWatchdog.reset reset} is called within `timeoutMs`. When
+ *  `timeoutMs <= 0`, returns an inert no-op so callers can always call `.reset()`
+ *  / `.stop()` without branching. Starts armed: the caller is responsible for
+ *  `.stop()` in a `finally`. `onTimeout` runs before the abort so observers can
+ *  emit a framework event with the original cause. Exported only for unit tests. */
+export function createStreamIdleWatchdog(
+  timeoutMs: number,
+  controller: AbortController,
+  onTimeout?: () => void,
+): StreamIdleWatchdog {
+  if (timeoutMs <= 0) {
+    return {
+      reset: () => {},
+      stop: () => {},
+    };
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  const arm = (): void => {
+    timer = setTimeout(() => {
+      if (stopped) {
+        return;
+      }
+      const reason = new Error(`model stream idle timeout after ${timeoutMs}ms`);
+      onTimeout?.();
+      controller.abort(reason);
+    }, timeoutMs);
+  };
+  arm();
+  return {
+    reset: () => {
+      if (stopped || !timer) {
+        return;
+      }
+      clearTimeout(timer);
+      arm();
+    },
+    stop: () => {
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    },
+  };
+}
+
+//#endregion
 
 //#region Model stream helpers
 
