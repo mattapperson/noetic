@@ -394,6 +394,7 @@ export class AgentHarness<
       emitItemsOnReplay: opts.emitItemsOnReplay,
       approveToolCall: opts.approveToolCall,
       onHeld: opts.onHeld,
+      onHeldFailed: opts.onHeldFailed,
       steerWhileHeld: opts.steerWhileHeld,
       now: opts.now,
       killAgentsOnExit: opts.killAgentsOnExit,

@@ -16,6 +16,7 @@ import type { DetachedHandle } from './detached';
 import type {
   HarnessJudgmentContract,
   HeldCallHandler,
+  HeldFailureHandler,
   HeldSteerPolicy,
   ToolApprover,
 } from './harness-judgment';
@@ -77,6 +78,8 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   approveToolCall?: ToolApprover;
   /** Puts a held call in front of a person and returns their answer (spec 08 § Held tool calls). */
   onHeld?: HeldCallHandler;
+  /** Told when a held call could not be answered: the handler threw, or its answer was not recorded. */
+  onHeldFailed?: HeldFailureHandler;
   /** What a steer does at the `held` steer point before any layer has a say. Default `apply`. */
   steerWhileHeld?: HeldSteerPolicy;
   /** The clock deadlines, leases and wake times are read from. Default `Date.now`. */

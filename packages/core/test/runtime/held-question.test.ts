@@ -92,7 +92,7 @@ describe('questionAnswerProblem', () => {
     expect(questionAnswerProblem(undefined, 3)).toBeUndefined();
   });
 
-  it('refuses a missing required field, a wrong type, a value outside the enum, a non-object', () => {
+  it('refuses a missing required field, a wrong type, a non-object', () => {
     expect(
       questionAnswerProblem(FORM, {
         depth: 1,
@@ -116,11 +116,6 @@ describe('questionAnswerProblem', () => {
         ratio: Number.NaN,
       }),
     ).toBe("'ratio' must be a number");
-    expect(
-      questionAnswerProblem(FORM, {
-        branch: 'dev',
-      }),
-    ).toContain("'branch' must be one of");
     expect(questionAnswerProblem(FORM, 'main')).toContain('must be an object');
   });
 
@@ -235,13 +230,6 @@ describe('questionAnswerProblem', () => {
     expect(
       questionAnswerProblem(form, {
         tags: [
-          'c',
-        ],
-      }),
-    ).toContain('items must be among');
-    expect(
-      questionAnswerProblem(form, {
-        tags: [
           1,
         ],
       }),
@@ -255,7 +243,7 @@ describe('questionAnswerProblem', () => {
     ).toBe("'extra' is not a field of the form");
   });
 
-  it('checks titled single-select choices, counts code points, and refuses sparse lists', () => {
+  it('counts code points and refuses sparse lists', () => {
     const form: HeldQuestion = {
       message: 'q',
       schema: {
@@ -282,16 +270,6 @@ describe('questionAnswerProblem', () => {
     };
     expect(
       questionAnswerProblem(form, {
-        answer: 'yes',
-      }),
-    ).toBeUndefined();
-    expect(
-      questionAnswerProblem(form, {
-        answer: 'no',
-      }),
-    ).toContain("'answer' must be one of");
-    expect(
-      questionAnswerProblem(form, {
         emoji: '🍎',
       }),
     ).toBeUndefined();
@@ -307,6 +285,61 @@ describe('questionAnswerProblem', () => {
         tags: sparse,
       }),
     ).toContain('list of strings');
+  });
+
+  it('takes an answer of the person’s own beside the listed choices', () => {
+    const form: HeldQuestion = {
+      message: 'q',
+      schema: {
+        type: 'object',
+        properties: {
+          answer: {
+            type: 'string',
+            oneOf: [
+              {
+                const: 'yes',
+                title: 'Yes',
+              },
+            ],
+          },
+          tags: {
+            type: 'array',
+            items: {
+              anyOf: [
+                {
+                  const: 'a',
+                },
+              ],
+            },
+          },
+          plain: {
+            type: 'array',
+            items: {
+              enum: [
+                'a',
+              ],
+            },
+          },
+        },
+      },
+    };
+    expect(
+      questionAnswerProblem(form, {
+        answer: 'Only on Fridays',
+        tags: [
+          'a',
+          'something else',
+        ],
+        plain: [
+          'c',
+        ],
+      }),
+    ).toBeUndefined();
+    expect(
+      questionAnswerProblem(FORM, {
+        branch: 'dev',
+      }),
+    ).toBeUndefined();
   });
 
   it('leaves a field the form does not describe alone', () => {
@@ -366,7 +399,8 @@ describe('a held question', () => {
         callId: 'q1',
         resolution: {
           output: {
-            branch: 'dev',
+            branch: 'main',
+            depth: 'deep',
           },
         },
       }),

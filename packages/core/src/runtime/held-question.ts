@@ -6,8 +6,12 @@
  * `input_required` and ACP `elicitation/create`: an object whose own properties
  * are strings, numbers, integers, booleans or arrays of strings, with the usual
  * constraints (`enum`, `minLength`/`maxLength`, `pattern`, `minimum`/`maximum`,
- * `minItems`/`maxItems`, `items.enum`), some of them `required`, and
- * `additionalProperties: false` to refuse any other field.
+ * `minItems`/`maxItems`), some of them `required`, and `additionalProperties: false`
+ * to refuse any other field.
+ *
+ * A field's choices (`enum`, `oneOf`/`anyOf` consts, `items.enum`, `items.anyOf`) are
+ * suggestions, never a limit: a person may always type an answer of their own, and the
+ * asker decides what to make of it.
  */
 
 import type { HeldQuestion } from '@noetic-tools/types';
@@ -32,15 +36,6 @@ function numberAt(schema: Schema, key: string): number | undefined {
   return typeof value === 'number' ? value : undefined;
 }
 
-/** The values a titled single-select (`oneOf: [{ const, title }]`) allows. */
-function titledChoices(schema: Schema): unknown[] | undefined {
-  const choices = schema.oneOf ?? schema.anyOf;
-  if (!Array.isArray(choices)) {
-    return undefined;
-  }
-  return choices.filter(isRecord).map((choice) => choice.const);
-}
-
 function checkString(name: string, schema: Schema, value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return `'${name}' must be a string`;
@@ -60,10 +55,6 @@ function checkString(name: string, schema: Schema, value: unknown): string | und
   const pattern = schema.pattern;
   if (typeof pattern === 'string' && !new RegExp(pattern, 'u').test(value)) {
     return `'${name}' must match ${pattern}`;
-  }
-  const choices = titledChoices(schema);
-  if (choices && !choices.includes(value)) {
-    return `'${name}' must be one of ${JSON.stringify(choices)}`;
   }
   return undefined;
 }
@@ -98,21 +89,6 @@ function checkBoolean(name: string, _schema: Schema, value: unknown): string | u
   return typeof value === 'boolean' ? undefined : `'${name}' must be a boolean`;
 }
 
-/** The choices an array's items may take: `items.enum`, or `items.anyOf[].const`. */
-function itemChoices(schema: Schema): unknown[] | undefined {
-  const items = schema.items;
-  if (!isRecord(items)) {
-    return undefined;
-  }
-  if (Array.isArray(items.enum)) {
-    return items.enum;
-  }
-  if (!Array.isArray(items.anyOf)) {
-    return undefined;
-  }
-  return items.anyOf.filter(isRecord).map((choice) => choice.const);
-}
-
 function checkArray(name: string, schema: Schema, value: unknown): string | undefined {
   // `Array.from` fills holes with `undefined`, which `every` would skip.
   if (!Array.isArray(value) || !Array.from(value).every((item) => typeof item === 'string')) {
@@ -125,10 +101,6 @@ function checkArray(name: string, schema: Schema, value: unknown): string | unde
   const max = numberAt(schema, 'maxItems');
   if (max !== undefined && value.length > max) {
     return `'${name}' must have at most ${max} items`;
-  }
-  const choices = itemChoices(schema);
-  if (choices && !value.every((item) => choices.includes(item))) {
-    return `'${name}' items must be among ${JSON.stringify(choices)}`;
   }
   return undefined;
 }
@@ -148,15 +120,7 @@ function propertyProblem(name: string, schema: unknown, value: unknown): string 
   }
   const type = schema.type;
   const check = typeof type === 'string' ? TYPE_CHECKS[type] : undefined;
-  const problem = check?.(name, schema, value);
-  if (problem) {
-    return problem;
-  }
-  const choices = schema.enum;
-  if (Array.isArray(choices) && !choices.includes(value)) {
-    return `'${name}' must be one of ${JSON.stringify(choices)}`;
-  }
-  return undefined;
+  return check?.(name, schema, value);
 }
 
 function requiredOf(schema: Readonly<Schema>): string[] {

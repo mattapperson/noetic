@@ -11,7 +11,9 @@ import type {
   HeldCall,
   HeldCallContext,
   HeldCallEvent,
+  HeldCallFailure,
   HeldCallHandler,
+  HeldFailureHandler,
   HeldResolution,
   ToolApprover,
 } from '@noetic-tools/types';
@@ -95,6 +97,7 @@ interface Setup {
     approveToolCall?: ToolApprover;
     storage?: StorageAdapter;
     onHeld?: HeldCallHandler;
+    onHeldFailed?: HeldFailureHandler;
     steerWhileHeld?: 'apply' | 'defer';
     contextLayers?: ContextLayer[];
   }) => AgentHarness;
@@ -192,6 +195,7 @@ function setup(reply: (input: unknown[]) => unknown[]): Setup {
         agentGraph: agent,
         approveToolCall: opts?.approveToolCall,
         onHeld: opts?.onHeld,
+        onHeldFailed: opts?.onHeldFailed,
         steerWhileHeld: opts?.steerWhileHeld,
         contextLayers: opts?.contextLayers,
         callModelDefaults: {
@@ -1173,6 +1177,46 @@ function cards(): {
   };
 }
 
+/**
+ * In-memory storage whose writes of an answer to a held call fail `times` times,
+ * or until `heal()`. Other writes pass.
+ */
+function answersFail(times: number): StorageAdapter & {
+  refused: () => number;
+  heal: () => void;
+} {
+  const inner = createInMemoryStorage();
+  let left = times;
+  let refused = 0;
+  const failing = (key: string, next: unknown): boolean => {
+    if (left <= 0 || !key.includes(':held:') || !isAnswered(next)) {
+      return false;
+    }
+    left -= 1;
+    refused += 1;
+    return true;
+  };
+  return {
+    get: (key) => inner.get(key),
+    async set(key, value) {
+      if (failing(key, value)) {
+        throw new Error('storage is down');
+      }
+      await inner.set(key, value);
+    },
+    delete: (key) => inner.delete(key),
+    list: (prefix) => inner.list(prefix),
+    refused: () => refused,
+    heal: () => {
+      left = 0;
+    },
+  };
+}
+
+function isAnswered(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && 'resolution' in value;
+}
+
 describe('onHeld', () => {
   it('shows the call, and its answer runs it once; the stream says held, then settled', async () => {
     const { runs, harness } = setup(LOOKUP_THEN_REFUND);
@@ -1295,7 +1339,106 @@ describe('onHeld', () => {
     expect((await h.getAgentResponse(THREAD)).text).toContain('refunded 420');
   });
 
-  it('that throws is logged, and the call stays held', async () => {
+  it('an answer that fails to record is tried again, and lands', async () => {
+    const { runs, harness } = setup(LOOKUP_THEN_REFUND);
+    const storage = answersFail(2);
+    const failures: HeldCallFailure[] = [];
+    const h = harness({
+      storage,
+      approveToolCall: holdIt,
+      onHeld: () => ({
+        action: 'allow',
+      }),
+      onHeldFailed: (_call, failure) => {
+        failures.push(failure);
+      },
+    });
+    await h.execute('refund A1', THREAD);
+    expect((await h.getAgentResponse(THREAD)).text).toBe('order A1 found | refunded 420');
+    expect(storage.refused()).toBe(2);
+    expect(failures).toEqual([]);
+    expect(runs).toEqual([
+      'lookup',
+      'refund',
+    ]);
+  }, 15e3);
+
+  it('an answer still not recorded goes to onHeldFailed, held; retry() records it', async () => {
+    const { runs, harness } = setup(LOOKUP_THEN_REFUND);
+    const storage = answersFail(Number.POSITIVE_INFINITY);
+    const failures: Array<{
+      call: HeldCall;
+      failure: HeldCallFailure;
+      held: HeldCallContext;
+    }> = [];
+    const h = harness({
+      storage,
+      approveToolCall: holdIt,
+      onHeld: () => ({
+        action: 'allow',
+      }),
+      onHeldFailed: (call, failure, held) => {
+        failures.push({
+          call,
+          failure,
+          held,
+        });
+      },
+    });
+    await h.execute('refund A1', THREAD);
+    await until(() => failures.length === 1, 'the failure');
+    const [reported] = failures;
+    assert(reported);
+    expect(reported.call.name).toBe('refund');
+    expect(reported.failure.stage).toBe('answer');
+    expect(String(reported.failure.error)).toContain('storage is down');
+    expect(reported.held.signal.aborted).toBe(false);
+    // three tries: the first and two more
+    expect(storage.refused()).toBe(3);
+    expect(await h.pending(THREAD)).toHaveLength(1);
+    expect(runs).toEqual([
+      'lookup',
+    ]);
+
+    storage.heal();
+    reported.failure.retry();
+    expect((await h.getAgentResponse(THREAD)).text).toBe('order A1 found | refunded 420');
+    expect(failures).toHaveLength(1);
+    expect(reported.held.signal.aborted).toBe(true);
+  }, 15e3);
+
+  it('a handler that throws goes to onHeldFailed; retry() asks it again', async () => {
+    const { harness } = setup(LOOKUP_THEN_REFUND);
+    let asked = 0;
+    const failures: HeldCallFailure[] = [];
+    const h = harness({
+      approveToolCall: holdIt,
+      onHeld: () => {
+        asked += 1;
+        if (asked === 1) {
+          throw new Error('no socket');
+        }
+        return {
+          action: 'allow',
+        };
+      },
+      onHeldFailed: (_call, failure) => {
+        failures.push(failure);
+      },
+    });
+    await h.execute('refund A1', THREAD);
+    await until(() => failures.length === 1, 'the failure');
+    const [failure] = failures;
+    assert(failure);
+    expect(failure.stage).toBe('handler');
+    expect(String(failure.error)).toContain('no socket');
+    expect(await h.pending(THREAD)).toHaveLength(1);
+    failure.retry();
+    expect((await h.getAgentResponse(THREAD)).text).toContain('refunded 420');
+    expect(asked).toBe(2);
+  });
+
+  it('that throws, with no onHeldFailed, is logged, and the call stays held', async () => {
     const { harness } = setup(LOOKUP_THEN_REFUND);
     const warn = spyOn(console, 'warn').mockImplementation(() => {});
     const h = harness({

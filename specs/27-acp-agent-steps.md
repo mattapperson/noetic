@@ -663,7 +663,9 @@ harness holds it (`08-runtime` § Held tool calls) as a **held question**.
   URL to open).
 - A `{ output }` decision answers it: the agent gets `accept` with that
   content. An output that does not match `schema` is refused (`hold_refused`)
-  and the question stays held. `{ action: 'deny' }` declines it: the agent
+  and the question stays held. A field's choices (`enum`, `oneOf`/`anyOf`
+  consts, and their `items` forms) are suggestions, not a limit: a person may
+  always type an answer of their own, and the agent decides what to make of it. `{ action: 'deny' }` declines it: the agent
   gets `decline`.
 - Settled any other way — its turn aborted or interrupted, a deadline, a steer
   applied at the `held` point, the harness closed — the agent gets `cancel`.
