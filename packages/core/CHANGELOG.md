@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.18 (2026-11-26)
+
+* feat!: one subprocess adapter concept, and named fs, shell and subprocess adapters (#182) ([096c64d](https://github.com/mattapperson/noetic/commit/096c64d)), closes [#182](https://github.com/mattapperson/noetic/issues/182)
+
 ## @noetic-tools/core-v5.22.0-next.17 (2026-11-26)
 
 * Run Cloudflare cron work on durable Noetic harnesses (#183) ([0e97b35](https://github.com/mattapperson/noetic/commit/0e97b35)), closes [#183](https://github.com/mattapperson/noetic/issues/183)
