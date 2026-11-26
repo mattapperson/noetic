@@ -28,7 +28,7 @@ import {
   sessionToolWiring,
 } from './tool-wiring';
 import type { TurnUsageOf } from './turn-usage';
-import { turnUsage } from './turn-usage';
+import { codexTurnUsage, turnUsage } from './turn-usage';
 
 /** @public How to launch an agent as a process. */
 export interface AcpProcessSpec {
@@ -238,7 +238,7 @@ export function codex(opts: AcpPresetOptions = {}): AcpAgent {
     opts,
     wiring: codexToolWiring,
     toolIdOf: codexToolId,
-    usageOf: turnUsage,
+    usageOf: codexTurnUsage,
   });
 }
 

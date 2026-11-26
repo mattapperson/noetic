@@ -47,3 +47,34 @@ export const turnUsage: TurnUsageOf = (answer) => {
         }),
   };
 };
+
+/** Codex's quota counts already include cached input tokens. */
+export const codexTurnUsage: TurnUsageOf = (answer) => {
+  const usage = turnUsage(answer);
+  if (usage !== undefined) {
+    return usage;
+  }
+  const quota = answer._meta?.quota;
+  const tokens = isRecord(quota) ? quota.token_count : undefined;
+  if (!isRecord(tokens)) {
+    return undefined;
+  }
+  const inputTokens = count(tokens.inputTokens);
+  const outputTokens = count(tokens.outputTokens);
+  const cachedTokens = count(tokens.cachedInputTokens);
+  return inputTokens === undefined || outputTokens === undefined
+    ? undefined
+    : {
+        inputTokens,
+        outputTokens,
+        ...(cachedTokens === undefined
+          ? {}
+          : {
+              cachedTokens,
+            }),
+      };
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
