@@ -335,6 +335,7 @@ Framework events emitted during execution:
 | `{name}:turn_aborted` | A session turn was aborted or errored. Data: `{ turnId, reason }`. |
 | `{name}:steer_accepted` | A steer was queued while a turn runs. Data: `{ messageId, turnId, deliveryMode }`. |
 | `{name}:steer_pending` | A steer is waiting for the round's tool calls to finish. Emitted once per steer. Data: `{ messageId, waitingOn }`. |
+| `{name}:flow_rebuild_failed` | A stored turn began on this harness's flow because the [JSON workflow it began under](/docs/framework/durability#stored-workflows) could not be rebuilt. Data: `{ threadId, executionId, version, reason, message }`. |
 | `{name}:steer_dropped` | A layer dropped a steer, or a turn started with `keptSteers: 'drop'` removed an unapplied steer from its stored record. The record event follows a successful write. Data: `{ messageId, point }` from a layer, `{ messageId, reason: 'kept_steers' }` from the record. |
 | `{name}:inbox_injected` | Steers were added before a model call. Data: `{ round, count, messageIds }`. |
 | `{name}:model_call_steered` | A steer stopped the round's stream at an item boundary. Data: `{ round, itemCount }`. |
@@ -530,7 +531,7 @@ When the harness is constructed with a durable `environment.storage.adapter` (an
 | `getNextWakeTime()` | The earliest time the harness has something to do: a [parked turn](/docs/framework/durability#parked-turns)'s deadline, a cut turn's back-off, or the next `cron()` tick. `undefined` when there is none. |
 | `onWakeTimeChange(listener)` | Call `listener` with `getNextWakeTime()` whenever it changes, first when the harness starts. Returns a function that stops it. A parking turn waits for the listener before it answers. |
 | `waitForIdle()` | Resolves once every scheduled event that is due has been read and every turn has finished or parked. A serverless host awaits it before it lets its process go. |
-| `listStuckRuns()` | List the turns that stopped with `turn_stuck` rather than redo a recorded effect under a newer [flow version](/docs/framework/durability#flow-versions). |
+| `listStuckRuns()` | List the turns that stopped with `turn_stuck` rather than redo a recorded effect under a newer [flow version](/docs/framework/durability#flow-versions). Each is `{ threadId, executionId, path, from, to, rebuild? }`; `rebuild` says why a [stored workflow](/docs/framework/durability#stored-workflows) could not be rebuilt. |
 | `execute({ type: 'noetic:decision', action }, { threadId })` | Settle a stuck turn: `'continue'` (accept the difference and resume), `'restart'` (run it from the top) or `'abandon'` (drop it). Refused with `decision_refused` when the thread has none. |
 | `recordedToolCalls(executionId)` | The tool calls a resume of the execution [brings back on its own](/docs/framework/durability#which-calls-a-resume-brings-back), each `settled` when its result is on record. |
 | `getAuditTrail(scope)` | [The trail](/docs/framework/durability#the-trail) of a thread or an execution: each finished step with its flow version, lease holder and receipt. |

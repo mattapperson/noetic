@@ -8,7 +8,13 @@
  * a harness built a moment ago behave the same.
  */
 
-import type { Context, ExecuteInput, Item, SessionUsage } from '@noetic-tools/types';
+import type {
+  Context,
+  ExecuteInput,
+  FlowRebuildFailure,
+  Item,
+  SessionUsage,
+} from '@noetic-tools/types';
 import { NoeticErrorImpl } from '@noetic-tools/types';
 import type { SessionRecord } from '../runtime/durable/session-store';
 import type { LedgerFence } from '../runtime/durable/turn-lease';
@@ -30,6 +36,16 @@ export interface ThreadRecordHost {
   parseItems(raw: unknown[]): Item[];
   /** Ids of the context layers this harness keeps durable state for. */
   layerIds?(): ReadonlyArray<string>;
+}
+
+/** The flow a turn begins on, as its record keeps it. */
+export interface TurnFlowRecord {
+  /** The version the turn runs under, when its flow has one. */
+  readonly version: string | undefined;
+  /** The hash of the source stored for the turn, when one is (spec 23 § Stored flows). */
+  readonly stored: string | undefined;
+  /** Set when the turn could not be put back on the flow it began under. */
+  readonly rebuild?: FlowRebuildFailure;
 }
 
 /** How many finished turns a thread remembers, to answer a message delivered again. */
@@ -123,6 +139,14 @@ export class ThreadRecord {
     });
   }
 
+  /** The turn in flight, when `messageIds` re-deliver its messages: the turn `resume` picks up. */
+  redelivered(messageIds: ReadonlyArray<string>): Promise<SessionRecord['turn']> {
+    return this.run(async () => {
+      const turn = (await this.load())?.turn;
+      return turn && isSameDelivery(turn.messageIds, messageIds) ? turn : undefined;
+    });
+  }
+
   /** Forget the turn in flight and what it recorded: the host aborted a parked turn. */
   drop(): Promise<SessionRecord['turn']> {
     return this.run(async () => {
@@ -201,6 +225,7 @@ export class ThreadRecord {
   begin(
     ctx: Context,
     messageIds: ReadonlyArray<string>,
+    flow: TurnFlowRecord,
     removed: ReadonlyArray<string> = [],
   ): Promise<void> {
     const start = (record: SessionRecord): SessionRecord => ({
@@ -215,11 +240,18 @@ export class ThreadRecord {
         messageIds: [
           ...messageIds,
         ],
-        ...(this.host.version === undefined
+        ...(flow.version === undefined
           ? {}
           : {
-              version: this.host.version,
+              version: flow.version,
             }),
+        ...(flow.stored === undefined
+          ? {}
+          : {
+              flow: flow.stored,
+            }),
+        // Kept until the turn ends: why it is not on the flow it began under.
+        ...rebuildOf(record.turn, ctx.id, flow),
         // Kept until the turn ends, even when it resumes under a new execution (its
         // checkpoint was not written): how often it was cut counts toward giving up.
         ...(record.turn?.cut !== undefined &&
@@ -277,7 +309,7 @@ export class ThreadRecord {
       if (!turn?.stuck) {
         return undefined;
       }
-      const { stuck, stopped: _stopped, ...rest } = turn;
+      const { stuck, stopped: _stopped, version: _version, ...rest } = turn;
       await this.write((record) =>
         action === 'abandon'
           ? withoutTurn(record)
@@ -285,6 +317,12 @@ export class ThreadRecord {
               ...record,
               turn: {
                 ...rest,
+                // The host's choice moves the turn onto this harness's flow.
+                ...(this.host.version === undefined
+                  ? {}
+                  : {
+                      version: this.host.version,
+                    }),
                 ...(action === 'continue'
                   ? {
                       accept: stuck.path,
@@ -596,6 +634,20 @@ export class ThreadRecord {
     this.queue = next.catch(() => {});
     return next;
   }
+}
+
+/** The rebuild failure the turn on `executionId` keeps: the one just found, else the one on record. */
+function rebuildOf(
+  turn: SessionRecord['turn'],
+  executionId: string,
+  flow: TurnFlowRecord,
+): Pick<NonNullable<SessionRecord['turn']>, 'rebuild'> {
+  const rebuild = flow.rebuild ?? (turn?.executionId === executionId ? turn.rebuild : undefined);
+  return rebuild
+    ? {
+        rebuild,
+      }
+    : {};
 }
 
 function withoutCut(turn: NonNullable<SessionRecord['turn']>): NonNullable<SessionRecord['turn']> {

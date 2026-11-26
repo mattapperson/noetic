@@ -614,6 +614,8 @@ function hydrateWorkflow(
 ): Step<string, string>
 ```
 
+A harness given the returned step as its `agentGraph` names its version by a hash of the document and the named workflows in `ctx.workflows`, stores both with each turn, and resumes a turn begun under an older document on that document, hydrated again with this `ctx` (`23-durable-execution` § Stored flows). A `workflow()` step does the same with its own options. The hydrator keeps what that takes; there is no API for it.
+
 Hydration expects an already-validated document; schema validation and depth limits are enforced at parse time by `parseAndRunWorkflow`/`dynamicWorkflow` (`WORKFLOW_VALIDATION_FAILED`).
 
 ### `hydrateNode`
@@ -1150,6 +1152,7 @@ const WorkflowDocumentSchema = z.object({
 - `Context`, `Item`, `ItemLog`: `07-context-and-event-log`
 - `AgentHarness`, `Tool`: `08-runtime`
 - `NoeticError` kinds: `09-error-model`
+- Flow versions, and the workflow stored with each turn: `23-durable-execution` § Versions, § Stored flows
 - `call` and `wait` nodes, operation shorthand, the `connections` manifest, and `$secret` / `$blob` / `$ref` values: `35-connections`
 - The `verify` node: `37-verification`
 - Profiles and extensions the manifest names: `36-connection-profiles`

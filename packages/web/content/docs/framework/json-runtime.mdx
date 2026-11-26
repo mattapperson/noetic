@@ -1154,6 +1154,10 @@ const singleStep = hydrateNode(someNode, hydrationCtx);
 const result = await harness.run(rootStep, 'input text', ctx);
 ```
 
+### As a harness's flow
+
+Give a harness the hydrated root, or a `workflow()` step, as its `agentGraph` and durability needs no more from you: the harness names its version by a hash of the documents, stores them with each turn, and resumes a turn begun under an older document on that document, hydrated again with the tools and context you pass today. See [Stored workflows](/docs/framework/durability#stored-workflows).
+
 ### HydrationContext
 
 | Field | Type | Description |
@@ -1164,7 +1168,7 @@ const result = await harness.run(rootStep, 'input text', ctx);
 | `acpAgents` | `ReadonlyMap<string, AcpAgent>` | Optional. ACP agent adapters keyed by `agentId`, resolving an `acp-agent` node's `agent` field. |
 | `uiLibraries` | `ReadonlyMap<string, OutputCodec>` | Optional. Output codecs for `callModel` nodes' `output` codec references. |
 | `resolveSubprocess` | `(ref: string) => SubprocessAdapter \| undefined` | Optional. Resolves the name a `runCode` node's `subprocess` gives. A name it does not know is looked up among the harness's subprocess adapters, which a document held to a `runCode` grant may name only when the grant lists it. When a `runCode` node omits the name, the harness default (`ctx.subprocess`) is used at execution time. |
-| `workflows` | `ReadonlyMap<string, WorkflowDocument>` | Optional. Named sub-workflow documents that `subflow` nodes resolve via `ref` — lazily, so a live map may gain entries after hydration. |
+| `workflows` | `ReadonlyMap<string, WorkflowDocument>` | Optional. Named sub-workflow documents that `subflow` nodes resolve via `ref` — lazily, so a live map may gain entries after hydration. The entries present at hydration are part of the flow's version and are stored with each turn; later ones are not. |
 | `maxRecursionDepth` | `number` | Optional. Deepest chain of named-ref resolutions on one path; default `100`, `Infinity` for none. |
 | `expressionLimits` | `ExpressionLimits` | Optional. Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. |
 | `allowlist` | `ConnectionAllowlist` | Optional. Narrows `{ "connection" }` tool entries to the operations it grants. Without it, a pick takes its `ops` as written. |

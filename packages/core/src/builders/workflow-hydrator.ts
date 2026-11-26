@@ -35,6 +35,7 @@ import type {
   WorkflowStepList,
 } from '../schemas/workflow';
 import { shorthandStepId, stepEntryToNode, stepListEntries } from '../schemas/workflow';
+import { flowFrom } from './flow-source';
 import { outputText } from './output-text';
 import { callModel, runCode } from './step-builders';
 import {
@@ -65,6 +66,7 @@ import {
   nodeScope,
 } from './workflow-custom-items';
 import { workflowReplayKey } from './workflow-replay-key';
+import { namedWorkflows, storedWorkflowSource, workflowSource } from './workflow-source';
 import {
   nodeTools,
   recordDocumentConnections,
@@ -477,7 +479,8 @@ export function hydrateNode(
  * @param doc - Validated workflow document (version 1).
  * @param ctx - Hydration context with tool registry and step executor.
  * @param customItems - TypeScript declarations of the document's root custom items (spec 34).
- * @returns The root `Step` of the hydrated workflow.
+ * @returns The root `Step` of the hydrated workflow. A harness given it as `agentGraph` stores the
+ *   document with each session and resumes a turn on the document it began under (spec 23 § Versions).
  * @throws `NoeticConfigError` with code `CUSTOM_ITEM_MISMATCH` when `customItems` and the document give one name different types.
  * @throws `NoeticConfigError` with code `CONNECTION_UNKNOWN` when a node uses a connection the document's `connections` do not declare, or `CONNECTION_INVALID` when a node's connection is neither named nor implied, or a source entry is used beyond its events.
  */
@@ -485,6 +488,42 @@ export function hydrateWorkflow(
   doc: WorkflowDocument,
   ctx: HydrationContext,
   customItems?: CustomItemMap,
+): Step<ContextData, string, string> {
+  const source = workflowSource({
+    document: doc,
+    workflows: ctx.workflows,
+  });
+  return flowFrom(source, (from) => {
+    if (from === source) {
+      return hydrateDocument(doc, ctx, customItems);
+    }
+    const stored = storedWorkflowSource(from);
+    if (!stored.document) {
+      throw new NoeticConfigError({
+        code: 'WORKFLOW_VALIDATION_FAILED',
+        message: 'A stored workflow holds no document.',
+        hint: 'hydrateWorkflow builds from a document. The stored flow was built another way.',
+      });
+    }
+    return hydrateDocument(
+      stored.document,
+      {
+        ...ctx,
+        workflows: namedWorkflows(stored, ctx.workflows),
+      },
+      customItems,
+    );
+  });
+}
+
+//#endregion
+
+//#region Document Hydration
+
+function hydrateDocument(
+  doc: WorkflowDocument,
+  ctx: HydrationContext,
+  customItems: CustomItemMap | undefined,
 ): Step<ContextData, string, string> {
   const connectionUses = checkDocumentConnections(doc);
   const root = hydrateNode(doc.root, {
@@ -501,40 +540,7 @@ export function hydrateWorkflow(
     ...root.customItems,
   };
   recordDocumentConnections(frameworkCast<Step>(root), doc, ctx.mcp);
-  noteFlowSource(root, {
-    document: doc,
-    workflows: ctx.workflows,
-  });
   return root;
-}
-
-/**
- * @internal
- * Where a step's flow comes from: the document it runs, or the name it looks one
- * up by, and the named workflows its subflow refs resolve against.
- */
-export interface FlowSource {
-  readonly document?: WorkflowDocument;
-  readonly ref?: string;
-  readonly workflows?: ReadonlyMap<string, WorkflowDocument>;
-}
-
-/** The source of each step that runs a JSON workflow. */
-const flowSources = new WeakMap<object, FlowSource>();
-
-/** @internal Note that `step` runs the flow `source` describes. */
-export function noteFlowSource(step: object, source: FlowSource): void {
-  flowSources.set(step, source);
-}
-
-/**
- * @internal
- * The flow `step` runs, when it runs a JSON workflow: a hydrated root, or a
- * `workflow()` step. A harness given such a step and no `version` names its flow
- * by a hash of it (spec 23 § Versions).
- */
-export function flowSourceOf(step: object): FlowSource | undefined {
-  return flowSources.get(step);
 }
 
 //#endregion

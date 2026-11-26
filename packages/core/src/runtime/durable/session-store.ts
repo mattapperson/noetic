@@ -56,6 +56,27 @@ const SessionRecordSchema = z.object({
       /** The flow version the turn was last run under, when the harness names one. */
       version: z.string().optional(),
       /**
+       * The hash of the flow source stored for the turn, under its execution
+       * (spec 23 § Stored flows). Absent when its flow has no source.
+       */
+      flow: z.string().optional(),
+      /**
+       * Set when the turn stored the flow it began under and a harness could
+       * not rebuild it, so the turn moved to that harness's flow (spec 23 § Versions).
+       */
+      rebuild: z
+        .object({
+          version: z.string(),
+          reason: z.enum([
+            'no_builder',
+            'unreadable',
+            'build_failed',
+            'hash_mismatch',
+          ]),
+          message: z.string(),
+        })
+        .optional(),
+      /**
        * Set when the turn stopped rather than redo a step that had a lasting effect
        * under another flow version (spec 23 § Versions). It waits for the host.
        */

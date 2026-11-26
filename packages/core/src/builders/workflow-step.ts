@@ -24,12 +24,14 @@ import type {
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import type { ExpressionLimits } from '../expression/jsonata';
+import { flowFrom } from './flow-source';
 import { outputText } from './output-text';
 import { spawn } from './spawn-builder';
 import { runCode } from './step-builders';
 import { everyDocumentItem } from './workflow-custom-items';
 import type { HydrationContext } from './workflow-hydrator';
-import { hydrateWorkflow, noteFlowSource } from './workflow-hydrator';
+import { hydrateWorkflow } from './workflow-hydrator';
+import { namedWorkflows, storedWorkflowSource, workflowSource } from './workflow-source';
 
 //#region Types
 
@@ -130,6 +132,22 @@ export function workflow<
     });
   }
 
+  const source = workflowSource({
+    document: documentIn(opts),
+    ref: opts.ref,
+    workflows: opts.workflows,
+  });
+  return frameworkCast<TypedWorkflowStep<D, M>>(
+    flowFrom(source, (from) => workflowStep(from === source ? opts : storedOpts(opts, from))),
+  );
+}
+
+//#endregion
+
+//#region Helpers
+
+/** The step that hydrates `opts`'s document when it first runs, and runs it. */
+function workflowStep(opts: WorkflowOpts): StepRunCode<ContextData, string, string> {
   // The hydrated tree bakes the harness's executeStep into every nested
   // node's closure, so the cache is keyed on the harness: a step shared
   // across sessions re-hydrates when it runs under a different harness
@@ -141,7 +159,7 @@ export function workflow<
       }
     | undefined;
 
-  const step = runCode({
+  return runCode({
     id: opts.id,
     customItems: workflowItems(opts),
     execute: async (input: string, ctx: Context): Promise<string> => {
@@ -163,19 +181,38 @@ export function workflow<
       return outputText(await executeStep(cached.step, input, ctx));
     },
   });
-  // The step hydrates when it first runs. What it will run is known now.
-  noteFlowSource(step, {
-    document:
-      opts.document === undefined ? undefined : frameworkCast<WorkflowDocument>(opts.document),
-    ref: opts.ref,
-    workflows: opts.workflows,
-  });
-  return frameworkCast<TypedWorkflowStep<D, M>>(step);
 }
 
-//#endregion
+/**
+ * `opts` with the document, name and named workflows of a source read back from
+ * storage. A live step hydrates when it first runs; a stored document is hydrated
+ * here once and thrown away, so one this release cannot run (it names a tool or
+ * agent `opts` no longer has) is refused before a turn resumes on it.
+ */
+function storedOpts(opts: WorkflowOpts, from: unknown): WorkflowOpts {
+  const stored = storedWorkflowSource(from);
+  if ((stored.document === null) === (stored.ref === null)) {
+    throw new NoeticConfigError({
+      code: 'INVALID_WORKFLOW_SOURCE',
+      message: `The stored source of workflow('${opts.id}') does not hold exactly one of 'document' or 'ref'.`,
+      hint: 'The stored flow was built another way. Settle the turn with a noetic:decision if it stops as stuck.',
+    });
+  }
+  const rebuilt: WorkflowOpts = {
+    ...opts,
+    document: stored.document ?? undefined,
+    ref: stored.ref ?? undefined,
+    workflows: namedWorkflows(stored, opts.workflows),
+  };
+  hydrate(rebuilt, async () => {
+    throw new Error('a workflow hydrated only to check it runs no step');
+  });
+  return rebuilt;
+}
 
-//#region Helpers
+function documentIn(opts: WorkflowOpts): WorkflowDocument | undefined {
+  return frameworkCast<WorkflowDocument | undefined>(opts.document);
+}
 
 /**
  * Every custom item the workflow can emit, keyed by `type`: its TypeScript map and all

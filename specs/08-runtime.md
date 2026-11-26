@@ -1076,6 +1076,7 @@ its events, and pass the step's `emit` filter.
 | `{name}:steer_accepted` | Emitted when a steer is queued while a turn runs. Always precedes the `inbox_injected` that applies it. Data: `{ messageId, turnId, deliveryMode }` |
 | `{name}:steer_pending` | Emitted once per steer when it is deferred at `before_tool_call`, waiting for tool calls to finish. Data: `{ messageId, waitingOn: callId[] }` |
 | `{name}:steer_dropped` | Emitted when a layer drops a steer, or a turn started with `keptSteers: 'drop'` drops an unapplied steer its stored record kept. The record event follows a successful write. Data: `{ messageId, point }` from a layer, `{ messageId, reason: 'kept_steers' }` from the record |
+| `{name}:flow_rebuild_failed` | Emitted when a stored turn begins on this harness's flow because the JSON workflow it began under could not be rebuilt (`23-durable-execution` § Stored flows). Data: `{ threadId, executionId, version, reason, message }`, `reason` one of `no_builder`, `unreadable`, `build_failed`, `hash_mismatch`. |
 | `{name}:inbox_injected` | Emitted when applied steers are added before a model call. Data: `{ round, count, messageIds }` |
 | `{name}:model_call_steered` | Emitted when a steer stops a round's stream at an item boundary. Data: `{ round, itemCount }` |
 | `{name}:step_started` | Emitted before each step executes. Data: `{ stepId, kind }` |
@@ -1270,7 +1271,7 @@ const harness = new AgentHarness({
 
 ### Flow versions and the trail
 
-`AgentHarnessOpts.version` names the flow the harness runs. `harness.listStuckRuns()` lists the turns that stopped with `turn_stuck` rather than redo a recorded effect under another version, a decision item (`continue`, `restart` or `abandon`) passed to `execute()` settles one, and `harness.getAuditTrail(scope)` reads what a thread or an execution did, step by step. The rules are in `23-durable-execution` § Versions and § The trail.
+`AgentHarnessOpts.version` names the flow the harness runs. `harness.listStuckRuns()` lists the turns that stopped with `turn_stuck` rather than redo a recorded effect under another version, a decision item (`continue`, `restart` or `abandon`) passed to `execute()` settles one, and `harness.getAuditTrail(scope)` reads what a thread or an execution did, step by step. A harness whose `agentGraph` is a JSON workflow stores the workflow with each turn, and a turn resumed under another version finishes on the workflow it began under; when that workflow cannot be rebuilt the turn moves forward and `StuckTurn.rebuild` says why. The rules are in `23-durable-execution` § Versions, § Stored flows and § The trail.
 
 ### Held tool calls
 

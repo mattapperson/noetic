@@ -627,6 +627,7 @@ export type {
   ExecuteOptions,
   ExecutionScope,
   ExecutionStatus,
+  FlowRebuildFailure,
   HarnessJudgmentContract,
   HarnessStatus,
   HeldCall,
@@ -669,7 +670,7 @@ export type {
   WriteOffSpendOptions,
 } from '@noetic-tools/types';
 /** @public */
-export { ExecutionPart, SpendKind } from '@noetic-tools/types';
+export { ExecutionPart, FlowRebuildReason, SpendKind } from '@noetic-tools/types';
 
 //#endregion
 

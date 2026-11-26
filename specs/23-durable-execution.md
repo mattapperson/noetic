@@ -237,15 +237,20 @@ Details that keep a parked turn whole:
 
 ## Versions
 
-A flow changes while turns are in flight. `AgentHarnessOpts.version` names the flow a harness runs: any string the host changes when the flow changes, such as a release tag or a hash. Old versions do not stay deployed; a turn moves forward to the version that resumes it.
+A flow changes while turns are in flight. `AgentHarnessOpts.version` names the flow a harness runs: any string the host changes when the flow changes, such as a release tag or a hash. Old versions do not stay deployed. What a turn begun under an old version does depends on what its flow is made of:
 
-- **Recorded.** The turn record stores the version the turn began under. Every ledger entry stores the version that recorded it.
+- **A flow that is data resumes on itself.** A JSON workflow (§ Stored flows) is stored with each turn that begins on it, and a turn resumed by a harness on another version runs the flow it began under, rebuilt from what it stored.
+- **A flow that is code moves forward.** A graph built in TypeScript closures has no source to store. A turn moves forward to the version that resumes it, under the rules below.
+
+The rules for a turn that moves forward:
+
+- **Recorded.** The turn record stores the version the turn runs under. Every ledger entry stores the version that recorded it.
 - **Resume keeps what still matches.** The ledger matches per step, by id, kind and input hash (`23a-step-level-resume` § Identity). A turn resumed under another version replays every entry the new flow still agrees with and runs live from the first difference.
 - **A recorded effect is not thrown away unasked.** An entry is marked `effect` when its step had a lasting effect: a `call` to a connection operation declared `once` or `effects`, or a `durable: true` tool, called by a model or by an `invokeTool` step. When a resume would discard such an entry recorded under a different version, the turn stops with `turn_stuck`, naming the step's path and both versions. Nothing is redone.
 - **Stuck turns wait for the host.** The turn record is marked `stuck`. `harness.wake()` skips it, and a re-delivery of its message stops the same way. `turn_stuck`, `lease_lost` and `ledger_write_failed` end the turn whichever step they surface in: a `run` step neither retries them nor wraps them in `step_failed`.
 
 ```typescript
-harness.listStuckRuns(): Promise<StuckTurn[]>;   // { threadId, executionId, path, from, to }
+harness.listStuckRuns(): Promise<StuckTurn[]>;   // { threadId, executionId, path, from, to, rebuild? }
 
 // the host's decision, passed to execute() on the stuck thread
 harness.execute({ type: 'noetic:decision', action: 'continue' | 'restart' | 'abandon' }, { threadId });
@@ -253,8 +258,8 @@ harness.execute({ type: 'noetic:decision', action: 'continue' | 'restart' | 'aba
 
 | Action | What happens |
 |---|---|
-| `continue` | The host accepts the difference. The turn resumes on this harness's version and the step that no longer matches runs again. |
-| `restart` | The ledger, held calls and pending entries of the turn are cleared and it runs from the top on this harness's version. Every step runs again, effects included. The snapshot is kept: it holds the turn's input. |
+| `continue` | The host accepts the difference. The turn resumes on this harness's flow and version, and the step that no longer matches runs again. |
+| `restart` | The ledger, held calls and pending entries of the turn are cleared and it runs from the top on this harness's flow and version. Every step runs again, effects included. The snapshot is kept: it holds the turn's input. |
 | `abandon` | The turn is dropped and its checkpoint cleared. Its trail is kept. The thread's next message starts a fresh turn. |
 
 What marks an entry as an effect, and what keeps the mark:
@@ -265,19 +270,61 @@ What marks an entry as an effect, and what keeps the mark:
 
 What settling does, precisely:
 
+- `continue` and `restart` write this harness's version to the turn record, and the turn stores this harness's flow in place of the one it held (§ Stored flows).
 - `continue` lets the turn go past the one step that was named. Another recorded effect further on that no longer matches stops the turn again. The choice is kept until the turn ends, so a host that dies part way through going on does not find the same step stuck.
 - `restart` puts a trail mark down for every entry before it clears the ledger: what the first run did still happened.
 - A message that arrives for a stuck thread is kept in storage and runs after the turn is settled (§ A message for a parked thread). It does not replace the stuck turn; `interrupt` does.
 
 A decision for a thread with no stuck turn is refused with `decision_refused`. The decision is never written to the conversation, and other input passed beside it is delivered after it, so `abandon` and the next message can go in one call.
 
-A harness whose `agentGraph` runs a JSON workflow, and that names no version, takes `workflow-<hash>`. The hash covers every document the graph runs: the root `hydrateWorkflow` returned, a `workflow({ document })` or `workflow({ ref })` step, and either of those as one step of several or nested inside other steps. It also covers the named workflows those were given, since a subflow `ref` runs one of them. Keys are sorted before hashing, so the same document is the same version whatever order its keys come back in from a database. Editing any of it is a new version. An explicit `version` wins.
-
-The named workflows are read when the harness is built. `dynamicWorkflow` and `parseAndRunWorkflow` run a document that arrives at run time, on a context the harness or the host already made, and are not versioned this way: a host that runs its own document with `parseAndRunWorkflow` and edits it between runs names the `version` itself.
-
-A harness with neither behaves as it did before versions: a resumed turn discards whatever no longer matches and runs it again. An entry recorded under no version never makes a turn stuck.
+A harness with no `version` and no JSON workflow in its graph behaves as it did before versions: a resumed turn discards whatever no longer matches and runs it again. An entry recorded under no version never makes a turn stuck.
 
 An author keeps an effect step matching across edits with `replayKey`, which keys its entry by a stable name instead of its position (`23a-step-level-resume` § `replayKey` and `durable: false`).
+
+### Stored flows
+
+A flow that is data does not have to move forward: the harness keeps it, with the turn.
+
+A flow has a **source** when its root step runs a JSON workflow: the step `hydrateWorkflow(doc, ctx)` returned, or a `workflow({ document })` or `workflow({ ref })` step. The source is `{ document, ref, workflows }`: the document, or the name it is looked up by, and every named workflow the step was given, since a subflow `ref` runs one of them. A document nested through a `subflow` node's `document` is part of the document that holds it. The builders remember, with the step, the source and how to build a step from one. Nothing else has a source, and a host has no call or option to give a step one: a host with a flow format of its own compiles it to a workflow document and runs that.
+
+**The version.** A harness that names no `version` takes `workflow-<hash>`. The hash covers the source of every step in the graph that has one: the root, one step of several, or one nested inside other steps. Keys are sorted before hashing, so the same document is the same version whatever order its keys come back in from a database. Editing any of it is a new version. An explicit `version` wins as the name; the source is stored and resumed the same way. A source is read when its step is built: a named workflow registered later is outside the version.
+
+**What is stored, and when.** When a turn begins, and the root step of its flow has a source, the harness writes `{ version, hash, source }` to `execution:<executionId>:flow`, and the turn's record keeps the hash in `flow`. `hash` is the hash above, whatever the version is called. The copy is the turn's alone: turns share none, and nothing counts who else uses one. A turn that resumes on the flow it stored writes nothing. The write is best-effort: a turn whose flow could not be stored runs, and resumes as one with no source.
+
+A graph whose root has no source stores nothing, although a workflow step inside it still names the version: the steps around it are code, and code cannot be stored.
+
+**Resuming.** A stored turn that is delivered again — cut off by a crash, cut, parked and woken, or its message re-delivered — is looked at before it runs:
+
+1. Its record names the harness's own version, or none: it runs the harness's flow.
+2. It stored no flow: it moves forward to the harness's flow, as a turn on a flow that is code does.
+3. It stored one: the harness has its own root step build a step from the stored source, and checks that the step tree it gets back hashes to the stored `hash`. The turn runs that tree, records under its own version, and its record goes on naming that version. Every ledger entry matches, nothing that ran runs again, and no entry is discarded, so there is no `turn_stuck`.
+
+The rebuilt flow is the old documents run by the new code. Tools, agents, connections, context layers and the hydration context are the running harness's; only the documents are old. The named workflows are the stored ones, with any the harness holds that the source does not name beside them. A harness builds a given stored flow once.
+
+**When the rebuild fails.** The turn does not move forward silently. It falls back to the rules above (replay what matches, `turn_stuck` on a recorded effect) on the harness's flow and version, and the reason is told twice: the runner emits `{name}:flow_rebuild_failed` with `{ threadId, executionId, version, reason, message }`, and the turn's record keeps `{ version, reason, message }` until the turn ends, where `listStuckRuns()` returns it as `rebuild` should the turn stop as stuck.
+
+| `reason` | What happened |
+|---|---|
+| `no_builder` | The harness's root step has no source, so nothing builds a flow from one. |
+| `unreadable` | What the turn stored is not the flow of its version. |
+| `build_failed` | The build threw; `message` is its error. The stored document no longer validates against `WorkflowDocumentSchema`, or names a tool, agent or UI library the harness no longer has. |
+| `hash_mismatch` | The rebuilt tree does not hash to the stored `hash`: it runs a document that was not stored. |
+
+A `workflow()` step hydrates its document when it first runs; rebuilt from a stored source it hydrates the root document once at once, so a missing tool fails the rebuild and not the turn. A named workflow is hydrated when a `subflow` first runs it: one that names a missing tool fails the turn there with `UNKNOWN_TOOL_REFERENCE`, as it would live. A storage read that throws is not a failed rebuild: the turn does not start, and its next delivery tries again.
+
+**A turn that moves forward stores the flow it moved to.** A turn that begins on the harness's flow while it holds another — its rebuild failed, or the host settled it — has the harness's source written in place of the old one, or the old one deleted when the harness's flow has no source. So `restart` and `continue` both leave the turn holding the flow of the harness that was asked, and a later resume by any harness rebuilds that one. `abandon` drops the turn and its stored flow.
+
+**New turns.** A new turn on the thread runs the harness's flow and stores its own copy.
+
+**Lifetime.** The stored flow goes when the turn's checkpoint is cleared: the turn ends, the host abandons or aborts it, an `interrupt` replaces it, or a `forget` covers its execution (§ Forgetting). A turn that resumes under a new execution id (§ Cut turns) moves its copy to the new id.
+
+**Two harnesses, two versions.** During a rollout a harness on the old flow and one on the new share storage. The lease (§ One writer per turn) decides which of them writes a turn, and the stored flow belongs to that turn, so the answer is the same either way. The old harness finds its own version on the record and runs its own flow. The new one finds another version, reads the source the turn stored, and runs the same flow rebuilt.
+
+**Secrets.** A stored source holds no secret value. A workflow document carries secret names only, as `{ "$secret": name }`, resolved when a call is sent (`35-connections` § Secrets), and the source is stored as it was written, before anything is resolved.
+
+**Size and cost.** A stored flow is one value written through the `StorageAdapter`: one write when a turn begins, one read when it resumes under another version, one delete when it ends. Each unfinished turn holds a copy, so storage in use grows with the number of turns in flight times the size of their documents, and falls back as they end. Storage that keeps a value too large for a row elsewhere (`25-platform-packages` § Values larger than a row) does that for a large document as for any other value, and deletes it with its key.
+
+**Outside this.** A step a subprocess adapter runs out of process is built by that process from its own code: the stored flow does not reach it. `dynamicWorkflow` and `parseAndRunWorkflow` run a document that arrives at run time, on a context the harness or the host already made. Their document is not the harness's flow, is not part of its version, and is not stored: a host that runs its own document with `parseAndRunWorkflow` and edits it between runs names the `version` itself, or makes the document its `agentGraph` with `workflow()`.
 
 ## The trail
 
@@ -324,7 +371,9 @@ interface TrailMark {
 
 The returned `Context` stands where the interrupted run began: its item log and dispatch counts are that run's baseline, with the live layer state, channels, state, and usage. The caller resumes by running the same step on the same input — every recorded step replays and the run continues live from the first that was not. A context restored after a finished run stands after it, so the next step dispatched — a new user turn — runs fresh.
 
-`harness.execute()` sessions do this themselves: a re-delivered cut-off turn resumes on its recorded execution (`23a-step-level-resume` § Sessions).
+`harness.execute()` sessions do this themselves: a re-delivered cut-off turn resumes on its recorded execution (`23a-step-level-resume` § Sessions). The step it runs is the harness's `agentGraph`, or, when the turn began under another version and stored its flow, the flow rebuilt from that source (§ Stored flows); its ledger then records under the turn's version, not the harness's.
+
+`harness.restore()` and `harness.run()` on a context the host built take the step the host passes: the host owns that execution's flow.
 
 ### Host context wiring is the caller's to supply
 
@@ -544,7 +593,7 @@ interface StoredExecution {
   resumable: boolean;           // a snapshot or ledger entries are stored: `restore()` can rebuild it
 }
 
-type ExecutionPart = 'snapshot' | 'ledger' | 'trail' | 'held' | 'intent' | 'pending' | 'child' | 'other';
+type ExecutionPart = 'snapshot' | 'ledger' | 'trail' | 'held' | 'intent' | 'pending' | 'child' | 'flow' | 'other';
 ```
 
 A scope with neither a `threadId` nor an `executionId` is refused with `NoeticConfigError` `INVALID_FORGET_SCOPE`: a forget never falls back to the default thread.
@@ -562,9 +611,9 @@ The lease goes last, while the forget still holds it (below). A forget cut off p
 
 ### What an execution's forget deletes
 
-`forget({ executionId })` deletes everything under `execution:<id>:` — the checkpoint snapshot (through the configured `CheckpointStore`), the step ledger, held calls and their intents, pending entries, the trail unless `keepTrail`, and any other key there. Core keeps layer state durably only at thread, resource, and global scope, so an execution has none to delete. A thread's record is not touched: forgetting the execution of a thread's turn leaves the thread naming an execution with nothing stored, and the turn starts over on its next delivery. Forget the thread for that.
+`forget({ executionId })` deletes everything under `execution:<id>:` — the checkpoint snapshot (through the configured `CheckpointStore`), the step ledger, held calls and their intents, pending entries, the flow its turn stored, the trail unless `keepTrail`, and any other key there. Core keeps layer state durably only at thread, resource, and global scope, so an execution has none to delete. A thread's record is not touched: forgetting the execution of a thread's turn leaves the thread naming an execution with nothing stored, and the turn starts over on its next delivery. Forget the thread for that. The flow the execution's turn stored (§ Stored flows) goes with it, so that turn starts over on the harness's flow. No other turn's flow is touched: each turn stores its own.
 
-A key under `execution:` is read as the execution its part's suffix names (`:snapshot`, `:ledger:<seq>`, `:trail:<seq>`, `:held:`, `:intent:`, `:pending:`, `:child:<childId>`); when more than one reading is well formed, the longest execution id wins, so `a:child:trail:1` is execution `a:child`'s trail. Any other key belongs to the longest execution id that other keys name and that it starts with, else to the id before its first colon; so `execution:a:b:custom` is execution `a:b`'s when `a:b` has records of its own.
+A key under `execution:` is read as the execution its part's suffix names (`:snapshot`, `:ledger:<seq>`, `:trail:<seq>`, `:held:`, `:intent:`, `:pending:`, `:child:<childId>`, `:flow`); when more than one reading is well formed, the longest execution id wins, so `a:child:trail:1` is execution `a:child`'s trail. Any other key belongs to the longest execution id that other keys name and that it starts with, else to the id before its first colon; so `execution:a:b:custom` is execution `a:b`'s when `a:b` has records of its own.
 
 **Children spawned out of process.** A spawn run in process records its steps under its run's root, so forgetting the run covers it. A `spawn` or `harness.detachedSpawn` a subprocess adapter runs elsewhere is an execution of its own, under its own id. Before dispatching it, a durable run writes a link, `execution:<rootId>:child:<childId>`, naming the step and where its adapter came from — the harness's `environment.subprocess` (`harness`), the step's own `subprocess` (`step`), or the adapter a `detachedSpawn` call passed (`call`) — and marks the link `settled` once the child has finished, however it ended. An adapter that runs steps in the calling process — core's in-memory adapter — gets no link.
 
@@ -777,6 +826,8 @@ Subprocess and IPC queue storage share a root because the adapter already provid
 
 A thread's display output (`08-runtime` § Display output) is kept in the harness's `StorageAdapter` under `output:<threadId>`, one key per thread holding every snapshot. It is outside the `execution:<id>:` and `session:<threadId>` keys: `clearCheckpoint`, an abandoned turn and ledger pruning leave it alone, `restore()` never reads it, and nothing replays from it. `forget({ threadId })` deletes it (§ Forgetting).
 
+The flow a turn stored (§ Stored flows) is kept in the harness's `StorageAdapter` under `execution:<executionId>:flow`, one key per unfinished turn holding `{ version, hash, source }`; the turn's record (`session:<threadId>`) keeps the hash. It lies under `execution:<id>:` with the turn's checkpoint and ledger and goes when they do: `clearCheckpoint`, the turn ending or being abandoned, and a `forget` of the execution or its thread delete it. Ledger pruning and `restart` leave it; a restarted turn replaces it when it begins again.
+
 Both root defaults respect `NOETIC_HOME` (if set, the roots become `$NOETIC_HOME/subprocess` and `$NOETIC_HOME/checkpoints`), so embedders that run under sandboxed or isolated home directories can relocate them with a single env var.
 
 ## Guarantees and limitations
@@ -788,6 +839,7 @@ Both root defaults respect `NOETIC_HOME` (if set, the roots become `$NOETIC_HOME
 - IPC replay is exactly-once at the frame level when the client tracks `durableAck` correctly — no losses, no duplicates.
 - Schema version drift surfaces as a typed error, not silent corruption.
 - On storage with `swap`, one harness at a time writes a thread's turn (§ One writer per turn), and a failed durable write stops the turn (§ Fail-stop).
+- A turn that began on a JSON workflow finishes on that workflow, whatever version the harness that resumes it runs, as long as that harness can still build it (§ Stored flows).
 - With parking on, a turn waiting on a replayable event holds no process, and resumes on any harness over the same storage with no finished model call made again (§ Parked turns).
 - Every paid model call is recorded before it is sent. A call cut off after its response headers arrived is settled at the provider's exact cost once the provider has priced it; one cut off earlier is held at its ceiling. Neither is dropped by a discard (§ Paid dispatches).
 
