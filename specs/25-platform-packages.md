@@ -104,12 +104,14 @@ Exports (all stable):
 
 ```typescript
 export { createD1Storage, createDurableObjectStorage };          // StorageAdapter, with swap
+export { durableObjectEnvironment, durableObjectHolder };        // a harness a Durable Object owns
 export { eventEndpoint, EventEndpointStatus, standardWebhookVerifier };
-export { alarmWake };                                            // wake preset: Durable Object alarm
+export { alarmWake, sharedAlarm };                               // wake preset: Durable Object alarm
 export { runTurn, startTurn, wakeTurn, turnInstanceId, TURN_WAKE_EVENT }; // wake preset: Cloudflare Workflows
+export { cronTurn, cronWake };                                   // Cron Trigger ticks: a harness turn, a scan
 ```
 
-Peer dependencies: none. It imports neither `cloudflare:workers` nor a Cloudflare types package: every helper takes a structural type naming the part of a binding it calls (`D1DatabaseLike`, `DurableObjectSqlLike`, `BlobStoreLike`, `AlarmStorageLike`, `WorkflowStepLike`, `WorkflowBindingLike`), so the real bindings fit and a test passes its own. No `node:*` imports. See § Cloudflare Workers.
+Peer dependencies: none. It imports neither `cloudflare:workers` nor a Cloudflare types package: every helper takes a structural type naming the part of a binding it calls (`D1DatabaseLike`, `DurableObjectSqlLike`, `DurableObjectLike`, `BlobStoreLike`, `AlarmStorageLike`, `WorkflowStepLike`, `WorkflowBindingLike`, `CronTick`), so the real bindings fit and a test passes its own. No `node:*` imports. See § Cloudflare Workers.
 
 ### Migrating `@noetic-tools/core/adapters/node`
 
@@ -374,7 +376,7 @@ export class Session extends DurableObject {
 
 **The lease holder.** An object passes its own id as the lease holder, `environment.storage.lease.holder = ctx.id.toString()` (`23-durable-execution` § One writer per turn): the object that comes back after its isolate died takes its turns over at once, and the alarm finds them due at once rather than one lease period later. The package exports `durableObjectHolder(ctx)` for it.
 
-A `cron()` trigger therefore runs on the alarm preset as it does on Node, with the schedule written once. The package has no cron helper of its own.
+A `cron()` trigger therefore runs on the alarm preset as it does on Node, with the schedule written once.
 
 **Cloudflare Workflows.** One Workflow instance per turn. `runTurn({ harness, step, turn, options?, maxWaitMs?, now? })` is called from the Workflow's `run`:
 
@@ -388,6 +390,67 @@ A `cron()` trigger therefore runs on the alarm preset as it does on Node, with t
 The Workflows preset has no object that is always there, so a `cron()` trigger needs something to start the harness at each tick: a Cloudflare Cron Trigger whose `scheduled` handler calls `harness.start()` and awaits `harness.waitForIdle()`.
 
 The Workflow decides only when the harness runs. What a turn did is in the harness's storage, so a Workflow step that is retried, and a turn woken twice, replay from the step ledger and repeat nothing.
+
+### Cron Triggers
+
+A Cloudflare Cron Trigger calls the Worker's `scheduled` handler with `{ cron, scheduledTime }` (`CronTick`). Unlike an alarm it needs no earlier run to set it, so it reaches an object that has never run. The package turns a tick into durable work two ways. Both ignore a tick whose `cron` is not the one they were given, so one `scheduled` handler passes every tick to each.
+
+**A turn of a Durable Object's harness.** The Worker routes both `fetch` and `scheduled` to one named object, and the object owns one harness for as long as its isolate lives: requests, alarms and ticks all reach it by the same `harness.execute()`.
+
+```typescript
+export class Agent extends DurableObject<Env> {
+  #harness = new AgentHarness({ name: 'agent', agentGraph, environment: durableObjectEnvironment(this.ctx) });
+  #wake = alarmWake({ harness: this.#harness, alarms: this.ctx.storage });
+  #digest = cronTurn({
+    cron: '0 8 * * *',
+    name: 'digest',
+    harness: this.#harness,
+    wake: this.#wake,
+    input: 'Write the morning digest.',
+  });
+
+  async alarm() {
+    await this.#wake.alarm();
+  }
+
+  async tick(tick: CronTick) {
+    await this.#digest(tick);
+  }
+
+  async message(text: string, messageId: string) {
+    await this.#harness.execute(text, { threadId: 'main', messageId });
+    return (await this.#harness.getAgentResponse({ threadId: 'main' })).text;
+  }
+}
+
+export default {
+  async fetch(request, env) {
+    const { text, messageId } = await request.json();
+    return Response.json(await env.AGENT.getByName('main').message(text, messageId));
+  },
+  async scheduled(controller, env) {
+    await env.AGENT.getByName('main').tick({ cron: controller.cron, scheduledTime: controller.scheduledTime });
+  },
+} satisfies ExportedHandler<Env>;
+```
+
+- **`durableObjectEnvironment(ctx, { table?, scope?, spill? }?)`** returns the harness's `environment`: `{ storage: { adapter, lease: { holder }, park: { autoWake: false } } }`, with `adapter` a `createDurableObjectStorage` over `ctx.storage.sql` and `holder` the object's id (`durableObjectHolder`). The harness is built once, in a field of the object, not per request: an isolate that comes back builds a new one over the same SQLite.
+- **`cronTurn({ cron, name, harness, wake, input, options? })`** returns the handler for a tick, `(tick) => Promise<void>`:
+  1. It calls `wake.alarm()`, `alarmWake`'s pass: the harness starts, and a turn the object was evicted in runs to its end. A new message would otherwise replace that turn (`23a-step-level-resume` § Sessions).
+  2. It calls `harness.execute(input, { threadId, messageId })`. `input` is the message, or a function of the tick. `threadId` is `cron:<name>` unless `options.threadId` names another, such as the thread the object's requests use. `messageId` is always `cron:<name>:<scheduledTime>`. `options` are the turn's other `execute()` options.
+  3. It awaits `harness.waitForIdle()`, since the handler is what keeps the object alive.
+- **One turn per tick.** The message id is the tick's identity, so the harness's stored record decides, with no state of the preset's own: a tick delivered twice at once is one message in hand, and one delivered again after its turn finished is answered from the record (`replayed`) and runs nothing, in the same isolate or a later one.
+- **Retry.** A turn cut by a lost lease or a failed write is run again by the alarm. A turn that failed is not: the handler does not throw for it, the failure is on the turn's response, and the same tick delivered again resumes it from its ledger. The next tick is a new message and replaces it.
+- **Eviction.** The turn's record and ledger are in the object's SQLite. The alarm set as the turn began brings it back in the next isolate, as does the next tick, whichever comes first; the object's id as lease holder makes it due at once.
+
+**A scan.** `cronWake({ cron, name, storage, run, now? })` is for work that keeps its own cursor and is not a harness turn: it returns `(tick, env) => Promise<void>`, which calls `run(env, tick.scheduledTime)` to scan for everything due.
+
+- `storage(env)` is any `StorageAdapter` with `swap`; without it the handler throws. The scan's state is one key, `noetic/cron/<name>`: the last tick a scan covered, and a lease while one runs.
+- A scan that succeeds covers every earlier tick, so a tick at or before the last one covered is dropped. A tick that arrives while another Worker's scan holds the lease is dropped too.
+- A scan that throws leaves the tick uncovered, and the throw reaches the runtime; the next tick scans again. A Worker that died keeps its lease for 16 minutes, one more than a Cron Trigger invocation may live, and a tick after that takes over.
+- `run` may be called again after a partial pass, so the work keeps its own cursor and uses stable keys for its effects.
+
+A `cron()` trigger (`35-connections` § Triggers) needs neither: on the alarm preset it runs as it does on Node, with the schedule written once, and its first alarm is set when the harness starts.
 
 ## Future Considerations
 

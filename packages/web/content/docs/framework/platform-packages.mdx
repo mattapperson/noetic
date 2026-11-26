@@ -103,7 +103,7 @@ It re-exports core's runtime-neutral in-memory adapters for ergonomic imports, a
 
 ## `@noetic-tools/platform-cloudflare-worker`
 
-Storage, an event endpoint and wake presets for a harness on Cloudflare Workers. It imports no Cloudflare package: each helper takes the part of a binding it uses, so `env.DB`, `ctx.storage` and a Workflow's `step` fit as they are.
+Storage, an event endpoint, wake presets and Cron Trigger handlers for a harness on Cloudflare Workers. It imports no Cloudflare package: each helper takes the part of a binding it uses, so `env.DB`, `ctx.storage` and a Workflow's `step` fit as they are.
 
 ### Storage
 
@@ -230,7 +230,7 @@ You never set the alarm yourself. `alarmWake` listens to [`harness.onWakeTimeCha
 
 A turn [cut](/docs/framework/durability#one-writer-per-turn) by a lost lease or a failed write is brought back by the same alarm after its back-off, so the object does not catch those errors itself.
 
-Name the lease holder after the object, so the object that comes back after its isolate died takes its turns over at once: `environment.storage.lease.holder = durableObjectHolder(this.ctx)` (the object's id). One holder name must drive a thread from one place at a time.
+Name the lease holder after the object, so the object that comes back after its isolate died takes its turns over at once: `environment.storage.lease.holder = durableObjectHolder(this.ctx)` (the object's id). One holder name must drive a thread from one place at a time. `durableObjectEnvironment(this.ctx)` returns the whole `environment` for a harness the object owns: this storage, this holder, and `park: { autoWake: false }`.
 
 **Sharing the alarm.** A Durable Object has one alarm, and yours may need it too. Pass `schedule` in place of `alarms`, and merge with `sharedAlarm`:
 
@@ -274,6 +274,88 @@ await wakeTurn(env.TURNS, instanceId);
 ```
 
 The instance runs the turn until it parks, sleeps until the turn's deadline or a wake, and runs it again. A cut turn sleeps until its back-off is over the same way. This preset has no object that is always there, so for a `cron()` trigger add a Cloudflare Cron Trigger whose `scheduled` handler calls `harness.start()` and awaits `harness.waitForIdle()`. Everything the turn did is in the harness's storage, so a Workflow step that is retried repeats nothing.
+
+### Cron Triggers
+
+A Cloudflare Cron Trigger reaches an object that has never run, which an alarm cannot. Route the Worker's `fetch` and `scheduled` handlers to one named Durable Object, and let the object own one harness: requests, alarms and ticks all go through the same `harness.execute()`.
+
+```ts validate=none
+import {
+  alarmWake,
+  type CronTick,
+  cronTurn,
+  durableObjectEnvironment,
+} from '@noetic-tools/platform-cloudflare-worker';
+
+export class Agent extends DurableObject<Env> {
+  #harness = new AgentHarness({
+    name: 'agent',
+    agentGraph,
+    environment: durableObjectEnvironment(this.ctx), // SQLite storage, the object's id as lease holder
+  });
+  #wake = alarmWake({ harness: this.#harness, alarms: this.ctx.storage });
+  #digest = cronTurn({
+    cron: '0 8 * * *',
+    name: 'digest',
+    harness: this.#harness,
+    wake: this.#wake,
+    input: 'Write the morning digest.',
+  });
+
+  async alarm() {
+    await this.#wake.alarm();
+  }
+
+  async tick(tick: CronTick) {
+    await this.#digest(tick);
+  }
+
+  async message(text: string, messageId: string) {
+    await this.#harness.execute(text, { threadId: 'main', messageId });
+    return (await this.#harness.getAgentResponse({ threadId: 'main' })).text;
+  }
+}
+
+export default {
+  async fetch(request, env) {
+    const { text, messageId } = await request.json();
+    return Response.json(await env.AGENT.getByName('main').message(text, messageId));
+  },
+  async scheduled(controller, env) {
+    await env.AGENT.getByName('main').tick({
+      cron: controller.cron,
+      scheduledTime: controller.scheduledTime,
+    });
+  },
+} satisfies ExportedHandler<Env>;
+```
+
+Each tick is one message: thread `cron:<name>`, message id `cron:<name>:<scheduledTime>`. Pass `options: { threadId }` to put the ticks on another thread, such as the one your requests use, and a function as `input` to build the message from the tick.
+
+- **A tick runs once.** The harness's stored record knows the message id. A tick delivered twice starts one turn, and one delivered again after its turn finished is answered from the record.
+- **An evicted object loses nothing.** The turn is in the object's SQLite. Its alarm, or the next tick, brings it back in the next isolate, and it runs to its end before the next tick's turn starts.
+- **A failed turn does not fail the handler.** The failure is on the turn's response. The alarm runs a [cut](/docs/framework/durability#one-writer-per-turn) turn again; the same tick delivered again resumes a failed one.
+
+A tick whose `cron` is not the handler's is ignored, so one `tick` method can pass every tick to several `cronTurn` handlers.
+
+**A scan.** For work that keeps its own cursor and is not a harness turn, `cronWake` runs one scan per tick over any storage with `swap`:
+
+```ts validate=none
+import { createD1Storage, cronWake } from '@noetic-tools/platform-cloudflare-worker';
+
+const scan = cronWake<Env>({
+  cron: '* * * * *',
+  name: 'outbox',
+  storage: (env) => createD1Storage({ database: env.DB }),
+  run: (env, through) => sendDue(env, through),
+});
+
+export default {
+  scheduled: (controller, env) => scan(controller, env),
+} satisfies ExportedHandler<Env>;
+```
+
+A scan that succeeds covers every earlier tick. A duplicate tick, or one that arrives while another Worker scans, starts nothing. A scan that throws is tried again by the next tick, and a Worker that died gives up its lease after 16 minutes. `run` may see the same work twice, so give its effects stable keys.
 
 ## Related Pages
 
