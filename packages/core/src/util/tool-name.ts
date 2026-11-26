@@ -1,3 +1,5 @@
+import type { Tool } from '@noetic-tools/types';
+
 /**
  * Provider APIs (Anthropic via OpenRouter) enforce tool names match
  * `^[a-zA-Z0-9_-]{1,64}$`. Noetic's internal layer-tool names use `layerId/fn`
@@ -7,4 +9,11 @@
  */
 export function sanitizeToolNameForWire(name: string): string {
   return name.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+/** Match a wire tool name against both the original and the sanitised name. */
+export function findTool(tools: ReadonlyArray<Tool>, wireName: string): Tool | undefined {
+  return tools.find(
+    (tool) => tool.name === wireName || sanitizeToolNameForWire(tool.name) === wireName,
+  );
 }

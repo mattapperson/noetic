@@ -161,7 +161,7 @@ describe('AUDIT-2 dead re-render', () => {
 
   it('2b: the interpreter DISCARDS rerenderRequests and never calls executeRerender', () => {
     const src = readFileSync(
-      new URL('../../../src/interpreter/execute-action.ts', import.meta.url),
+      new URL('../../../src/interpreter/context-assembly.ts', import.meta.url),
       'utf-8',
     );
     // runInputPipeline destructures ONLY `items` from runAppendPipeline.

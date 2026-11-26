@@ -17,7 +17,7 @@ import type {
   ProjectionPolicy,
 } from '@noetic-tools/types';
 import { DEFAULT_PROJECTION } from './action-deps';
-import { computeBudgetMap, gatherRecallResults } from './execute-action';
+import { computeBudgetMap, gatherRecallResults } from './context-assembly';
 
 //#region Helpers
 

@@ -59,9 +59,9 @@ import { sanitizeToolNameForWire } from '../util/tool-name';
 import type { AcpEventBridge } from './acp-events';
 import type { BridgedCallRecord } from './acp-resume';
 import { BridgedCallRecords } from './acp-resume';
+import { resolveLazy, resolveToolsAndRestrictions, splitResolvedTools } from './action-tools';
 import { openChildSpan, traceChild } from './child-span';
 import { deduplicateTools } from './collect-tools';
-import { resolveLazy, resolveToolsAndRestrictions, splitResolvedTools } from './execute-action';
 import { isFunctionCall } from './typeguards';
 
 //#region Types

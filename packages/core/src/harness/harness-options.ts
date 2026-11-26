@@ -2,16 +2,22 @@ import type {
   ArtifactStore,
   ConnectionEntries,
   ConnectionTrigger,
+  ScopedStorage,
   SecretResolver,
 } from '@noetic-tools/types';
+import { frameworkCast } from '@noetic-tools/types';
 import type { Verifier } from '@noetic-tools/types/verify';
+import { toStep } from '../builders/sequence';
 import { createInMemoryArtifactStore } from '../runtime/in-memory-artifact-store';
+import { LayerPlanReporter, reportingLayerPlans } from '../runtime/layer-plans';
+import { setHarnessInternals } from '../util/harness-internals';
 import {
   createInMemoryFsAdapter,
   createInMemoryShellAdapter,
   createInMemorySubprocessAdapter,
 } from './deps/adapters';
 import type { LayerStateStore } from './deps/context';
+import { createLayerStateStore } from './deps/context';
 import type { CheckpointStore, StepLedgerRetention } from './deps/runtime';
 import { createCheckpointStore } from './deps/runtime';
 import type {
@@ -34,6 +40,7 @@ import type {
   LlmProviderConfig,
   ProjectionPolicy,
   ShellAdapter,
+  Step,
   Steps,
   StorageAdapter,
   StoredTurn,
@@ -43,6 +50,7 @@ import type {
   TraceExporter,
   ZodType,
 } from './deps/types';
+import { flowVersionOf } from './flow-version';
 
 //#region Types
 
@@ -374,3 +382,65 @@ export function resolveCheckpointStore(
 }
 
 //#endregion
+
+/** Track plans and durable layer IDs as the layer store is written. */
+export function harnessLayerStore(
+  harness: object,
+  store: LayerStateStore | undefined,
+  durableLayerIds: Set<string>,
+): {
+  store: LayerStateStore;
+  plans: LayerPlanReporter;
+} {
+  const plans = new LayerPlanReporter();
+  const tracked = reportingLayerPlans(
+    noteDurableLayers(
+      store ??
+        createLayerStateStore((layerId, hook, error) => {
+          console.warn(`[noetic] context layer '${layerId}' ${hook} error:`, error);
+        }),
+      durableLayerIds,
+    ),
+    plans,
+  );
+  setHarnessInternals(harness, {
+    layerPlans: plans,
+  });
+  return {
+    store: tracked,
+    plans,
+  };
+}
+
+/**
+ * `store`, noting in `ids` the id of every layer it keeps durable state for, so a
+ * forget knows which layers' storage to look in (spec 23 § Forgetting).
+ */
+function noteDurableLayers(store: LayerStateStore, ids: Set<string>): LayerStateStore {
+  const register = store.registerDurable;
+  if (!register) {
+    return store;
+  }
+  return new Proxy(store, {
+    get(target, property) {
+      if (property === 'registerDurable') {
+        return (executionId: string, layerId: string, storage: ScopedStorage): void => {
+          ids.add(layerId);
+          register.call(target, executionId, layerId, storage);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+export function harnessGraph(opts: Pick<AgentHarnessOpts, 'agentGraph' | 'version'>): {
+  graph: Step<ContextData, string, string> | undefined;
+  version: string | undefined;
+} {
+  const graph = opts.agentGraph ? toStep(opts.agentGraph) : undefined;
+  return {
+    graph,
+    version: opts.version ?? flowVersionOf(frameworkCast<Step | undefined>(graph)),
+  };
+}

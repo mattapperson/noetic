@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { ContextData } from '@noetic-tools/context';
 import type { CallModelRequest, StepCallModel } from '@noetic-tools/types';
-import { executeCallModel } from '../../src/interpreter/execute-action';
+import { executeCallModel } from '../../src/interpreter/execute-call-model';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { makeLLMResponse, makeMockHarness, makeTestTool } from '../_helpers';
 

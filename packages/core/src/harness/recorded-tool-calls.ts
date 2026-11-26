@@ -7,9 +7,11 @@
  * know which calls the resume brings back on its own, so it never adds them twice.
  */
 
-import type { RecordedToolCall } from '@noetic-tools/types';
+import type { RecordedToolCall, TrailMark } from '@noetic-tools/types';
 import { z } from 'zod';
 import type { StepLedgerEntry, StepLedgerWindow } from '../runtime/durable/step-ledger';
+import { stubOf } from '../runtime/durable/step-ledger';
+import type { StepLedgerStore } from './deps/runtime';
 import { CALL_KIND, CALL_SEGMENT, ROUND_KIND } from './model-rounds';
 
 //#region Types
@@ -135,3 +137,44 @@ export function recordedToolCalls(window: StepLedgerWindow): RecordedToolCall[] 
 }
 
 //#endregion
+
+/** Keep what this execution did before dropping its replay entries. */
+export async function keepTrailAndClear(
+  store: StepLedgerStore | undefined,
+  executionId: string,
+): Promise<void> {
+  if (!store) {
+    return;
+  }
+  const { entries, seqs } = await store.load(executionId);
+  for (const [path, entry] of entries) {
+    const seq = seqs.get(path);
+    if (seq !== undefined) {
+      await store.mark(executionId, seq, stubOf(entry));
+    }
+  }
+  await store.clear(executionId);
+}
+
+export async function readTrail(
+  store: StepLedgerStore,
+  executionIds: ReadonlyArray<string>,
+): Promise<TrailMark[]> {
+  const marks: TrailMark[] = [];
+  for (const executionId of executionIds) {
+    const kept = await store.trail(executionId);
+    const live = [
+      ...(await store.load(executionId)).entries.values(),
+    ].map(stubOf);
+    for (const mark of [
+      ...kept,
+      ...live,
+    ]) {
+      marks.push({
+        executionId,
+        ...mark,
+      });
+    }
+  }
+  return marks;
+}

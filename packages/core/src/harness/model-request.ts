@@ -218,13 +218,6 @@ function allowedToolsChoice(
   };
 }
 
-/** Match a wire tool name against both the original and the sanitised name. */
-export function findTool(tools: ReadonlyArray<Tool>, wireName: string): Tool | undefined {
-  return tools.find(
-    (tool) => tool.name === wireName || sanitizeToolNameForWire(tool.name) === wireName,
-  );
-}
-
 function filterAllowedTools(request: CallModelRequest): Tool[] | undefined {
   if (!request.tools) {
     return undefined;

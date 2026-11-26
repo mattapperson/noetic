@@ -15,6 +15,7 @@ import { createMessage, estimateTokens, hashItems, hashString } from '@noetic-to
 import { NoeticAttr } from '../observability/genai-attributes';
 import type { LayerServeInfo } from './action-deps';
 import {
+  allocateBudgets,
   churnFor,
   churnRate,
   lineageKey,
@@ -24,6 +25,7 @@ import {
   reanchorReason,
   resolveCacheConfig,
 } from './action-deps';
+import type { Context, ContextData, ContextRerenderRequest } from './action-types';
 
 /**
  * Supersedes below this are never treated as delta pressure, whatever share of
@@ -740,3 +742,155 @@ function totalTokens(items: ReadonlyArray<Item>): number {
 }
 
 //#endregion
+
+/**
+ * Append user input — through layer pipeline if layers exist, otherwise direct.
+ * The append pipeline may request a context re-render (e.g. a layer that
+ * expanded an input reference into new content); applied after recall.
+ */
+export async function appendUserInput<I>(params: {
+  ctx: Context<ContextData>;
+  layers: ContextLayer[] | undefined;
+  input: I;
+}): Promise<ContextRerenderRequest[]> {
+  const { ctx, layers, input } = params;
+  if (typeof input !== 'string' || input.length === 0) {
+    return [];
+  }
+  if (layers !== undefined && layers.length > 0) {
+    return await runInputPipeline({
+      ctx,
+      layers,
+      input,
+    });
+  }
+  ctx.itemLog.append(createMessage(input, 'user'));
+  return [];
+}
+
+/**
+ * Splits the context budget across layers via `allocateBudgets`. An empty map
+ * when the step runs without layers.
+ */
+export function computeBudgetMap(params: {
+  layers: ContextLayer[] | undefined;
+  policy: ProjectionPolicy;
+  systemPromptTokens: number;
+}): Map<string, number> {
+  const { layers, policy, systemPromptTokens } = params;
+  if (layers === undefined || layers.length === 0) {
+    return new Map<string, number>();
+  }
+  const { allocations } = allocateBudgets({
+    layers,
+    totalBudget: policy.tokenBudget,
+    systemPromptTokens,
+    responseReserve: policy.responseReserve,
+  });
+  return new Map(
+    allocations.map((a) => [
+      a.layerId,
+      a.allocated,
+    ]),
+  );
+}
+
+/**
+ * Recall once per LLM step: atomic layers run in the hot path; eventual layers
+ * are served from cache. Results drive both the assembled context window and
+ * the per-layer usage breakdown (ctx.lastLayerUsage). Recall fires before the
+ * steering retry loop because retries replay the same context. Re-render
+ * requests collected from the input-append pipeline are applied on top.
+ */
+export async function gatherRecallResults(params: {
+  ctx: Context<ContextData>;
+  layers: ContextLayer[] | undefined;
+  recallQuery: string;
+  budgetMap: Map<string, number>;
+  slotOf: Map<string, number>;
+  rerenderRequests: ContextRerenderRequest[];
+}): Promise<ReadonlyArray<RecallLayerOutput>> {
+  const { ctx, layers, recallQuery, budgetMap, slotOf, rerenderRequests } = params;
+  if (layers === undefined || layers.length === 0) {
+    return emptyRecall;
+  }
+  const atomic = await ctx.harness.recallLayersAtomic(layers, recallQuery, ctx, budgetMap);
+  const eventual = await ctx.harness.recallLayersEventual(layers, recallQuery, ctx, budgetMap);
+  let recallResults: ReadonlyArray<RecallLayerOutput> = [
+    ...atomic,
+    ...eventual,
+  ].sort((a, b) => (slotOf.get(a.layerId) ?? 0) - (slotOf.get(b.layerId) ?? 0));
+
+  if (rerenderRequests.length > 0) {
+    const rerendered = await ctx.harness.executeRerender(
+      rerenderRequests,
+      layers,
+      ctx,
+      budgetMap,
+      recallQuery,
+    );
+    recallResults = mergeRecallResults(
+      [
+        ...recallResults,
+      ],
+      rerendered,
+      slotOf,
+    );
+  }
+  return recallResults;
+}
+
+const emptyRecall: ReadonlyArray<RecallLayerOutput> = [];
+
+/**
+ * Merge re-render recall outputs over the base recall results, replacing entries
+ * for the same layer and keeping slot order. New layer entries are appended.
+ */
+function mergeRecallResults(
+  base: RecallLayerOutput[],
+  overrides: RecallLayerOutput[],
+  slotOf: Map<string, number>,
+): RecallLayerOutput[] {
+  if (overrides.length === 0) {
+    return base;
+  }
+  const byId = new Map(
+    overrides.map((r) => [
+      r.layerId,
+      r,
+    ]),
+  );
+  const merged = base.map((r) => byId.get(r.layerId) ?? r);
+  const seen = new Set(base.map((r) => r.layerId));
+  for (const o of overrides) {
+    if (!seen.has(o.layerId)) {
+      merged.push(o);
+    }
+  }
+  return merged.sort((a, b) => (slotOf.get(a.layerId) ?? 0) - (slotOf.get(b.layerId) ?? 0));
+}
+
+interface RunInputPipelineParams {
+  ctx: Context<ContextData>;
+  layers: ContextLayer[];
+  input: string;
+}
+
+async function runInputPipeline({
+  ctx,
+  layers,
+  input,
+}: RunInputPipelineParams): Promise<ContextRerenderRequest[]> {
+  const userItem = createMessage(input, 'user');
+  const { items: finalItems, rerenderRequests } = await ctx.harness.runAppendPipeline(
+    layers,
+    [
+      userItem,
+    ],
+    ctx,
+  );
+  for (const item of finalItems) {
+    ctx.itemLog.append(item);
+  }
+  return rerenderRequests;
+}

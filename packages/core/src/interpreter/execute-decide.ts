@@ -26,6 +26,7 @@ import {
   exportSpans,
   laneBase,
 } from './action-deps';
+import { resolveLazy } from './action-tools';
 import type {
   Context,
   ContextData,
@@ -34,7 +35,6 @@ import type {
   ProjectionPolicy,
   StepDecide,
 } from './action-types';
-import { resolveLazy } from './execute-action';
 import { trackUsage } from './message-helpers';
 import { wrapModelError } from './model-error';
 import { isContextImpl, isMutableContext } from './typeguards';

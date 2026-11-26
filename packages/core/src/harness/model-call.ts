@@ -7,32 +7,19 @@ import type {
   LLMResponse,
   TraceExporter,
 } from '@noetic-tools/types';
-import { frameworkCast, NoeticConfigError, SpendKind, SteerPoint } from '@noetic-tools/types';
+import { frameworkCast, NoeticConfigError, SteerPoint } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import type { OpenRouter } from '@openrouter/agent';
-import {
-  extractOutputItems,
-  extractUsage,
-  itemsToInput,
-  toolsOnWire,
-} from '../adapters/openrouter';
+import { extractOutputItems, itemsToInput } from '../adapters/openrouter';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import { drainsOf } from '../runtime/drain';
 import { markSpent } from '../util/spent';
 import { CallSpanCollector } from './call-span-collector';
-import type { Bill } from './call-spend';
-import { CallSpend, noBill } from './call-spend';
+import { CallSpend } from './call-spend';
 import { buildTextFormat, prepareModelRequest } from './model-request';
-import type { RoundRecord } from './model-rounds';
-import { RoundLedger } from './model-rounds';
+import { openRoundJournal, RoundLedger } from './model-rounds';
 import { buildItemSchemaRegistry } from './model-schema.js';
-import {
-  awaitWithAbort,
-  hasUsableResponseOutput,
-  noteStreamGeneration,
-  pipeStreamEventsToBroadcaster,
-  providerTerminalError,
-} from './model-stream';
+import { dispatchRound, hasUsableResponseOutput, providerTerminalError } from './model-stream';
 import type { ToolRoundScope } from './model-tool-round';
 import { hasFunctionCalls, replayOutput, runToolRound } from './model-tool-round';
 import type { Spend } from './spend';
@@ -41,16 +28,6 @@ import { openSteerInbox } from './steer-inbox';
 
 const MAX_RECOVERY_CONTINUATIONS = 3;
 const EPHEMERAL_CONTINUE_INPUT = 'continue';
-
-function itemIds(items: ReadonlyArray<Item>): string[] {
-  return items.flatMap((item) =>
-    'id' in item && typeof item.id === 'string'
-      ? [
-          item.id,
-        ]
-      : [],
-  );
-}
 
 function hasItem(items: ReadonlyArray<Item>, id: string): boolean {
   return items.some((item) => 'id' in item && item.id === id);
@@ -69,13 +46,6 @@ function withEphemeralContinueInput(
   ];
 }
 
-interface StreamIdleWatchdog {
-  /** Bump the deadline because a stream event just arrived. */
-  reset: () => void;
-  /** Clear the pending timer. Safe to call multiple times. */
-  stop: () => void;
-}
-
 /** @internal The error for a model call on a harness with no LLM credentials. */
 export function noLlmProviderError(): NoeticConfigError {
   return new NoeticConfigError({
@@ -83,54 +53,6 @@ export function noLlmProviderError(): NoeticConfigError {
     message: 'No LLM provider configured on this harness.',
     hint: 'Pass `callModelDefaults: { apiKey: "..." }` (defaults to the Noetic platform) or set NOETIC_API_KEY. For direct OpenRouter, use `callModelDefaults: { provider: "openrouter", apiKey: "..." }` or set OPENROUTER_API_KEY.',
   });
-}
-
-/** @internal Create a watchdog that aborts `controller` when no
- *  {@link StreamIdleWatchdog.reset reset} is called within `timeoutMs`. When
- *  `timeoutMs <= 0`, returns an inert no-op so callers can always call `.reset()`
- *  / `.stop()` without branching. Starts armed: the caller is responsible for
- *  `.stop()` in a `finally`. `onTimeout` runs before the abort so observers can
- *  emit a framework event with the original cause. Exported only for unit tests. */
-export function createStreamIdleWatchdog(
-  timeoutMs: number,
-  controller: AbortController,
-  onTimeout?: () => void,
-): StreamIdleWatchdog {
-  if (timeoutMs <= 0) {
-    return {
-      reset: () => {},
-      stop: () => {},
-    };
-  }
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let stopped = false;
-  const arm = (): void => {
-    timer = setTimeout(() => {
-      if (stopped) {
-        return;
-      }
-      const reason = new Error(`model stream idle timeout after ${timeoutMs}ms`);
-      onTimeout?.();
-      controller.abort(reason);
-    }, timeoutMs);
-  };
-  arm();
-  return {
-    reset: () => {
-      if (stopped || !timer) {
-        return;
-      }
-      clearTimeout(timer);
-      arm();
-    },
-    stop: () => {
-      stopped = true;
-      if (timer) {
-        clearTimeout(timer);
-        timer = undefined;
-      }
-    },
-  };
 }
 
 interface AgentHarnessModelCallerOpts {
@@ -278,91 +200,13 @@ export class AgentHarnessModelCaller {
       layers: request.layers,
       tools: request.tools,
     });
-    // Where the loop's lists stood when the current round began, for its record.
-    let marks = {
-      round: -1,
-      log: 0,
-      input: 0,
-      items: 0,
-    };
-    const markRound = (): void => {
-      marks = {
-        round,
-        log: roundLedger?.mark() ?? 0,
-        input: conversationInput.length,
-        items: allItems.length,
-      };
-    };
-    // The current round's checkpoint writes, in order. Its own record waits for
-    // them, so a late checkpoint never replaces it.
-    let checkpoints: Promise<void> = Promise.resolve();
-    const writeRound = async (record: RoundRecord): Promise<void> => {
-      if (!roundLedger || request.signal?.aborted) {
-        return;
-      }
-      if (!(await roundLedger.record(round, marks.log, record))) {
-        return;
-      }
-      prepared.emitIfAllowed('model_round_recorded', {
-        round,
-        itemIds: itemIds(record.items),
-        done: !record.cut,
-      });
-    };
-    // A rejected round is asked again on the conversation it was asked on, or fails
-    // the call, so a resume must not go on from the items it streamed. The same goes
-    // for the round that ends the loop.
-    const dropCheckpoints = async (): Promise<void> => {
-      await checkpoints;
-      await roundLedger?.drop(round);
-    };
-    const rejectRound = async <
-      T extends {
-        kind: 'continue' | 'ok';
-      },
-    >(
-      check: () => T,
-    ): Promise<T> => {
-      let result: T;
-      try {
-        result = check();
-      } catch (error: unknown) {
-        await dropCheckpoints();
-        throw error;
-      }
-      if (result.kind === 'continue') {
-        await dropCheckpoints();
-      }
-      return result;
-    };
-    // Record a round the loop goes on from, so a resumed loop can replay it.
-    const recordRound = async (bill: Bill): Promise<void> => {
-      await checkpoints;
-      await writeRound({
-        items: allItems.slice(marks.items),
-        input: conversationInput.slice(marks.input),
-        ...bill,
-      });
-    };
-    // Record the output items a round has finished while it still streams, so a
-    // resume goes on from them rather than making them again. The input holds only
-    // what the round began with: the tool round adds each function call with its
-    // output, as it does for a round that finishes.
-    const checkpoint = (finished: Item[]): void => {
-      if (!roundLedger) {
-        return;
-      }
-      const record: RoundRecord = {
-        items: [
-          ...allItems.slice(marks.items),
-          ...finished,
-        ],
-        input: conversationInput.slice(marks.input),
-        ...noBill,
-        cut: true,
-      };
-      checkpoints = checkpoints.then(() => writeRound(record));
-    };
+    const journal = openRoundJournal({
+      roundLedger,
+      allItems,
+      conversationInput,
+      signal: request.signal,
+      emit: prepared.emitIfAllowed,
+    });
     let stoppedForRecall = false;
     const steers = openSteerInbox({
       ctx: request.ctx,
@@ -376,7 +220,7 @@ export class AgentHarnessModelCaller {
     while (!request.signal?.aborted) {
       const replayed = roundLedger?.take(round, replaySchemas);
       if (replayed) {
-        markRound();
+        journal.mark(round);
         allItems.push(...replayed.items);
         conversationInput.push(...frameworkCast<typeof conversationInput>(replayed.input));
         for (const item of replayed.appended) {
@@ -408,13 +252,13 @@ export class AgentHarnessModelCaller {
             steers,
             calls: roundLedger?.calls(round),
           });
-          await recordRound(spend.keep());
+          await journal.record(spend.keep());
         }
         round += 1;
         continue;
       }
-      if (marks.round !== round) {
-        markRound();
+      if (!journal.marked(round)) {
+        journal.mark(round);
       }
       // A graceful stop starts no new round: wait here until it cancels the call.
       await drains?.hold(request.ctx);
@@ -438,191 +282,27 @@ export class AgentHarnessModelCaller {
         }
       }
 
-      const roundController = new AbortController();
-      const roundSignal = request.signal
-        ? AbortSignal.any([
-            request.signal,
-            roundController.signal,
-          ])
-        : roundController.signal;
-      let firstEventSeen = false;
-      let idleStalled = false;
-      const watchdog = createStreamIdleWatchdog(
-        this.opts.streamIdleTimeoutMs,
-        roundController,
-        () => {
-          idleStalled = true;
-          prepared.emitIfAllowed('model_call_stalled', {
-            round,
-            idleTimeoutMs: this.opts.streamIdleTimeoutMs,
-          });
-        },
-      );
-      const modelInput: OpenRouterAgent.Item[] = recoveryContinuation
+      const modelInput = recoveryContinuation
         ? withEphemeralContinueInput(conversationInput)
         : frameworkCast<OpenRouterAgent.Item[]>(conversationInput);
-
-      prepared.emitIfAllowed('model_call_started', {
+      const { sdkResponse, finishedItems, modelSpan } = await dispatchRound({
+        request,
+        client,
         round,
-        messageCount: modelInput.length,
-        toolCount: prepared.sdkTools?.length ?? 0,
+        prepared,
+        modelInput,
+        textFormat,
         recoveryContinuation,
-      });
-
-      const modelSpan = spans.startModelSpan(request.model);
-      const dispatch = await this.opts.spend?.open({
-        ctx: request.ctx ?? request._billTo,
-        kind: SpendKind.Model,
-        model: request.model,
-        body: {
-          model: request.model,
-          instructions: prepared.instructions,
-          input: modelInput,
-          tools: prepared.sdkTools && toolsOnWire(prepared.sdkTools),
-          text: textFormat,
-        },
-        maxOutputTokens: request.params?.maxTokens,
-        round,
-      });
-      if (request.signal?.aborted) {
-        // Aborted while the record was written: the call was never sent.
-        await dispatch?.settle();
-        modelSpan.end();
-        break;
-      }
-
-      const roundFinished = drains?.track(
-        request.ctx,
-        {
-          kind: 'model_round',
-          model: request.model,
-          round,
-        },
-        dispatch?.record,
-      );
-      const callResult = client.callModel(
-        {
-          model: request.model,
-          input: modelInput,
-          instructions: prepared.instructions,
-          tools: prepared.sdkTools,
-          toolChoice: round === 0 ? prepared.toolChoice.first : prepared.toolChoice.rest,
-          temperature: request.params?.temperature,
-          maxOutputTokens: request.params?.maxTokens,
-          topP: request.params?.topP,
-          // The agent's bundled SDK types an older tier list (no `fast` or
-          // `ultrafast`); the field is an open enum, so newer tiers pass through.
-          serviceTier: frameworkCast<OpenRouterAgent.CallModelInput['serviceTier']>(
-            request.params?.serviceTier,
-          ),
-          ...(textFormat
-            ? {
-                text: textFormat,
-              }
-            : {}),
-        },
-        {
-          signal: roundSignal,
-          ...(dispatch
-            ? {
-                headers: dispatch.headers,
-              }
-            : {}),
-        },
-      );
-
-      // Output items the stream has finished, kept so a steer can stop the
-      // round early without losing them.
-      const finishedItems: unknown[] = [];
-      // Parsed for the round ledger; none once the stream has failed, since a call
-      // that has thrown must write nothing more.
-      const parsedItems: Item[] = [];
-      let streaming = true;
-      let steered = false;
-      const pipePromise = pipeStreamEventsToBroadcaster({
-        stream: callResult.getFullResponsesStream(),
-        broadcaster: prepared.broadcaster,
         agentName: this.opts.agentName,
-        signal: roundSignal,
-        onEvent: (event) => {
-          watchdog.reset();
-          noteStreamGeneration(dispatch, event);
-          if (!firstEventSeen) {
-            firstEventSeen = true;
-            prepared.emitIfAllowed('model_call_first_event', {
-              round,
-            });
-          }
-        },
-        onItemDone: async (item) => {
-          finishedItems.push(item);
-          if (streaming && roundLedger) {
-            try {
-              parsedItems.push(
-                ...replaySchemas.parseMany(
-                  frameworkCast<Item[]>([
-                    item,
-                  ]),
-                ),
-              );
-              checkpoint(parsedItems);
-            } catch {
-              // The round fails on this item when it ends; nothing after it can be
-              // gone on from.
-              streaming = false;
-            }
-          }
-          if (!steers?.hasQueued() || !(await steers.offer(SteerPoint.ItemDone))) {
-            return;
-          }
-          steered = true;
-          roundController.abort(new Error('steered'));
-        },
+        idleTimeoutMs: this.opts.streamIdleTimeoutMs,
+        billing: this.opts.spend,
+        drains,
+        spans,
+        spend,
+        steers,
+        replaySchemas,
+        journal,
       });
-
-      // A dropped connection rejects the response and the event pipe together; the
-      // response's rejection is the one that propagates. Unobserved, the pipe's would
-      // surface as an unhandled rejection and take the host process down with it.
-      pipePromise.catch(() => {});
-      let sdkResponse: Awaited<ReturnType<typeof callResult.getResponse>> | undefined;
-      try {
-        sdkResponse = await awaitWithAbort(callResult.getResponse(), roundSignal);
-        watchdog.stop();
-        // Counted before its record goes and before the recovery checks: a round
-        // rejected below and asked again was billed all the same. Once counted, the
-        // call charges its context with this bill however it ends, so a drain that
-        // reports from here on lists the round finished with it.
-        const roundUsage = extractUsage(sdkResponse.usage);
-        const roundCost = sdkResponse.usage?.cost ?? 0;
-        spend.count(roundUsage, roundCost);
-        roundFinished?.({
-          cost: roundCost,
-          usage: roundUsage,
-        });
-        spans.finishModelSpan(modelSpan, roundUsage, roundCost > 0 ? roundCost : undefined);
-        await dispatch?.settle();
-        await awaitWithAbort(pipePromise, roundSignal);
-      } catch (err: unknown) {
-        streaming = false;
-        await checkpoints;
-        if (dispatch?.wasRefused(err)) {
-          await dispatch.settle();
-        }
-        if (idleStalled) {
-          throw roundSignal.reason instanceof Error
-            ? roundSignal.reason
-            : new Error(`model stream idle timeout after ${this.opts.streamIdleTimeoutMs}ms`);
-        }
-        if (!steered && !request.signal?.aborted) {
-          throw err;
-        }
-      } finally {
-        watchdog.stop();
-        dispatch?.end();
-        if (!sdkResponse) {
-          roundFinished?.();
-        }
-      }
       if (request.signal?.aborted) {
         break;
       }
@@ -640,7 +320,7 @@ export class AgentHarnessModelCaller {
         replayOutput(conversationInput, roundItems);
         // Let the round's cut records land first: each one prunes what is beneath the
         // round's key, which is where the calls about to run are recorded.
-        await checkpoints;
+        await journal.wait();
         await runToolRound(this.toolRoundScope(), {
           roundItems,
           request,
@@ -653,11 +333,11 @@ export class AgentHarnessModelCaller {
           steers,
           calls: roundLedger?.calls(round),
         });
-        await recordRound(bill);
+        await journal.record(bill);
         round += 1;
         continue;
       }
-      const recovery = await rejectRound(() =>
+      const recovery = await journal.check(() =>
         this.handleModelRecovery({
           sdkResponse,
           round,
@@ -672,7 +352,7 @@ export class AgentHarnessModelCaller {
       }
 
       const roundItems = this.parseRoundItems(request, extractOutputItems(sdkResponse));
-      const outputRecovery = await rejectRound(() =>
+      const outputRecovery = await journal.check(() =>
         this.handleEmptyOutputRecovery({
           sdkResponse,
           roundItems,
@@ -696,7 +376,7 @@ export class AgentHarnessModelCaller {
       allItems.push(...roundItems);
 
       // As above: no cut record may land after a call of this round is recorded.
-      await checkpoints;
+      await journal.wait();
       const ranTools = await runToolRound(this.toolRoundScope(), {
         roundItems,
         request,
@@ -714,13 +394,13 @@ export class AgentHarnessModelCaller {
       if (!ranTools && !steers?.hasStaged()) {
         // The step's own record covers the round that ends the loop. A cut record
         // left behind would hand a retry this answer after the step rejected it.
-        await dropCheckpoints();
+        await journal.drop();
         break;
       }
       if (!ranTools) {
         replayOutput(conversationInput, roundItems);
       }
-      await recordRound(bill);
+      await journal.record(bill);
 
       round += 1;
     }

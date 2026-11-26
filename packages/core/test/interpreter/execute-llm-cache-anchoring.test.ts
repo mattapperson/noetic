@@ -14,7 +14,8 @@ import type {
 import { createMessage, frameworkCast, SteeringAction } from '@noetic-tools/types';
 import type { BandedView } from '../../src/interpreter/context-assembly';
 import { anchoringAttributes } from '../../src/interpreter/context-assembly';
-import { executeCallModel, executeWithContext } from '../../src/interpreter/execute-action';
+import { executeCallModel } from '../../src/interpreter/execute-call-model';
+import { executeWithContext } from '../../src/interpreter/execute-with-context';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import {
   makeFunctionCallOutput,

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type { ContextData } from '@noetic-tools/context';
 import type { CallModelRequest, OutputCodec, StepCallModel } from '@noetic-tools/types';
-import { executeCallModel } from '../../src/interpreter/execute-action';
+import { executeCallModel } from '../../src/interpreter/execute-call-model';
 import { makeLLMResponse, makeMockContext, makeMockHarness } from '../_helpers';
 
 /** A tiny codec that upper-cases the text and records the deltas it was fed. */

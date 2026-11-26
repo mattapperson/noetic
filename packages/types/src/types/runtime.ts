@@ -676,3 +676,5 @@ export interface AppendPipelineResult {
   /** Re-render requests collected from layers. */
   rerenderRequests: RerenderRequest[];
 }
+
+export type { DetachedHandle } from './detached';

@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import type { ContextData } from '@noetic-tools/context';
 import type { Context, StepRunCode } from '@noetic-tools/types';
 import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
-import { executeRunCode } from '../../src/interpreter/execute-action';
+import { executeRunCode } from '../../src/interpreter/execute-run-code';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { makeMockContext, makeMockHarness } from '../_helpers';
 

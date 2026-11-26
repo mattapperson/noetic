@@ -1,3 +1,4 @@
+export { toStep } from '../../builders/sequence';
 export {
   checkPickNames,
   checkToolChoices,

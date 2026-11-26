@@ -2,8 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import { createLayerStateStore } from '@noetic-tools/context';
 import type { Context, StepInParallelAll, StepSpawn } from '@noetic-tools/types';
-import { executeSpawn } from '../../src/interpreter/execute-action';
 import { executeInParallel } from '../../src/interpreter/execute-control';
+import { executeSpawn } from '../../src/interpreter/execute-spawn';
 import { ContextImpl } from '../../src/runtime/context-impl';
 import { makeLayer, makeMockHarness, simpleExecute, sleep } from '../_helpers';
 

@@ -13,8 +13,8 @@ import type {
 import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
 import { loop } from '../../src/builders/loop-builder';
 import { execute } from '../../src/interpreter/execute';
-import { executeSpawn } from '../../src/interpreter/execute-action';
 import { executeInParallel } from '../../src/interpreter/execute-control';
+import { executeSpawn } from '../../src/interpreter/execute-spawn';
 import { NoeticAttr, NoeticEvent } from '../../src/observability/genai-attributes';
 import { SpanImpl } from '../../src/observability/span-impl';
 import { InMemoryExporter } from '../../src/observability/trace-exporter';
