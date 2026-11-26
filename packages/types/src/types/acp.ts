@@ -305,6 +305,8 @@ export interface AcpChildInfo {
   readonly sessionId: string;
   readonly title?: string;
   readonly description?: string;
+  /** The agent lets a client stop this subagent alone (`capabilities.cancel`). */
+  readonly cancellable?: boolean;
 }
 
 /** @public What identifies an agent's question beyond its params. */
@@ -691,6 +693,12 @@ export interface AcpSession {
   prompt(opts: AcpPromptOptions): Promise<AcpTurnResult>;
   /** Send `session/cancel` for an in-flight turn. */
   cancel(): Promise<void>;
+  /**
+   * Stop one subagent: `session/cancel` for its child session, which the
+   * agent announced as cancellable. The session's turn goes on. Absent where
+   * the session cannot reach its subagents' sessions.
+   */
+  cancelChild?(sessionId: string): Promise<void>;
   /**
    * Switch mode. Throws when the agent advertised no modes — on `session/new`
    * or on `session/load`.

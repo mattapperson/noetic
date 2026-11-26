@@ -180,3 +180,61 @@ describe('localMachine without wrap', () => {
     await machine.close();
   });
 });
+
+describe('localMachine onSpawn', () => {
+  it('reports the agent it starts itself, and its exit once it is stopped', async () => {
+    const spawned: Array<{
+      pid: number;
+      exited: Promise<void>;
+    }> = [];
+    const machine = await localMachine('tracked', {
+      keeper: false,
+      onStderr: () => undefined,
+      onSpawn: (agent) => spawned.push(agent),
+    })({});
+    const transport = await machine.launch({
+      command: process.execPath,
+      args: [
+        FIXTURE,
+      ],
+    });
+    expect(spawned).toHaveLength(1);
+    const agent = spawned[0];
+    if (!agent) {
+      throw new Error('no agent reported');
+    }
+    // The process is alive until the transport stops it.
+    expect(() => process.kill(agent.pid, 0)).not.toThrow();
+    await transport.close();
+    await agent.exited;
+    expect(() => process.kill(agent.pid, 0)).toThrow();
+
+    // An MCP server beside it is not the agent.
+    const server = await machine.spawn({
+      command: process.execPath,
+      args: [
+        FIXTURE,
+      ],
+    });
+    expect(spawned).toHaveLength(1);
+    await server.close();
+    await machine.close();
+  });
+
+  it("reports nothing for a kept agent, which is its keeper's child", async () => {
+    const spawned: number[] = [];
+    const machine = await localMachine('kept', {
+      onStderr: () => undefined,
+      onSpawn: (agent) => spawned.push(agent.pid),
+    })({});
+    const transport = await machine.launch({
+      command: process.execPath,
+      args: [
+        FIXTURE,
+      ],
+    });
+    expect(await echo(transport, PING)).toContain(PING);
+    expect(spawned).toEqual([]);
+    await machine.close();
+  });
+});

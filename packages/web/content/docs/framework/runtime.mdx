@@ -258,7 +258,7 @@ Framework events emitted during execution:
 | `{name}:step_completed` | After each step completes. |
 | `{name}:tool_round_started` | Before a tool execution round. |
 | `{name}:tool_call_started` | Before each tool call. Data: `{ name, callId, toolId, toolServer?, title?, kind?, locations?, status? }` — see [Tool calls, plans and agent settings](#tool-calls-plans-and-agent-settings). |
-| `{name}:tool_progress` | A running tool call reported progress. Data: `{ name, callId, toolId, toolServer?, status?, title?, kind?, locations?, progress?, content?, event? }`. |
+| `{name}:tool_progress` | A running tool call reported progress. Data: `{ name, callId, toolId, toolServer?, status?, title?, kind?, locations?, progress?, content?, input?, event? }`. |
 | `{name}:tool_call_completed` | After each tool call. Data: `{ name, callId, toolId, toolServer?, error, output?, content?, result? }`. |
 | `{name}:tool_model_output_failed` | A tool's `toModelOutput` threw; the model was given the call's JSON output. |
 | `{name}:tool_round_completed` | After all tool calls in a round. |
@@ -270,11 +270,11 @@ Framework events emitted during execution:
 | `{name}:model_call_stalled` | Stream-idle watchdog fired; the round is about to abort. Data: `{ round, idleTimeoutMs }`. |
 | `{name}:spend_pending` | A paid call was left with no settled bill, or `restore()` found one. Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }`, or `{ id, unreadable: true, unbounded: true }` for a record that no longer reads. See [Paid Calls](/docs/framework/durability#paid-calls). |
 | `{name}:spend_settled` | A pending paid call was settled or written off. Data: `{ id, cost, writtenOff? }`. |
-| `{name}:agent_started` | A [nested agent](#nested-agents) started. Scoped. Data: `{ stepId, title?, description? }`. |
+| `{name}:agent_started` | A [nested agent](#nested-agents) started. Scoped. Data: `{ stepId, title?, description?, callId?, cancellable }`: `callId` the call that started it, `cancellable` whether `harness.stopAgent(scope.id)` can stop it. |
 | `{name}:agent_status` | A nested agent reported its status: `running`, `idle`, `waiting` or `unknown`. Scoped. Data: `{ stepId, status, stopReason? }`. |
 | `{name}:plan_updated` | An agent reported its plan, whole. Data: `{ stepId, plan }`. |
 | `{name}:plan_removed` | An agent dropped a plan. Data: `{ stepId, id? }`. |
-| `{name}:agent_config_updated` | An agent changed its mode or model. Data: `{ stepId, mode?, model? }`. |
+| `{name}:agent_config_updated` | What an agent's session runs with as a turn starts, then each change. Data: `{ stepId, mode?, model?, effort? }`. |
 | `{name}:agent_completed` | The turn that ran a nested agent ended. Scoped. Data: `{ stepId, status }`, `status` being `completed`, `failed` or `cancelled`. |
 | `{name}:drain_started` | A [graceful stop](#graceful-stop) began. Data: `{ executionId, deadline, inFlight }`. |
 | `{name}:drain_finished` | A graceful stop ended, just before the cancel. Data: `{ executionId, reason, durationMs, finished, cutOff }`. |
@@ -286,9 +286,9 @@ callModel steps support an `emit` option to control step/tool framework event em
 Every agent — a `callModel` step's model, a coding agent a step runs, a nested agent — reports its work in one vocabulary, so a trail of what it is doing needs no agent-specific code:
 
 - **Which tool**: every event of a call carries `toolId` and, for an MCP tool, `toolServer` — group calls by the pair and each tool is one group. It is your tool's `name` (or the `presentation.identity` it declares; a connection tool is its operation on its connection), the name a coding agent gives its own tool (`Read`, `Bash`, `read_file` on `workspace`), or — for an agent that names a call by title alone — its `kind`.
-- **A tool call** starts with `tool_call_started`, carrying its human `title`, its `kind` (`read`, `edit`, `delete`, `move`, `search`, `execute`, `think`, `fetch`, `switch_mode`, `other`), the `locations` it works on (`{ path, line? }`) and `status: 'pending'` while it waits. While it runs, `tool_progress` carries what changed: `status`, `title`, `progress` (0 to 1), `content`. It ends with `tool_call_completed`, whose `content` is what it produced as structure: the content parts a model is given for text and media (`input_text`, `input_image` with a URL or data URL, `input_file`), plus `diff` (`path`, `oldText`, `newText`), `terminal`, `resource_link` and `resource`.
+- **A tool call** starts with `tool_call_started`, carrying its human `title`, its `kind` (`read`, `edit`, `delete`, `move`, `search`, `execute`, `think`, `fetch`, `switch_mode`, `other`), the `locations` it works on (`{ path, line? }`) and `status: 'pending'` while it waits. While it runs, `tool_progress` carries what changed: `status`, `title`, `progress` (0 to 1), `content`, and `input` when a coding agent wrote more of the call's input after announcing it. It ends with `tool_call_completed`, whose `content` is what it produced as structure: the content parts a model is given for text and media (`input_text`, `input_image` with a URL or data URL, `input_file`), plus `diff` (`path`, `oldText`, `newText`), `terminal`, `resource_link` and `resource`.
 - **A plan** — a coding agent's, or the one a `callModel` step's [`plan()` layer](/docs/framework/context-layers/plan) keeps (its PRD, as markdown) — arrives whole on `plan_updated` (`{ stepId, plan }`, `plan.entries` each `{ content, priority, status }`, or a `markdown` or `uri` plan) and replaces the last one with the same `id`; `plan_removed` drops it.
-- **Settings**: `agent_config_updated` says the agent switched its `mode` or its `model`.
+- **Settings**: `agent_config_updated` says what the agent's session runs with as a turn starts — its `mode`, its `model` and how hard it reasons (`effort`) — then each change.
 - **An image an agent answers with** is an `image_generation_call` item, its `result` a data URL — not text.
 
 ```ts

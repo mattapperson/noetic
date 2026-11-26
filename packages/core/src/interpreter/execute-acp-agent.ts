@@ -1059,6 +1059,11 @@ async function runTurn<TContext, I, O>(params: {
     );
   }
   bridge.begin();
+  bridge.announceSettings(resolution.live.session);
+  const cancelChild = resolution.live.session.cancelChild?.bind(resolution.live.session);
+  if (cancelChild) {
+    bridge.offerChildStops(cancelChild);
+  }
   let result: AcpTurnResult;
   try {
     // Per-turn signal, so a session reused across turns is cancelled by the

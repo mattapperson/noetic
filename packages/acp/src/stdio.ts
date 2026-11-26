@@ -96,6 +96,20 @@ export interface LocalMachineOptions {
   wrap?: (command: LocalAgentCommand, info: LocalWrapInfo) => SpawnCommand | Promise<SpawnCommand>;
   /** The agent's stderr. Default: this process's stderr. */
   onStderr?: (chunk: string) => void;
+  /**
+   * Told of each agent this machine starts as its own child, once it runs: a
+   * host that tracks its processes (to list them, or to stop what is left
+   * when it shuts down) learns them here. A kept agent is its keeper's child,
+   * not this process's, and is not reported; nor is an MCP server.
+   */
+  onSpawn?: (agent: LocalAgentProcess) => void;
+}
+
+/** @public An agent process {@link LocalMachineOptions.onSpawn} reports. */
+export interface LocalAgentProcess {
+  readonly pid: number;
+  /** Settles once the process has exited. */
+  readonly exited: Promise<void>;
 }
 
 /** @public The command {@link LocalMachineOptions.wrap} receives: `env` is complete. */
@@ -193,6 +207,7 @@ export function localMachine(
     const start = async (
       command: SpawnCommand,
       env: Record<string, string | undefined>,
+      onSpawn?: (agent: LocalAgentProcess) => void,
     ): Promise<AcpTransport> => {
       const transport = await spawnStdio(
         agentId,
@@ -204,6 +219,7 @@ export function localMachine(
           signal,
           whenHostExits,
           onStderr: options.onStderr,
+          onSpawn,
         },
       );
       started.add(transport);
@@ -228,7 +244,7 @@ export function localMachine(
         const prepared = await prepare(command);
         const link = await openKeeper();
         if (!link) {
-          return await start(prepared, prepared.env ?? {});
+          return await start(prepared, prepared.env ?? {}, options.onSpawn);
         }
         const transport = await link.launch(prepared);
         started.add(transport);
@@ -280,10 +296,12 @@ async function spawnStdio(
     signal,
     whenHostExits = 'keep',
     onStderr,
+    onSpawn,
   }: {
     signal: AbortSignal | undefined;
     whenHostExits?: AcpWhenHostExits;
     onStderr?: (chunk: string) => void;
+    onSpawn?: (agent: LocalAgentProcess) => void;
   },
 ): Promise<AcpTransport> {
   const fail = (message: string, cause: unknown): AcpConnectError =>
@@ -314,6 +332,10 @@ async function spawnStdio(
       windowsHide: true,
     },
   );
+  // Listened for at once: a child that dies at start still settles it.
+  const exited = new Promise<void>((resolve) => {
+    child.once('exit', () => resolve());
+  });
 
   const forgetOnExit = whenHostExits === 'stop' ? stopWithHost(child) : () => undefined;
   let closing: Promise<void> | undefined;
@@ -363,6 +385,12 @@ async function spawnStdio(
   if (!stdin || !stdout) {
     await close().catch(() => undefined);
     throw fail('was spawned without usable stdio pipes', undefined);
+  }
+  if (onSpawn && child.pid !== undefined) {
+    onSpawn({
+      pid: child.pid,
+      exited,
+    });
   }
 
   return {

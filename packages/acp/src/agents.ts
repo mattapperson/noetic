@@ -27,6 +27,8 @@ import {
   piToolWiring,
   sessionToolWiring,
 } from './tool-wiring';
+import type { TurnUsageOf } from './turn-usage';
+import { claudeTurnUsage, codexTurnUsage } from './turn-usage';
 
 /** @public How to launch an agent as a process. */
 export interface AcpProcessSpec {
@@ -143,6 +145,7 @@ function preset({
   wiring,
   instructionsMeta,
   toolIdOf,
+  usageOf,
 }: {
   agentId: string;
   base: AcpProcessSpec;
@@ -150,6 +153,7 @@ function preset({
   wiring: AcpToolWiring;
   instructionsMeta?: InstructionsMeta;
   toolIdOf?: AcpAgent['toolIdOf'];
+  usageOf?: TurnUsageOf;
 }): AcpAgent {
   const spec: AcpProcessSpec = {
     command: opts.command ?? base.command,
@@ -180,6 +184,7 @@ function preset({
     instructionsMeta,
     sessionMeta: opts.sessionMeta,
     toolIdOf,
+    usageOf,
   });
 }
 
@@ -210,6 +215,7 @@ export function claudeCode(opts: AcpPresetOptions = {}): AcpAgent {
     wiring: claudeToolWiring,
     instructionsMeta: claudeInstructionsMeta,
     toolIdOf: claudeToolId,
+    usageOf: claudeTurnUsage,
   });
 }
 
@@ -224,6 +230,7 @@ export function codex(opts: AcpPresetOptions = {}): AcpAgent {
     opts,
     wiring: codexToolWiring,
     toolIdOf: codexToolId,
+    usageOf: codexTurnUsage,
   });
 }
 

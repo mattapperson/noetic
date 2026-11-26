@@ -909,3 +909,143 @@ describe("a subagent's requests to a person", () => {
     expect(heldEvents.every((e) => e.scope === undefined)).toBe(true);
   });
 });
+
+describe('a nested agent: what started it, what it was asked, and stopping it', () => {
+  function started(): {
+    harness: AgentHarness;
+    events: Captured[];
+    bridge: AcpEventBridge;
+    stopped: string[];
+  } {
+    const harness = new AgentHarness({
+      name: 'h',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const events: Captured[] = [];
+    frameworkCast<{
+      _broadcaster: unknown;
+    }>(ctx)._broadcaster = {
+      emit(event: Captured) {
+        events.push(event);
+      },
+    };
+    const b = new AcpEventBridge(
+      {
+        id: 'step',
+      },
+      ctx,
+    );
+    const stopped: string[] = [];
+    b.offerChildStops(async (sessionId) => {
+      stopped.push(sessionId);
+    });
+    return {
+      harness,
+      events,
+      bridge: b,
+      stopped,
+    };
+  }
+
+  const lineage = (cancellable: boolean) => [
+    {
+      sessionId: 'kid',
+      title: 'general-purpose',
+      description: 'Count files',
+      cancellable,
+    },
+  ];
+
+  /** The parent's Agent call, then the child's first message naming it. */
+  function launch(b: AcpEventBridge, cancellable: boolean): void {
+    b.begin();
+    b.forward({
+      sessionId: 'root',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'toolu_agent',
+        title: 'Agent',
+        status: 'pending',
+        rawInput: {},
+      },
+    });
+    b.forwardChild({
+      sessionId: 'kid',
+      announcement: true,
+      lineage: lineage(cancellable),
+      update: {
+        sessionUpdate: 'subagent_update',
+        sessionId: 'kid',
+        title: 'general-purpose',
+        description: 'Count files',
+        state: {
+          state: 'running',
+        },
+      },
+    });
+    b.forwardChild({
+      sessionId: 'kid',
+      announcement: false,
+      lineage: lineage(cancellable),
+      update: {
+        sessionUpdate: 'session_message',
+        messageId: 'toolu_agent',
+        senderSessionId: 'root',
+        recipientSessionId: 'kid',
+        content: [
+          {
+            type: 'text',
+            text: 'Run ls and wc -l.',
+          },
+        ],
+      },
+    });
+  }
+
+  it('names the call that started it and shows its prompt as its input', () => {
+    const { events, bridge: b } = started();
+    launch(b, true);
+    const start = events.find((e) => e.type === 'h:agent_started');
+    expect(start?.data).toEqual({
+      stepId: 'step',
+      title: 'general-purpose',
+      description: 'Count files',
+      callId: 'toolu_agent',
+      cancellable: true,
+    });
+    const input = events.find((e) => e.type === 'h:item_appended' && e.scope);
+    expect(input?.scope).toEqual(start?.scope);
+    expect(input?.data.item).toMatchObject({
+      type: 'message',
+      role: 'user',
+    });
+    expect(JSON.stringify(input?.data.item)).toContain('Run ls and wc -l.');
+  });
+
+  it('stops one cancellable nested agent through the harness, while its turn runs', async () => {
+    const { harness, events, bridge: b, stopped } = started();
+    launch(b, true);
+    const scope = events.find((e) => e.type === 'h:agent_started')?.scope;
+    if (!scope) {
+      throw new Error('no nested agent');
+    }
+    expect(await harness.stopAgent(scope.id)).toBe(true);
+    expect(stopped).toEqual([
+      'kid',
+    ]);
+    expect(await harness.stopAgent('no-such-agent')).toBe(false);
+    b.finalize(RESULT);
+    // Its turn is over: nothing is left to stop.
+    expect(await harness.stopAgent(scope.id)).toBe(false);
+  });
+
+  it('offers no stop for an agent its agent does not let a client stop', async () => {
+    const { harness, events, bridge: b, stopped } = started();
+    launch(b, false);
+    const start = events.find((e) => e.type === 'h:agent_started');
+    expect(start?.data.cancellable).toBe(false);
+    expect(await harness.stopAgent(start?.scope?.id ?? '')).toBe(false);
+    expect(stopped).toEqual([]);
+  });
+});

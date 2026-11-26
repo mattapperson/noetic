@@ -258,4 +258,19 @@ export function modelOf(
   return option?.type === 'select' ? option.currentValue : undefined;
 }
 
+/**
+ * How hard the session's model thinks: its reasoning option's current value,
+ * found by the protocol's `thought_level` category, else by the ids Claude
+ * Code (`effort`) and Codex (`reasoning_effort`) give it.
+ */
+export function effortOf(
+  options: ReadonlyArray<AcpSessionConfigOption> | null | undefined,
+): string | undefined {
+  const selects = (options ?? []).filter((option) => option.type === 'select');
+  const option =
+    selects.find((candidate) => candidate.category === 'thought_level') ??
+    selects.find((candidate) => candidate.id === 'effort' || candidate.id === 'reasoning_effort');
+  return option?.type === 'select' ? option.currentValue : undefined;
+}
+
 //#endregion

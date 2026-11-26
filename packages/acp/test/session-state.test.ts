@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type * as acp from '@agentclientprotocol/sdk';
 import { frameworkCast, isAcpCapabilityError } from '@noetic-tools/types';
 import { rawInputRecord } from '../src/permission-channel';
+import { claudeTurnUsage, codexTurnUsage } from '../src/turn-usage';
 import { createAcpTestRig, textChunk } from './_helpers';
 
 const TEXT_PROMPT: acp.ContentBlock[] = [
@@ -197,6 +198,85 @@ describe('current session updates (#96)', () => {
     expect(result.usage).toBeUndefined();
 
     await rig.close();
+  });
+
+  test("charges the turn what the agent's usageOf reads from its answer", async () => {
+    const rig = await createAcpTestRig({
+      script: {
+        usage: {
+          inputTokens: 120,
+          outputTokens: 30,
+          totalTokens: 450,
+          cachedReadTokens: 200,
+          cachedWriteTokens: 100,
+        },
+      },
+      usageOf: claudeTurnUsage,
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+
+    const result = await session.prompt({
+      content: TEXT_PROMPT,
+    });
+
+    expect(result.usage).toEqual({
+      input: 420,
+      output: 30,
+      total: 450,
+      cached: 200,
+    });
+
+    await rig.close();
+  });
+});
+
+describe('preset turn usage', () => {
+  const answer = (usage: acp.Usage | undefined): acp.PromptResponse => ({
+    stopReason: 'end_turn',
+    ...(usage
+      ? {
+          usage,
+        }
+      : {}),
+  });
+
+  test('Claude Code counts cache reads and writes as input; Codex already does', () => {
+    const usage: acp.Usage = {
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 45,
+      cachedReadTokens: 20,
+      cachedWriteTokens: 10,
+    };
+    expect(claudeTurnUsage(answer(usage))).toEqual({
+      input: 40,
+      output: 5,
+      total: 45,
+      cached: 20,
+    });
+    expect(codexTurnUsage(answer(usage))).toEqual({
+      input: 10,
+      output: 5,
+      total: 15,
+      cached: 20,
+    });
+  });
+
+  test('an answer without counts charges nothing', () => {
+    expect(claudeTurnUsage(answer(undefined))).toBeUndefined();
+    expect(
+      codexTurnUsage(
+        answer(
+          frameworkCast<acp.Usage>({
+            inputTokens: -1,
+            outputTokens: 2,
+            totalTokens: 1,
+          }),
+        ),
+      ),
+    ).toBeUndefined();
   });
 });
 

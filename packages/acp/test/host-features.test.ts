@@ -8,6 +8,7 @@
 import { describe, expect, test } from 'bun:test';
 import type * as acp from '@agentclientprotocol/sdk';
 import { RequestError } from '@agentclientprotocol/sdk';
+import type { AcpChildInfo } from '@noetic-tools/types';
 import { frameworkCast, isAcpCapabilityError } from '@noetic-tools/types';
 import { announcedChild, canonicalJson } from '../src/connection';
 import { createAcpTestRig, textChunk } from './_helpers';
@@ -494,6 +495,55 @@ function subagentAnnounce(parent: string, child: string): acp.SessionNotificatio
 }
 
 describe("subagents' own sessions", () => {
+  test('a subagent announced as cancellable is stopped alone, by its child session', async () => {
+    const lineages: Array<ReadonlyArray<AcpChildInfo>> = [];
+    let stopKid: (() => Promise<void>) | undefined;
+    const rig = await createAcpTestRig({
+      onChildUpdate: (child) => {
+        lineages.push(child.lineage);
+      },
+      script: {
+        onPrompt: async (conn, params) => {
+          await conn.sessionUpdate({
+            sessionId: params.sessionId,
+            update: {
+              sessionUpdate: 'subagent_update',
+              sessionId: 'kid',
+              title: 'Explore',
+              capabilities: {
+                cancel: {},
+              },
+            },
+          });
+          await stopKid?.();
+          await conn.sessionUpdate(textChunk(params.sessionId, 'the answer'));
+        },
+      },
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+    stopKid = () => session.cancelChild?.('kid') ?? Promise.resolve();
+    const result = await session.prompt({
+      content: PROMPT,
+    });
+    expect(lineages[0]).toEqual([
+      {
+        sessionId: 'kid',
+        title: 'Explore',
+        cancellable: true,
+      },
+    ]);
+    // The child was cancelled; the step's turn went on.
+    expect(rig.calls.cancel).toEqual([
+      {
+        sessionId: 'kid',
+      },
+    ]);
+    expect(result.text).toBe('the answer');
+    await rig.close();
+  });
+
   test("a child session's updates, nested ones too, never reach the step", async () => {
     const rig = await createAcpTestRig({
       script: {
