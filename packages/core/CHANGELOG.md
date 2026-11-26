@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.12 (2026-11-26)
+
+* feat: an agent's tool calls, plans and settings reach the host in one vocabulary (#172) ([cf712bf](https://github.com/mattapperson/noetic/commit/cf712bf)), closes [#172](https://github.com/mattapperson/noetic/issues/172) [#170](https://github.com/mattapperson/noetic/issues/170)
+
 ## @noetic-tools/core-v5.22.0-next.11 (2026-11-25)
 
 * feat: support video input in user messages (#173) ([9cd2683](https://github.com/mattapperson/noetic/commit/9cd2683)), closes [#173](https://github.com/mattapperson/noetic/issues/173)
