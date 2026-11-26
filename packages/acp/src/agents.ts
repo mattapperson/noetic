@@ -27,6 +27,8 @@ import {
   piToolWiring,
   sessionToolWiring,
 } from './tool-wiring';
+import type { TurnUsageOf } from './turn-usage';
+import { turnUsage } from './turn-usage';
 
 /** @public How to launch an agent as a process. */
 export interface AcpProcessSpec {
@@ -134,6 +136,14 @@ export interface AcpPresetOptions {
    * (Claude Code's `{ claudeCode: { options } }`).
    */
   sessionMeta?: Readonly<Record<string, unknown>>;
+  /**
+   * How a turn's tokens are read from the agent's answer, in place of the
+   * preset's own reader; `false` charges no turn. The presets read each
+   * turn's own figures, as the bridge versions they were checked against
+   * report them; a bridge that reports the session's running total instead
+   * needs `false` or a reader of its own.
+   */
+  usageOf?: TurnUsageOf | false;
 }
 
 function preset({
@@ -143,6 +153,7 @@ function preset({
   wiring,
   instructionsMeta,
   toolIdOf,
+  usageOf,
 }: {
   agentId: string;
   base: AcpProcessSpec;
@@ -150,6 +161,7 @@ function preset({
   wiring: AcpToolWiring;
   instructionsMeta?: InstructionsMeta;
   toolIdOf?: AcpAgent['toolIdOf'];
+  usageOf?: TurnUsageOf;
 }): AcpAgent {
   const spec: AcpProcessSpec = {
     command: opts.command ?? base.command,
@@ -180,6 +192,7 @@ function preset({
     instructionsMeta,
     sessionMeta: opts.sessionMeta,
     toolIdOf,
+    usageOf: opts.usageOf === false ? undefined : (opts.usageOf ?? usageOf),
   });
 }
 
@@ -210,6 +223,7 @@ export function claudeCode(opts: AcpPresetOptions = {}): AcpAgent {
     wiring: claudeToolWiring,
     instructionsMeta: claudeInstructionsMeta,
     toolIdOf: claudeToolId,
+    usageOf: turnUsage,
   });
 }
 
@@ -224,6 +238,7 @@ export function codex(opts: AcpPresetOptions = {}): AcpAgent {
     opts,
     wiring: codexToolWiring,
     toolIdOf: codexToolId,
+    usageOf: turnUsage,
   });
 }
 

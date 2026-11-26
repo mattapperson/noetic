@@ -15,7 +15,7 @@ import type {
   AcpToolCallContent,
   AcpTurnResult,
   Item,
-  TokenUsage,
+  RoundUsage,
 } from '@noetic-tools/types';
 import {
   assistantMessageItem,
@@ -123,7 +123,7 @@ export class AcpTurnAccumulator {
   /** Build the turn result. */
   result(opts: {
     stopReason: AcpStopReason;
-    usage?: TokenUsage;
+    usage?: RoundUsage;
     cost?: number;
     reportedUsage?: AcpTurnResult['reportedUsage'];
   }): AcpTurnResult {

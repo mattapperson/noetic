@@ -119,6 +119,11 @@ export interface ToolCallProgress extends ToolCallPresentation {
   progress?: number;
   /** What the call has produced so far: replaces what an earlier report gave. */
   content?: ToolContent[];
+  /**
+   * The call's input, whole, when it changed: an agent may announce a call
+   * before it has written its input.
+   */
+  input?: unknown;
 }
 
 //#endregion

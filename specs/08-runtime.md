@@ -781,12 +781,29 @@ show one.
   `response.completed`, and its output indexes are its own, so a consumer
   folding one scope never collides with another.
 - **Its life** is three framework events, each scoped: `agent_started`
-  (`{ title?, description? }`), `agent_status` (`{ status: 'running' | 'idle'
+  (`{ title?, description?, callId?, cancellable }`), `agent_status` (`{ status: 'running' | 'idle'
   | 'waiting' | 'unknown', stopReason? }`) as the agent reports it, and
   `agent_completed` (`{ status: 'completed' | 'failed' | 'cancelled' }`) when
   the turn that ran it ends — from its last stop reason; running again clears
   an earlier one. Once that turn has ended nothing more of it is shown: an
   update that arrives late opens no new nested agent.
+- **What started it, and what it was asked.** `callId` is the call of the
+  agent above it whose message opened it in this turn — one of the turn's
+  calls, whose id that first message carries: the call that started it, or,
+  for a subagent an earlier turn started, the call that spoke to it again.
+  A message sent to it by another session — what the agent above asked of
+  it — is its input: a user message on its `item_appended`, scoped, and like
+  the rest of its events subject to the step's `emit`. It is shown whole,
+  once, as it stands when the nested agent starts on it or when the turn
+  ends; a later edit of it shows nothing.
+- **Stopping one.** `cancellable` says its agent lets a client stop it alone.
+  While its turn runs in this process, `harness.stopAgent(scope.id)` stops it
+  and the turn goes on; the agent then reports how it ended with its
+  `agent_status`. It answers false for any other id, for one whose last
+  status was `idle` (it already stopped), for one the session can no longer
+  stop (its connection forgot it, or is gone), and once the agent answered
+  the turn. It reaches only turns running in this process: a host that
+  drives a harness over IPC, or reads a stored event log, cannot stop one.
 - **Ids.** `scope.id` is the nested agent's identity — scoped events carry no
   adapter id. It is the step's dispatch path, the turn, and the subagent's own
   id (`<path>/turn:<turn>/agent:<id>`), so a steering retry or a later prompt
@@ -838,8 +855,9 @@ its announcement would have been.
   `tool_call_held` (§ Held tool calls).
 - `tool_progress` — what a running call reports, each field only when the
   report carries it: `{ name, callId, toolId, toolServer?, status?, title?, kind?,
-  locations?, progress?, content? }`. `progress` is a fraction from 0 to 1; `content` replaces what an
-  earlier report gave. A generator tool's report also carries the yielded
+  locations?, progress?, content?, input? }`. `progress` is a fraction from 0 to 1; `content` replaces what an
+  earlier report gave. `input` is the call's input, whole, when an agent
+  wrote more of it after announcing the call. A generator tool's report also carries the yielded
   `event`.
 - `tool_call_completed` — `{ name, callId, toolId, toolServer?, error,
   output?, content?, result? }`.
@@ -903,8 +921,11 @@ none runs (`init`, between turns) carries none.
 
 **The agent's settings** that a host shows while it works:
 
-- `agent_config_updated` — `{ stepId, mode?, model? }`: the agent changed its
-  mode, or the model it runs with, carrying only what changed. A step's last
+- `agent_config_updated` — `{ stepId, mode?, model?, effort? }`: what the
+  session runs with as each turn starts — its mode, its model and how hard
+  that model reasons, as far as the agent says — then, carrying only what
+  changed, each change the agent reports. `effort: null` says the session no
+  longer has an effort to set (a model without one). A step's last
   model is also its `lastStepMeta.model` (`02-step-variants` § `StepMeta`).
 
 All three kinds are scoped to the nested agent they belong to, like the rest of
@@ -932,7 +953,7 @@ its events, and pass the step's `emit` filter.
 | `{name}:step_completed` | Emitted after each step completes. Data: `{ stepId, kind }` |
 | `{name}:tool_round_started` | Emitted before a tool execution round. Data: `{ round, toolCount }` |
 | `{name}:tool_call_started` | Emitted before each tool call. Data: `{ name, callId, toolId, toolServer?, title?, kind?, locations?, status? }` (§ Tool calls, plans and agent settings) |
-| `{name}:tool_progress` | A running tool call reported progress (§ Tool calls, plans and agent settings). Data: `{ name, callId, toolId, toolServer?, status?, title?, kind?, locations?, progress?, content?, event? }`; an `invokeTool` step's also carries `{ stepId, toolName }`, its `callId` the step id |
+| `{name}:tool_progress` | A running tool call reported progress (§ Tool calls, plans and agent settings). Data: `{ name, callId, toolId, toolServer?, status?, title?, kind?, locations?, progress?, content?, input?, event? }`; an `invokeTool` step's also carries `{ stepId, toolName }`, its `callId` the step id |
 | `{name}:tool_call_completed` | Emitted after each tool call. Data: `{ name, callId, toolId, toolServer?, error, output?, content?, result? }` |
 | `{name}:tool_model_output_failed` | Emitted when a tool's `toModelOutput` throws; the model is given the call's output text instead (`02-step-variants` § What the model is given). Data: `{ name, callId, error }` |
 | `{name}:tool_round_completed` | Emitted after all tool calls in a round. Data: `{ round, toolCount }` |
@@ -945,12 +966,12 @@ its events, and pass the step's `emit` filter.
 | `{name}:stream_pipe_error` | Emitted when SDK stream piping fails. Data: `{ error }` |
 | `{name}:spend_pending` | Emitted when a paid call is left with no settled bill, or `restore()` finds one (`23-durable-execution` § Paid dispatches). Data: `{ id, kind, model, generationId?, ceiling?, unbounded? }`, or `{ id, unreadable: true, unbounded: true }` for a record that no longer reads |
 | `{name}:spend_settled` | Emitted when a pending paid call is settled or written off. Data: `{ id, cost, writtenOff? }` |
-| `{name}:agent_started` | A nested agent started (§ Nested agents). Scoped. Data: `{ stepId, title?, description? }` |
+| `{name}:agent_started` | A nested agent started (§ Nested agents). Scoped. Data: `{ stepId, title?, description?, callId?, cancellable }` |
 | `{name}:agent_status` | A nested agent reported its status. Scoped. Data: `{ stepId, status, stopReason? }` |
 | `{name}:agent_completed` | The turn that ran a nested agent ended. Scoped. Data: `{ stepId, status }` |
 | `{name}:plan_updated` | An agent reported its plan, whole (§ Tool calls, plans and agent settings). Data: `{ stepId, plan }` |
 | `{name}:plan_removed` | An agent dropped a plan. Data: `{ stepId, id? }` |
-| `{name}:agent_config_updated` | An agent changed its mode or its model. Data: `{ stepId, mode?, model? }` |
+| `{name}:agent_config_updated` | What an agent's session runs with as a turn starts, then each change. Data: `{ stepId, mode?, model?, effort? }` |
 | `{name}:workspace_access` | A step read or wrote a file or ran a command through the host's fs or shell adapters on an agent's behalf — served or refused (spec 27 § Observing client-side activity). Data: `{ stepId, operation: 'read_file' \| 'write_file' \| 'run_command' \| 'read_output' \| 'wait' \| 'kill' \| 'release', path?, command?, terminalId?, allowed, reason? }` |
 | `{name}:drain_started` | Emitted when a graceful stop begins (see Graceful Stop). Data: `{ executionId, deadline, inFlight }` |
 | `{name}:drain_finished` | Emitted when a graceful stop ends, just before the cancel. Data: `{ executionId, reason, durationMs, finished, cutOff }` |

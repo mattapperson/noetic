@@ -311,6 +311,74 @@ describe('agent tool calls carry the generic presentation', () => {
   });
 });
 
+describe("an own call's input", () => {
+  it('reports input the agent writes after announcing the call, each change once', () => {
+    const { bridge, events } = bridgeCtx();
+    bridge.begin();
+    // Claude Code announces a call before its input is written.
+    send(bridge, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'c1',
+      title: 'Bash',
+      kind: 'execute',
+      status: 'pending',
+      rawInput: {},
+    });
+    send(bridge, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'c1',
+      rawInput: {
+        command: 'sleep 8',
+      },
+    });
+    send(bridge, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'c1',
+      rawInput: {
+        command: 'sleep 8',
+      },
+    });
+    // The same input with its keys in another order, and no input, are no change.
+    send(bridge, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'c1',
+      rawInput: {
+        run_in_background: true,
+        command: 'sleep 8',
+      },
+    });
+    send(bridge, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'c1',
+      rawInput: null,
+    });
+    send(bridge, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'c1',
+      status: 'completed',
+      rawInput: {
+        command: 'sleep 8',
+        run_in_background: true,
+      },
+    });
+
+    expect(
+      named(events, 'tool_progress')
+        .map((event) => event.data.input)
+        .filter((input) => input !== undefined),
+    ).toEqual([
+      {
+        command: 'sleep 8',
+      },
+      {
+        run_in_background: true,
+        command: 'sleep 8',
+      },
+    ]);
+    expect(named(events, 'tool_call_completed')).toHaveLength(1);
+  });
+});
+
 describe("an agent's plan, mode and model", () => {
   it('replaces the plan on every plan update, as plan_updated', () => {
     const { bridge, events } = bridgeCtx();
@@ -406,6 +474,111 @@ describe("an agent's plan, mode and model", () => {
         model: 'opus',
       },
     ]);
+  });
+
+  it('tells what the session starts with, then only what changes, effort included', () => {
+    const { bridge, events } = bridgeCtx();
+    bridge.begin();
+    const select = (id: string, category: string | undefined, currentValue: string) => ({
+      type: 'select' as const,
+      id,
+      name: id,
+      ...(category === undefined
+        ? {}
+        : {
+            category,
+          }),
+      currentValue,
+      options: [],
+    });
+    bridge.announceSettings({
+      modes: {
+        currentModeId: 'default',
+        availableModes: [],
+      },
+      configOptions: [
+        select('model', 'model', 'sonnet'),
+        // Claude Code names its effort option without the protocol's category.
+        select('effort', undefined, 'high'),
+      ],
+    });
+    send(bridge, {
+      sessionUpdate: 'config_option_update',
+      configOptions: [
+        select('model', 'model', 'sonnet'),
+        select('reasoning', 'thought_level', 'low'),
+      ],
+    });
+
+    expect(named(events, 'agent_config_updated').map((event) => event.data)).toEqual([
+      {
+        stepId: 'agent',
+        mode: 'default',
+        model: 'sonnet',
+        effort: 'high',
+      },
+      {
+        stepId: 'agent',
+        effort: 'low',
+      },
+    ]);
+  });
+
+  it('tells the same mode once, and an effort the session no longer has as null', () => {
+    const { bridge, events } = bridgeCtx();
+    bridge.begin();
+    const select = (id: string, category: string, currentValue: string) => ({
+      type: 'select' as const,
+      id,
+      name: id,
+      category,
+      currentValue,
+      options: [],
+    });
+    bridge.announceSettings({
+      modes: {
+        currentModeId: 'default',
+        availableModes: [],
+      },
+      configOptions: [
+        select('model', 'model', 'sonnet'),
+        select('effort', 'thought_level', 'high'),
+      ],
+    });
+    send(bridge, {
+      sessionUpdate: 'current_mode_update',
+      currentModeId: 'default',
+    });
+    // A model without an effort option.
+    send(bridge, {
+      sessionUpdate: 'config_option_update',
+      configOptions: [
+        select('model', 'model', 'haiku'),
+      ],
+    });
+
+    expect(named(events, 'agent_config_updated').map((event) => event.data)).toEqual([
+      {
+        stepId: 'agent',
+        mode: 'default',
+        model: 'sonnet',
+        effort: 'high',
+      },
+      {
+        stepId: 'agent',
+        model: 'haiku',
+        effort: null,
+      },
+    ]);
+  });
+
+  it('tells nothing at the start of a session that says nothing of its settings', () => {
+    const { bridge, events } = bridgeCtx();
+    bridge.begin();
+    bridge.announceSettings({
+      configOptions: [],
+    });
+    expect(named(events, 'agent_config_updated')).toEqual([]);
   });
 });
 

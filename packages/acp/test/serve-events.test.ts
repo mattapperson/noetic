@@ -831,6 +831,32 @@ describe('pumpTurnEvents — what an editor cannot show', () => {
     expect(reports).toHaveLength(2);
   });
 
+  it("sends an agent call's input written after its announcement as rawInput", async () => {
+    const { updates } = await pump([
+      START,
+      fw('tool_call_started', {
+        name: 'Bash',
+        callId: 'c1',
+      }),
+      fw('tool_progress', {
+        name: 'Bash',
+        callId: 'c1',
+        input: {
+          command: 'ls',
+        },
+      }),
+      END,
+    ]);
+    const reports = updates.filter((update) => update.sessionUpdate === 'tool_call_update');
+    expect(reports[0]).toEqual({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'c1',
+      rawInput: {
+        command: 'ls',
+      },
+    });
+  });
+
   it('shows one plan at a time: another plan replaces it, only its own removal clears it', async () => {
     const plan = (id: string | undefined, content: string) =>
       fw('plan_updated', {

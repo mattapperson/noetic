@@ -21,6 +21,8 @@ import type {
   AcpChildUpdate,
   AcpClientActivity,
   AcpClientMethod,
+  AcpContentBlock,
+  AcpSession,
   AcpSessionNotification,
   AcpTurnResult,
   AgentScope,
@@ -28,22 +30,27 @@ import type {
   ContextData,
   FunctionCallItem,
   FunctionCallOutputItem,
+  InputContentPart,
+  InputMessageItem,
   Item,
   StepAcpAgent,
   ToolCallPresentation,
   ToolContent,
   ToolIdentity,
 } from '@noetic-tools/types';
-import { frameworkCast, toolIdentityData } from '@noetic-tools/types';
+import { createMessage, frameworkCast, toolIdentityData } from '@noetic-tools/types';
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
+import { offerStop } from '../runtime/nested-agents';
 import { errorMessage } from '../util/error-message';
 import type { ToolCallUpdate } from './acp-activity';
 import {
+  blockContent,
   contentText,
   dataUrl,
+  effortOf,
   modelOf,
   planOf,
   presentationOf,
@@ -63,6 +70,38 @@ type AgentEnd = 'completed' | 'failed' | 'cancelled';
 interface ChildAgent {
   readonly scope: AgentScope;
   readonly bridge: AcpEventBridge;
+}
+
+/** A message of a child's session, as its upserts and chunks left it. */
+interface ChildMessage {
+  readonly id: string;
+  readonly sender?: string;
+  readonly recipient?: string;
+  readonly content: ReadonlyArray<AcpContentBlock>;
+  /** Shown as the child's input already. */
+  shown: boolean;
+}
+
+/**
+ * A message's content as a user message: text and media as the parts a model
+ * is given, a resource as the text that names it.
+ */
+function inputMessage(content: ReadonlyArray<AcpContentBlock>): InputMessageItem {
+  return {
+    ...createMessage('', 'user'),
+    content: content.map((block): InputContentPart => {
+      const part = blockContent(block);
+      return part.type === 'input_text' ||
+        part.type === 'input_image' ||
+        part.type === 'input_file' ||
+        part.type === 'input_video'
+        ? part
+        : {
+            type: 'input_text',
+            text: blockText(block),
+          };
+    }),
+  };
 }
 
 /** What a child last announced of its work. */
@@ -167,8 +206,11 @@ interface TurnCall {
    * bridge has not run it yet. `open`: started, not completed. `closed`: done.
    */
   state: 'announced' | 'open' | 'closed';
-  /** What the announcement gave as the call's input. */
-  readonly input?: unknown;
+  /**
+   * The call's input as last reported: what the announcement gave, then what
+   * the agent's later updates of an own call filled in.
+   */
+  input?: unknown;
   /** How the announcement presented the call. */
   readonly presentation?: ToolCallPresentation;
   /** What the call has produced so far: the agent's latest content for it. */
@@ -185,12 +227,16 @@ class TurnCalls {
   }> = [];
 }
 
-/** A call's input as a comparable key. */
+/** A call's input as a comparable key: the same input whatever order its keys come in. */
 function inputKey(input: unknown): string {
   if (typeof input === 'string') {
     return input;
   }
-  return JSON.stringify(input ?? {});
+  return JSON.stringify(input ?? {}, (_key, value: unknown) =>
+    typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : value,
+  );
 }
 
 /** What a step did through the host's fs or shell adapters, as `workspace_access` names it. */
@@ -238,8 +284,10 @@ export class AcpEventBridge {
   private messageId = '';
   private messageText = '';
   private sawText = false;
-  /** The model the agent last reported, so a change is told once. */
+  /** The mode, model and effort the agent last reported, so a change is told once. */
+  private mode: string | undefined;
   private model: string | undefined;
+  private effort: string | undefined;
   /** Maps an agent's title for a bridged tool call to the tool's wire name. */
   toolNameOf: (title: string) => string | undefined = () => undefined;
   /** Which tool a call to one of the step's tools is to, from its wire name and input. */
@@ -256,6 +304,14 @@ export class AcpEventBridge {
   private readonly lineages = new Map<string, ReadonlyArray<AcpChildInfo>>();
   /** Each announced child's status, shown once it is. */
   private readonly statuses = new Map<string, ChildStatus>();
+  /** The call of the turn that started each child, as its first message said. */
+  private readonly launches = new Map<string, string>();
+  /** Each child's messages by id, as the agent last left them. */
+  private readonly messages = new Map<string, Map<string, ChildMessage>>();
+  /** Stops one child session; set when the agent lets a client stop its subagents. */
+  private stopChild: ((sessionId: string) => Promise<void>) | undefined;
+  /** Takes back each nested agent's offer to be stopped, when the turn ends. */
+  private readonly offers: Array<() => void> = [];
   private readonly step: Pick<StepAcpAgent, 'id' | 'emit'>;
   private readonly ctx: Context<ContextData>;
   /** Prefix of the scope ids of this turn's subagents: the step's dispatch path. */
@@ -298,11 +354,108 @@ export class AcpEventBridge {
       this.noteStatus(child);
       return;
     }
+    const message = this.noteMessage(child);
+    if (message && !this.children.has(child.sessionId)) {
+      const launch = this.isInput(message, child.sessionId) ? message.id : undefined;
+      if (launch !== undefined && this.calls.byId.has(launch)) {
+        this.launches.set(child.sessionId, launch);
+      }
+    }
     const agent = this.openChild(child.sessionId);
+    if (message) {
+      // Shown once whole: when the child starts on it, or its turn ends.
+      return;
+    }
+    if (agent) {
+      this.showInputs(child.sessionId, agent);
+    }
     agent?.bridge.forward({
       sessionId: child.sessionId,
       update: child.update,
     });
+  }
+
+  /**
+   * Let the host stop this turn's nested agents one by one, through `stop`
+   * (the session's `cancelChild`), each one its agent announced as cancellable.
+   */
+  offerChildStops(stop: (sessionId: string) => Promise<void>): void {
+    this.stopChild = stop;
+  }
+
+  /** The agent answered the turn: none of its nested agents can be stopped now. */
+  withdrawChildStops(): void {
+    for (const takeBack of this.offers.splice(0)) {
+      takeBack();
+    }
+  }
+
+  /**
+   * Take a `session_message` or `session_message_chunk` of the child into
+   * its message by that id, as the RFD keys them: an omitted or null sender
+   * or recipient keeps the one known, omitted content keeps it, null clears
+   * it, an array replaces it, and a chunk appends a block. Undefined for any
+   * other update.
+   */
+  private noteMessage(child: AcpChildUpdate): ChildMessage | undefined {
+    const update = child.update;
+    if (
+      update.sessionUpdate !== 'session_message' &&
+      update.sessionUpdate !== 'session_message_chunk'
+    ) {
+      return undefined;
+    }
+    const messages = this.messages.get(child.sessionId) ?? new Map<string, ChildMessage>();
+    this.messages.set(child.sessionId, messages);
+    const known = messages.get(update.messageId);
+    const content =
+      update.sessionUpdate === 'session_message_chunk'
+        ? [
+            ...(known?.content ?? []),
+            update.content,
+          ]
+        : update.content === undefined
+          ? (known?.content ?? [])
+          : (update.content ?? []);
+    const message: ChildMessage = {
+      id: update.messageId,
+      sender: update.senderSessionId ?? known?.sender,
+      recipient: update.recipientSessionId ?? known?.recipient,
+      content,
+      shown: known?.shown ?? false,
+    };
+    messages.set(update.messageId, message);
+    return message;
+  }
+
+  /** Whether a message is what another session asked of the child: sent to it, not by it. */
+  private isInput(message: ChildMessage, child: string): boolean {
+    if (message.sender === child) {
+      return false;
+    }
+    if (message.recipient !== undefined) {
+      return message.recipient === child;
+    }
+    return message.sender !== undefined;
+  }
+
+  /**
+   * The child's input messages not shown yet, each as a user message on its
+   * `item_appended`. Gated by the step's `emit`, as the nested agent's other
+   * events are, so a host that filters them out never meets a scope it was
+   * not shown. A message is shown as it stands then: a later edit of it
+   * shows nothing.
+   */
+  private showInputs(sessionId: string, agent: ChildAgent): void {
+    for (const message of this.messages.get(sessionId)?.values() ?? []) {
+      if (message.shown || !this.isInput(message, sessionId) || message.content.length === 0) {
+        continue;
+      }
+      message.shown = true;
+      agent.bridge.framework('item_appended', {
+        item: inputMessage(message.content),
+      });
+    }
   }
 
   /**
@@ -379,6 +532,24 @@ export class AcpEventBridge {
     agent.bridge.bridgedIdentityOf = this.bridgedIdentityOf;
     this.children.set(info.sessionId, agent);
     agent.bridge.begin();
+    const stop = this.stopChild;
+    const cancellable = info.cancellable === true && stop !== undefined;
+    if (cancellable) {
+      this.offers.push(
+        offerStop(this.ctx.harness, scope.id, async () => {
+          // One that already stopped has nothing left to stop.
+          if (this.statuses.get(info.sessionId)?.status === 'idle') {
+            return false;
+          }
+          // A refusal (the connection forgot it) or a connection gone: not stopped.
+          return await stop(info.sessionId).then(
+            () => true,
+            () => false,
+          );
+        }),
+      );
+    }
+    const launch = this.launches.get(info.sessionId);
     agent.bridge.framework('agent_started', {
       ...(info.title === undefined
         ? {}
@@ -390,6 +561,12 @@ export class AcpEventBridge {
         : {
             description: info.description,
           }),
+      ...(launch === undefined
+        ? {}
+        : {
+            callId: launch,
+          }),
+      cancellable,
     });
     const status = this.statuses.get(info.sessionId);
     if (status?.status !== undefined) {
@@ -401,7 +578,10 @@ export class AcpEventBridge {
   /** The turn is over: every subagent's bracket closes, and it is reported ended. */
   private closeChildren(fallback: AgentEnd): void {
     this.childrenClosed = true;
+    this.withdrawChildStops();
     for (const [sessionId, agent] of this.children) {
+      // What it was asked, even when it never began on it.
+      this.showInputs(sessionId, agent);
       const stopReason = this.statuses.get(sessionId)?.stopReason;
       const end = stopReason === undefined ? fallback : endOf(stopReason);
       agent.bridge.end(stopReason ?? (end === 'completed' ? 'end_turn' : end));
@@ -432,6 +612,38 @@ export class AcpEventBridge {
    */
   begin(): void {
     this.start();
+  }
+
+  /**
+   * What the session runs with as the turn starts — its mode, model and
+   * effort, as far as the agent says — as one `agent_config_updated`; a later
+   * change of any of them is told when the agent reports it.
+   */
+  announceSettings(session: Pick<AcpSession, 'modes' | 'configOptions'>): void {
+    const mode = session.modes?.currentModeId;
+    this.mode = mode;
+    this.model = modelOf(session.configOptions);
+    this.effort = effortOf(session.configOptions);
+    const settings = {
+      ...(mode === undefined
+        ? {}
+        : {
+            mode,
+          }),
+      ...(this.model === undefined
+        ? {}
+        : {
+            model: this.model,
+          }),
+      ...(this.effort === undefined
+        ? {}
+        : {
+            effort: this.effort,
+          }),
+    };
+    if (Object.keys(settings).length > 0) {
+      this.framework('agent_config_updated', settings);
+    }
   }
 
   /**
@@ -683,9 +895,21 @@ export class AcpEventBridge {
       call.content = toolContentOf(update.content);
     }
     const final = update.status === 'completed' || update.status === 'failed';
+    // An agent may announce a call before its input is written (Claude Code
+    // streams it in later updates): each new input is part of its progress.
+    const input =
+      update.rawInput !== undefined &&
+      update.rawInput !== null &&
+      inputKey(update.rawInput) !== inputKey(call.input)
+        ? update.rawInput
+        : undefined;
+    if (input !== undefined) {
+      call.input = input;
+    }
     this.reportOwnProgress(update, call, {
       announced,
       final,
+      input,
     });
     if (!final) {
       return;
@@ -727,6 +951,8 @@ export class AcpEventBridge {
     at: {
       announced: boolean;
       final: boolean;
+      /** The call's input, when this update changed it. */
+      input?: unknown;
     },
   ): void {
     const report = at.announced
@@ -743,11 +969,15 @@ export class AcpEventBridge {
               }),
         }
       : progressReport(update, at.final ? undefined : (update.status ?? undefined));
-    if (!report) {
-      return;
-    }
-    const { content, ...changes } = report;
-    const data = at.final || content === undefined ? changes : report;
+    const { content, ...changes } = report ?? {};
+    const data = {
+      ...(at.final || content === undefined ? changes : report),
+      ...(at.input === undefined
+        ? {}
+        : {
+            input: at.input,
+          }),
+    };
     if (Object.keys(data).length === 0) {
       return;
     }
@@ -923,6 +1153,7 @@ export class AcpEventBridge {
       via: 'own',
       bridge: this,
       state: 'open',
+      input: update.rawInput,
     });
     this.closeMessage();
     this.emitToolCall(callId, update.title, update.rawInput);
@@ -1173,22 +1404,37 @@ export class AcpEventBridge {
       return;
     }
     if (update.sessionUpdate === 'current_mode_update') {
-      this.framework('agent_config_updated', {
-        mode: update.currentModeId,
-      });
+      if (update.currentModeId !== this.mode) {
+        this.mode = update.currentModeId;
+        this.framework('agent_config_updated', {
+          mode: update.currentModeId,
+        });
+      }
       return;
     }
     if (update.sessionUpdate !== 'config_option_update') {
       return;
     }
     const model = modelOf(update.configOptions);
-    if (model === undefined || model === this.model) {
-      return;
+    const effort = effortOf(update.configOptions);
+    const changed = {
+      ...(model === undefined || model === this.model
+        ? {}
+        : {
+            model,
+          }),
+      // null: the session no longer has an effort to set (a model without one).
+      ...(effort === this.effort
+        ? {}
+        : {
+            effort: effort ?? null,
+          }),
+    };
+    this.model = model ?? this.model;
+    this.effort = effort;
+    if (Object.keys(changed).length > 0) {
+      this.framework('agent_config_updated', changed);
     }
-    this.model = model;
-    this.framework('agent_config_updated', {
-      model,
-    });
   }
 
   /**

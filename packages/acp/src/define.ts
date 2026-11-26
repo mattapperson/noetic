@@ -30,6 +30,7 @@ import { spawnOn } from './spawn';
 import type { AcpToolWiring, ToolBridge, ToolBridgeCredentials } from './tool-bridge';
 import { startToolBridge } from './tool-bridge';
 import { sessionToolWiring } from './tool-wiring';
+import type { TurnUsageOf } from './turn-usage';
 
 //#region Types
 
@@ -73,6 +74,12 @@ export interface DefineAcpAgentOptions {
    * the call's `toolId` / `toolServer`. Without one, a call goes by its title.
    */
   toolIdOf?: AcpAgent['toolIdOf'];
+  /**
+   * The tokens a turn cost, from the agent's answer to it. ACP's `usage` is
+   * the session's running total, so without one no turn is charged; set it
+   * for a bridge that reports each turn's own figures.
+   */
+  usageOf?: TurnUsageOf;
 }
 
 /** How one connection reaches its agent: the stream, and the bridge's way there. */
@@ -128,6 +135,7 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
           tools: bridge,
           instructionsMeta: def.instructionsMeta,
           sessionMeta: def.sessionMeta,
+          usageOf: def.usageOf,
           reattach: reattachHandle(transport.reattach, bridge),
         });
       } catch (e) {
@@ -313,6 +321,7 @@ async function reattachTo(
       tools: bridge,
       instructionsMeta: def.instructionsMeta,
       sessionMeta: def.sessionMeta,
+      usageOf: def.usageOf,
       reattach: reattachHandle(transport.reattach ?? handle, bridge),
       reattached: true,
     });

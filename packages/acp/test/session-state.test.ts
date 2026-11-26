@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type * as acp from '@agentclientprotocol/sdk';
 import { frameworkCast, isAcpCapabilityError } from '@noetic-tools/types';
 import { rawInputRecord } from '../src/permission-channel';
+import { turnUsage } from '../src/turn-usage';
 import { createAcpTestRig, textChunk } from './_helpers';
 
 const TEXT_PROMPT: acp.ContentBlock[] = [
@@ -197,6 +198,81 @@ describe('current session updates (#96)', () => {
     expect(result.usage).toBeUndefined();
 
     await rig.close();
+  });
+
+  test("charges the turn what the agent's usageOf reads from its answer", async () => {
+    const rig = await createAcpTestRig({
+      script: {
+        usage: {
+          inputTokens: 120,
+          outputTokens: 30,
+          totalTokens: 450,
+          cachedReadTokens: 200,
+          cachedWriteTokens: 100,
+        },
+      },
+      usageOf: turnUsage,
+    });
+    const session = await rig.connection.newSession({
+      cwd: '/workspace',
+    });
+
+    const result = await session.prompt({
+      content: TEXT_PROMPT,
+    });
+
+    expect(result.usage).toEqual({
+      inputTokens: 420,
+      outputTokens: 30,
+      cachedTokens: 200,
+      cacheWriteTokens: 100,
+    });
+
+    await rig.close();
+  });
+});
+
+describe('preset turn usage', () => {
+  const answer = (usage: acp.Usage | undefined): acp.PromptResponse => ({
+    stopReason: 'end_turn',
+    ...(usage
+      ? {
+          usage,
+        }
+      : {}),
+  });
+
+  test('counts cache reads and writes as input, as both bridges leave them out of inputTokens', () => {
+    // codex-acp 2.2.2 and claude-agent-acp 0.93 both report 1000 input tokens,
+    // 800 read from the cache and 100 written to it, this way.
+    const usage: acp.Usage = {
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 1050,
+      cachedReadTokens: 800,
+      cachedWriteTokens: 100,
+    };
+    expect(turnUsage(answer(usage))).toEqual({
+      inputTokens: 1000,
+      outputTokens: 50,
+      cachedTokens: 800,
+      cacheWriteTokens: 100,
+    });
+  });
+
+  test('an answer without counts charges nothing', () => {
+    expect(turnUsage(answer(undefined))).toBeUndefined();
+    expect(
+      turnUsage(
+        answer(
+          frameworkCast<acp.Usage>({
+            inputTokens: -1,
+            outputTokens: 2,
+            totalTokens: 1,
+          }),
+        ),
+      ),
+    ).toBeUndefined();
   });
 });
 

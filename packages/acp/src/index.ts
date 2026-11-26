@@ -59,6 +59,8 @@ export {
   piToolWiring,
   sessionToolWiring,
 } from './tool-wiring';
+export type { TurnUsageOf } from './turn-usage';
+export { turnUsage } from './turn-usage';
 
 //#endregion
 

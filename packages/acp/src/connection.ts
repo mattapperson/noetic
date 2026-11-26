@@ -41,6 +41,7 @@ import type { WatchedTransport } from './liveness';
 import { watchTransport } from './liveness';
 import type { ToolBridge } from './tool-bridge';
 import { AcpTurnAccumulator } from './turn';
+import type { TurnUsageOf } from './turn-usage';
 import { divertNewerUpdates } from './update-filter';
 
 //#region Types
@@ -67,6 +68,8 @@ export interface OpenAcpConnectionOptions {
    * connection opens. Its keys win over {@link instructionsMeta}'s.
    */
   sessionMeta?: Readonly<Record<string, unknown>>;
+  /** The tokens each turn cost, from the agent's answer: the turn's `usage`. */
+  usageOf?: TurnUsageOf;
 }
 
 /** @public See {@link OpenAcpConnectionOptions.instructionsMeta}. */
@@ -239,6 +242,10 @@ class AcpSessionImpl implements AcpSession {
    * deserve a correct answer, just not simultaneously.
    */
   private queue: Promise<unknown> = Promise.resolve();
+  /** Set by the connection: how the agent's answer says what a turn cost. */
+  usageOf: TurnUsageOf | undefined;
+  /** Set by the connection: whether `child` is a subagent below this session the agent lets a client stop. */
+  stoppable: (child: string) => boolean = () => false;
 
   constructor(
     private readonly agentId: string,
@@ -401,8 +408,14 @@ class AcpSessionImpl implements AcpSession {
       if (!response) {
         return undefined;
       }
+      const usage = this.usageOf?.(response);
       const result = accumulator.result({
         stopReason: response.stopReason,
+        ...(usage
+          ? {
+              usage,
+            }
+          : {}),
         reportedUsage: response.usage ?? undefined,
       });
       return {
@@ -418,6 +431,21 @@ class AcpSessionImpl implements AcpSession {
   async cancel(): Promise<void> {
     await this.agent.cancel({
       sessionId: this.sessionId,
+    });
+  }
+
+  async cancelChild(sessionId: string): Promise<void> {
+    // Never this session itself, nor another on the connection: `session/cancel`
+    // for those would stop a turn, not a subagent.
+    if (!this.stoppable(sessionId)) {
+      throw new AcpCapabilityError({
+        agentId: this.agentId,
+        capability: 'subagent cancel',
+        message: `ACP agent '${this.agentId}' announced no subagent '${sessionId}' it lets a client stop below session '${this.sessionId}'.`,
+      });
+    }
+    await this.agent.cancel({
+      sessionId,
     });
   }
 
@@ -516,6 +544,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
   settings: {
     instructionsMeta?: InstructionsMeta;
     sessionMeta?: Readonly<Record<string, unknown>>;
+    usageOf?: TurnUsageOf;
     /** What `initialize` advertised. */
     capabilities?: acp.ClientCapabilities;
     /**
@@ -666,7 +695,7 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     }
   }
 
-  /** Keep what an announcement says of a child: its title and description. */
+  /** Keep what an announcement says of a child: its title, description, and whether it can be stopped alone. */
   private describe(child: string, update: AcpSessionNotification['update']): void {
     const fields: Record<string, unknown> = {
       ...update,
@@ -683,8 +712,18 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
     const known = this.childInfo.get(child);
     const title = text('title', 'name') ?? known?.title;
     const description = text('description', 'task') ?? known?.description;
+    // The RFD: `cancel` as an object (`{}` too) grants it; omitted or null does not.
+    const capabilities = fields.capabilities;
+    const cancellable = isRecord(capabilities)
+      ? typeof capabilities.cancel === 'object' && capabilities.cancel !== null
+      : known?.cancellable;
     this.childInfo.set(child, {
       sessionId: child,
+      ...(cancellable === undefined
+        ? {}
+        : {
+            cancellable,
+          }),
       ...(title === undefined
         ? {}
         : {
@@ -715,6 +754,17 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
       at = this.children.get(at);
     }
     return chain;
+  }
+
+  /** The session a child was announced under, through every subagent above it. */
+  private rootOf(child: string): string | undefined {
+    const seen = new Set<string>();
+    let at: string | undefined = child;
+    while (at !== undefined && this.children.has(at) && !seen.has(at)) {
+      seen.add(at);
+      at = this.children.get(at);
+    }
+    return at;
   }
 
   /** A child's updates held before it was announced, routed now as its own, in order. */
@@ -854,6 +904,11 @@ class AcpAgentConnectionImpl implements AcpAgentConnection {
   //#region internals
 
   private track(session: AcpSessionImpl): AcpSessionImpl {
+    session.usageOf = this.settings.usageOf;
+    session.stoppable = (child) =>
+      this.children.has(child) &&
+      this.childInfo.get(child)?.cancellable === true &&
+      this.rootOf(child) === session.sessionId;
     this.sessions.set(session.sessionId, session);
     // Everything held while no session was known goes through the routing
     // again, in order: the new session's own updates are delivered, a child
@@ -1076,6 +1131,7 @@ export async function openAcpConnection(
   connection.settings = {
     instructionsMeta: opts.instructionsMeta,
     sessionMeta: opts.sessionMeta,
+    usageOf: opts.usageOf,
     capabilities: clientCapabilitiesFor(host),
     setup: setupOf(host, opts.tools),
     deliver: (notification) => {

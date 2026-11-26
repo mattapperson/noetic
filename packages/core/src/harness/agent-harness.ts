@@ -35,6 +35,7 @@ import { stubOf } from '../runtime/durable/step-ledger';
 import type { HeldAnswerRequest } from '../runtime/held-calls';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
 import { LayerPlanReporter, reportingLayerPlans } from '../runtime/layer-plans';
+import { stopNestedAgent } from '../runtime/nested-agents';
 import type { OutputSnapshot } from '../runtime/output-store';
 import { OutputStore } from '../runtime/output-store';
 import { awaitApproval } from '../runtime/tool-approval';
@@ -1898,6 +1899,19 @@ export class AgentHarness<
       ? await heldElsewhereUntil(this.leaseOptions, threadId)
       : undefined;
     return heldUntil === undefined ? due : Math.max(due, heldUntil);
+  }
+
+  /**
+   * Stop one nested agent (spec 08 § Nested agents): the agent of a turn
+   * running in this process whose `agent_started` said it is `cancellable`,
+   * by its scope id. The turn that runs it goes on; the agent reports how it
+   * ended with its `agent_status`. False when no running turn here has a
+   * nested agent by that id that can be stopped, or it already stopped
+   * (its last `agent_status` was `idle`).
+   * @public
+   */
+  async stopAgent(scopeId: string): Promise<boolean> {
+    return await stopNestedAgent(this, scopeId);
   }
 
   /**

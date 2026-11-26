@@ -180,3 +180,112 @@ describe('localMachine without wrap', () => {
     await machine.close();
   });
 });
+
+describe('localMachine onLaunch', () => {
+  it('reports the agent it starts itself, and its exit once it is stopped', async () => {
+    const spawned: Array<{
+      pid: number;
+      exited: Promise<void>;
+    }> = [];
+    const machine = await localMachine('tracked', {
+      keeper: false,
+      onStderr: () => undefined,
+      onLaunch: (agent) => {
+        spawned.push(agent);
+      },
+    })({});
+    const transport = await machine.launch({
+      command: process.execPath,
+      args: [
+        FIXTURE,
+      ],
+    });
+    expect(spawned).toHaveLength(1);
+    const agent = spawned[0];
+    if (!agent) {
+      throw new Error('no agent reported');
+    }
+    // The process is alive until the transport stops it.
+    expect(() => process.kill(agent.pid, 0)).not.toThrow();
+    await transport.close();
+    await agent.exited;
+    expect(() => process.kill(agent.pid, 0)).toThrow();
+
+    // An MCP server beside it is not the agent.
+    const server = await machine.spawn({
+      command: process.execPath,
+      args: [
+        FIXTURE,
+      ],
+    });
+    expect(spawned).toHaveLength(1);
+    await server.close();
+    await machine.close();
+  });
+
+  it("reports nothing for a kept agent, which is its keeper's child", async () => {
+    const spawned: number[] = [];
+    const machine = await localMachine('kept', {
+      onStderr: () => undefined,
+      onLaunch: (agent) => {
+        spawned.push(agent.pid);
+      },
+    })({});
+    const transport = await machine.launch({
+      command: process.execPath,
+      args: [
+        FIXTURE,
+      ],
+    });
+    expect(await echo(transport, PING)).toContain(PING);
+    expect(spawned).toEqual([]);
+    await machine.close();
+  });
+});
+
+describe('localMachine onLaunch that throws', () => {
+  it('treats a rejected promise as a throw', async () => {
+    let pid: number | undefined;
+    const machine = await localMachine('rejects', {
+      keeper: false,
+      onStderr: () => undefined,
+      onLaunch: async (agent) => {
+        pid = agent.pid;
+        await Promise.resolve();
+        throw new Error('registry is down');
+      },
+    })({});
+    await expect(
+      machine.launch({
+        command: process.execPath,
+        args: [
+          FIXTURE,
+        ],
+      }),
+    ).rejects.toThrow('onLaunch');
+    expect(() => process.kill(pid ?? 0, 0)).toThrow();
+    await machine.close();
+  });
+
+  it('stops the agent and fails the launch, leaving nothing running', async () => {
+    let pid: number | undefined;
+    const machine = await localMachine('throws', {
+      keeper: false,
+      onStderr: () => undefined,
+      onLaunch: (agent) => {
+        pid = agent.pid;
+        throw new Error('registry is full');
+      },
+    })({});
+    const launching = machine.launch({
+      command: process.execPath,
+      args: [
+        FIXTURE,
+      ],
+    });
+    await expect(launching).rejects.toThrow('onLaunch');
+    expect(pid).toBeDefined();
+    expect(() => process.kill(pid ?? 0, 0)).toThrow();
+    await machine.close();
+  });
+});

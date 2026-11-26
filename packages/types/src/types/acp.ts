@@ -20,7 +20,7 @@
  */
 
 import type * as acp from '@agentclientprotocol/sdk';
-import type { TokenUsage } from './common';
+import type { RoundUsage } from './common';
 import type { Context } from './context';
 import type { FsAdapter } from './fs-adapter';
 import type { Item } from './items';
@@ -305,6 +305,8 @@ export interface AcpChildInfo {
   readonly sessionId: string;
   readonly title?: string;
   readonly description?: string;
+  /** The agent lets a client stop this subagent alone (`capabilities.cancel`). */
+  readonly cancellable?: boolean;
 }
 
 /** @public What identifies an agent's question beyond its params. */
@@ -623,13 +625,17 @@ export interface AcpTurnResult {
   items: Item[];
   /** The agent's final message: its text after the last tool call of the turn. */
   text: string;
-  /** Billed token delta supplied by an adapter, never context-window occupancy. */
-  usage?: TokenUsage;
+  /**
+   * The turn's tokens, as a model round reports them, supplied by an adapter
+   * (`usageOf`): billed tokens, never context-window occupancy.
+   */
+  usage?: RoundUsage;
   cost?: number;
   /**
-   * The `usage` the agent's `session/prompt` answer reported, verbatim: the
-   * session's running total, not this turn's, so the runtime never charges it
-   * (an adapter that knows its agent's figures supplies `usage`).
+   * The `usage` the agent's `session/prompt` answer reported, verbatim. The
+   * protocol makes it the session's running total, so the runtime never
+   * charges it as it is: an adapter whose agent reports each turn's own
+   * figures reads them into `usage` (`usageOf`).
    * Context-window occupancy (`usage_update`) is not here.
    */
   reportedUsage?: acp.Usage;
@@ -691,6 +697,12 @@ export interface AcpSession {
   prompt(opts: AcpPromptOptions): Promise<AcpTurnResult>;
   /** Send `session/cancel` for an in-flight turn. */
   cancel(): Promise<void>;
+  /**
+   * Stop one subagent: `session/cancel` for its child session, which the
+   * agent announced as cancellable. The session's turn goes on. Absent where
+   * the session cannot reach its subagents' sessions.
+   */
+  cancelChild?(sessionId: string): Promise<void>;
   /**
    * Switch mode. Throws when the agent advertised no modes — on `session/new`
    * or on `session/load`.

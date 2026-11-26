@@ -175,7 +175,7 @@ An agent is reached one of two ways:
 
 | Machine or transport | Use |
 |---|---|
-| `localMachine(agentId?, { keeper?, detachedTimeoutMs?, wrap?, onStderr? })` (`@noetic-tools/acp/stdio`) | This machine. `launch` starts the agent through its keeper (§ A local agent outlives its host), `reach` serves the bridge on the keeper's own loopback port, `attach` reaches a kept agent again; `spawn` starts a child process. `keeper: false` (or no keeper script on disk, as in a single-file bundle) starts the agent as a child process and `reach` returns the bridge's own address. The default for every preset, loaded through a lazy `import()`. |
+| `localMachine(agentId?, { keeper?, detachedTimeoutMs?, wrap?, onStderr?, onLaunch? })` (`@noetic-tools/acp/stdio`) | This machine. `launch` starts the agent through its keeper (§ A local agent outlives its host), `reach` serves the bridge on the keeper's own loopback port, `attach` reaches a kept agent again; `spawn` starts a child process. `keeper: false` (or no keeper script on disk, as in a single-file bundle) starts the agent as a child process and `reach` returns the bridge's own address. The default for every preset, loaded through a lazy `import()`. |
 | `webSocketMachine({ url, token, ca? })` (`@noetic-tools/acp/remote`) | A remote runner over WebSocket. Every upgrade carries the runner's bearer token; `ws://` is refused except to a loopback host, so a hop off the machine is TLS. |
 | `commandMachine({ command, args })` (`@noetic-tools/acp/remote`) | A remote runner started by a local command and spoken to over its stdio: `ssh host npx -y @noetic-tools/acp serve --stdio`, `docker exec -i ctr noetic-acp serve --stdio`. The command's own channel carries everything. |
 | `runnerMachine(openLink)` (`@noetic-tools/acp/remote`) | A remote runner over any `FrameLink`. |
@@ -216,7 +216,14 @@ so a sandbox can let exactly those loopback ports through. The command it
 returns runs with exactly its own `args`, `env` and `cwd` — nothing is merged
 back in — as the leader of its own process group, through the keeper or not,
 with the shutdown above. `onStderr` receives the agent's stderr, which
-otherwise goes to the host's.
+otherwise goes to the host's. `onLaunch` is told of each agent the machine
+starts as its own child, once it runs — `{ pid, exited }`, where `pid` leads
+the agent's process group and `exited` settles when that process has exited
+— so a host that keeps a list of its processes, or stops what is left when
+it shuts down, learns them. It needs `keeper: false`: a kept agent is its
+keeper's child and is not reported, nor is an MCP server. The launch waits
+for a promise it returns; if it throws or its promise rejects, the agent is
+stopped and the launch fails.
 
 ### A local agent outlives its host
 
@@ -711,7 +718,21 @@ grandchild speaks first, and a child that only reappears in a replayed
 announcement shows nothing. Each state it reports is an `agent_status`
 (`running`, `idle`, `requires_action` as `waiting`, `unknown`), and the end of
 the turn closes it (`agent_completed`: `cancelled` or `failed` when its last
-stop reason said so, else `completed`). A connection remembers at most a
+stop reason said so, else `completed`). The child's messages (the RFD's
+`session_message` and `session_message_chunk`) are kept by `messageId` as the
+RFD defines them: an omitted or null sender or recipient keeps the one known,
+omitted content keeps it, null clears it, an array replaces it, and a chunk
+appends a block. A message sent to the child by another session is its
+input, a scoped user message (text and media as content parts, a resource as
+the text that names it), shown once when the child starts on it or the turn
+ends; its `messageId`, when it is one of the turn's calls and the message is
+what opens the child, is `agent_started`'s `callId`. `capabilities.cancel`
+grants a stop only as an object; omitted or null grants none. A child announced with
+`capabilities.cancel` is `cancellable`: `AcpSession.cancelChild(sessionId)`
+sends `session/cancel` for it alone, which `harness.stopAgent` uses. It
+refuses (`AcpCapabilityError`) any other id — the session itself, another
+session of the connection, a child below another session, one not announced
+as cancellable — since `session/cancel` for those would stop a turn. A connection remembers at most a
 thousand children, forgetting the one heard from least recently first — the
 order the keeper keeps, so a child still speaking is never forgotten — but
 never one another kept child was announced under, so a child is never placed without its parent. Updates for a session the connection does not
@@ -886,12 +907,13 @@ step's. The `AcpEventBridge` translates each variant into the same
 | `agent_thought_chunk` | `response.reasoning.delta` |
 | `tool_call` | `response.output_item.added` (function_call) + `response.function_call_arguments.delta`/`.done` + `response.output_item.done` |
 | `tool_call` of the agent's own tool | also the framework `tool_call_started` `{ name, callId, title, kind?, locations?, status? }`, as the `callModel` tool loop emits it; `status` when the agent said `pending` or `in_progress` |
-| `tool_call` / `tool_call_update` of a call still running | the framework `tool_progress` `{ name, callId, … }` with what the update changed: `status`, `title`, `kind`, `locations`, `progress`, `content` |
+| `tool_call` / `tool_call_update` of a call still running | the framework `tool_progress` `{ name, callId, … }` with what the update changed: `status`, `title`, `kind`, `locations`, `progress`, `content`, and `input` — the call's `rawInput`, whole, when it differs from what the call had. An update that finishes the call with new input reports that `input`, with the update's other changes but not its content, just before its completion, which carries none. The same input with its keys in another order, or a null `rawInput`, is no change |
 | `tool_call` / `tool_call_update` that reports the call `completed` or `failed` | the framework `tool_call_completed` `{ name, callId, error, output?, content?, result? }`, once per call; `content` is the call's latest content as structure, `output` the text it carries, `result` its raw output |
 | `plan`, draft `plan_update` | the framework `plan_updated` `{ stepId, plan }`: entries, or a markdown or file plan, with its `id` |
 | draft `plan_removed` | the framework `plan_removed` `{ stepId, id }` |
-| `current_mode_update` | the framework `agent_config_updated` `{ stepId, mode }` |
-| `config_option_update` that changes the `model` option | the framework `agent_config_updated` `{ stepId, model }` |
+| `current_mode_update` to another mode | the framework `agent_config_updated` `{ stepId, mode }` |
+| `config_option_update` that changes the `model` option or the effort option (category `thought_level`, else id `effort` or `reasoning_effort`) | the framework `agent_config_updated` `{ stepId, model?, effort? }` with what changed; `effort: null` when the options no longer have one |
+| the turn starting | the framework `agent_config_updated` `{ stepId, mode?, model?, effort? }`: the session's current mode, model and effort, when it has any |
 | every other variant — `user_message_chunk`, `available_commands_update`, `session_info_update`, `usage_update`, … | nothing: session state the runtime tracks on the live session, not output |
 
 **What a call's events carry.** The fields are the harness's own (`08-runtime`
@@ -975,8 +997,16 @@ none; every attempt's spend is charged all the same:
   a complete one. A refusal or a cancellation is an error, not metadata.
 - `usage` — the turn's tokens as `RoundUsage`, when the adapter supplies them
   (`AcpTurnResult.usage`), charged to the run's token and cost totals like a
-  model call's. The `usage` a `session/prompt` answer reports is the session's
-  running total, not the turn's, so it is never charged.
+  model call's. The protocol specifies the `usage` a `session/prompt` answer
+  reports as the session's running total, so the runtime charges nothing from
+  it on its own; an adapter whose bridge reports each turn's own figures reads
+  them with `usageOf` (`defineAcpAgent`), as a `RoundUsage`. `claudeCode()`
+  and `codex()` do, with `turnUsage`: claude-agent-acp 0.93 and codex-acp
+  2.2.2 each tally the turn alone, and both leave cache reads and writes out
+  of `inputTokens`, so the turn's input is all three, with `cachedTokens` and
+  `cacheWriteTokens` as the bridge reports them. A preset's `usageOf` option
+  replaces its reader, or with `false` charges no turn — for a bridge that
+  reports the session's running total.
 - `model` — the model the turn ran with: the current value of the session's
   `model` config option (found by category, else by id, as the session finds
   it to set it), else the model the step selected.

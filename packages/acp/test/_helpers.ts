@@ -27,6 +27,7 @@ import { frameworkCast } from '@noetic-tools/types';
 import type { InstructionsMeta } from '../src/connection';
 import { openAcpConnection } from '../src/connection';
 import { createAcpLoopbackPair } from '../src/transport-loopback';
+import type { TurnUsageOf } from '../src/turn-usage';
 
 //#region Adapters
 
@@ -273,6 +274,7 @@ export interface AcpTestRigOptions {
   onChildUpdate?: AcpClientHost['onChildUpdate'];
   instructionsMeta?: InstructionsMeta;
   sessionMeta?: Readonly<Record<string, unknown>>;
+  usageOf?: TurnUsageOf;
 }
 
 /**
@@ -403,6 +405,7 @@ export async function createAcpTestRig(opts: AcpTestRigOptions = {}): Promise<Ac
     signal: opts.signal,
     instructionsMeta: opts.instructionsMeta,
     sessionMeta: opts.sessionMeta,
+    usageOf: opts.usageOf,
   });
 
   return {

@@ -909,3 +909,578 @@ describe("a subagent's requests to a person", () => {
     expect(heldEvents.every((e) => e.scope === undefined)).toBe(true);
   });
 });
+
+describe('a nested agent: what started it, what it was asked, and stopping it', () => {
+  function started(): {
+    harness: AgentHarness;
+    events: Captured[];
+    bridge: AcpEventBridge;
+    stopped: string[];
+  } {
+    const harness = new AgentHarness({
+      name: 'h',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const events: Captured[] = [];
+    frameworkCast<{
+      _broadcaster: unknown;
+    }>(ctx)._broadcaster = {
+      emit(event: Captured) {
+        events.push(event);
+      },
+    };
+    const b = new AcpEventBridge(
+      {
+        id: 'step',
+      },
+      ctx,
+    );
+    const stopped: string[] = [];
+    b.offerChildStops(async (sessionId) => {
+      stopped.push(sessionId);
+    });
+    return {
+      harness,
+      events,
+      bridge: b,
+      stopped,
+    };
+  }
+
+  const lineage = (cancellable: boolean) => [
+    {
+      sessionId: 'kid',
+      title: 'general-purpose',
+      description: 'Count files',
+      cancellable,
+    },
+  ];
+
+  /** The parent's Agent call, then the child's first message naming it. */
+  function launch(b: AcpEventBridge, cancellable: boolean): void {
+    b.begin();
+    b.forward({
+      sessionId: 'root',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'toolu_agent',
+        title: 'Agent',
+        status: 'pending',
+        rawInput: {},
+      },
+    });
+    b.forwardChild({
+      sessionId: 'kid',
+      announcement: true,
+      lineage: lineage(cancellable),
+      update: {
+        sessionUpdate: 'subagent_update',
+        sessionId: 'kid',
+        title: 'general-purpose',
+        description: 'Count files',
+        state: {
+          state: 'running',
+        },
+      },
+    });
+    b.forwardChild({
+      sessionId: 'kid',
+      announcement: false,
+      lineage: lineage(cancellable),
+      update: {
+        sessionUpdate: 'session_message',
+        messageId: 'toolu_agent',
+        senderSessionId: 'root',
+        recipientSessionId: 'kid',
+        content: [
+          {
+            type: 'text',
+            text: 'Run ls and wc -l.',
+          },
+        ],
+      },
+    });
+  }
+
+  it('names the call that started it and shows its prompt as its input', () => {
+    const { events, bridge: b } = started();
+    launch(b, true);
+    const start = events.find((e) => e.type === 'h:agent_started');
+    expect(start?.data).toEqual({
+      stepId: 'step',
+      title: 'general-purpose',
+      description: 'Count files',
+      callId: 'toolu_agent',
+      cancellable: true,
+    });
+    // Shown once the child starts on it.
+    expect(events.filter((e) => e.type === 'h:item_appended')).toEqual([]);
+    b.forwardChild({
+      ...work('kid'),
+      lineage: lineage(true),
+    });
+    const input = events.find((e) => e.type === 'h:item_appended' && e.scope);
+    expect(input?.scope).toEqual(start?.scope);
+    expect(input?.data.item).toMatchObject({
+      type: 'message',
+      role: 'user',
+    });
+    expect(JSON.stringify(input?.data.item)).toContain('Run ls and wc -l.');
+  });
+
+  /** A message update to the child, by its id. */
+  const message = (update: Record<string, unknown>): AcpChildUpdate => ({
+    sessionId: 'kid',
+    announcement: false,
+    lineage: lineage(true),
+    update: frameworkCast<AcpChildUpdate['update']>(update),
+  });
+  const inputs = (events: Captured[]): unknown[] =>
+    events.filter((e) => e.type === 'h:item_appended' && e.scope).map((e) => e.data.item);
+
+  it('keeps one message per id, as the agent last left it, and shows it once', () => {
+    const { events, bridge: b } = started();
+    b.begin();
+    b.forwardChild(
+      message({
+        sessionUpdate: 'session_message',
+        messageId: 'm1',
+        senderSessionId: 'root',
+        recipientSessionId: 'kid',
+        content: [
+          {
+            type: 'text',
+            text: 'first draft',
+          },
+        ],
+      }),
+    );
+    // An edit replaces it; a metadata-only upsert keeps it, sender and recipient too.
+    b.forwardChild(
+      message({
+        sessionUpdate: 'session_message',
+        messageId: 'm1',
+        content: [
+          {
+            type: 'text',
+            text: 'Do it. ',
+          },
+          {
+            type: 'image',
+            mimeType: 'image/png',
+            data: 'AAAA',
+          },
+        ],
+      }),
+    );
+    b.forwardChild(
+      message({
+        sessionUpdate: 'session_message',
+        messageId: 'm1',
+        _meta: {
+          seen: true,
+        },
+      }),
+    );
+    b.forwardChild({
+      ...work('kid'),
+      lineage: lineage(true),
+    });
+    b.finalize(RESULT);
+    expect(inputs(events)).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: 'Do it. ',
+          },
+          {
+            type: 'input_image',
+            imageUrl: 'data:image/png;base64,AAAA',
+          },
+        ],
+      }),
+    ]);
+  });
+
+  it('builds a streamed message from its chunks, naming the call its id is', () => {
+    const { events, bridge: b } = started();
+    b.begin();
+    b.forward({
+      sessionId: 'root',
+      update: {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'toolu_agent',
+        title: 'Agent',
+        status: 'pending',
+      },
+    });
+    for (const text of [
+      'Count ',
+      'the files.',
+    ]) {
+      b.forwardChild(
+        message({
+          sessionUpdate: 'session_message_chunk',
+          messageId: 'toolu_agent',
+          senderSessionId: 'root',
+          recipientSessionId: 'kid',
+          content: {
+            type: 'text',
+            text,
+          },
+        }),
+      );
+    }
+    b.finalize(RESULT);
+    expect(events.find((e) => e.type === 'h:agent_started')?.data.callId).toBe('toolu_agent');
+    expect(inputs(events)).toEqual([
+      expect.objectContaining({
+        content: [
+          {
+            type: 'input_text',
+            text: 'Count ',
+          },
+          {
+            type: 'input_text',
+            text: 'the files.',
+          },
+        ],
+      }),
+    ]);
+  });
+
+  it("never shows the child's own message, or an empty one, as its input", () => {
+    const { events, bridge: b } = started();
+    b.begin();
+    b.forwardChild(
+      message({
+        sessionUpdate: 'session_message',
+        messageId: 'out',
+        senderSessionId: 'kid',
+        recipientSessionId: 'root',
+        content: [
+          {
+            type: 'text',
+            text: 'my report',
+          },
+        ],
+      }),
+    );
+    // Its upsert with neither id still names the child as its sender.
+    b.forwardChild(
+      message({
+        sessionUpdate: 'session_message',
+        messageId: 'out',
+        content: [
+          {
+            type: 'text',
+            text: 'my report, edited',
+          },
+        ],
+      }),
+    );
+    b.forwardChild(
+      message({
+        sessionUpdate: 'session_message',
+        messageId: 'blank',
+        senderSessionId: 'root',
+        recipientSessionId: 'kid',
+        content: null,
+      }),
+    );
+    b.finalize(RESULT);
+    expect(inputs(events)).toEqual([]);
+  });
+
+  it('answers false, never throws, when the session cannot stop it', async () => {
+    const harness = new AgentHarness({
+      name: 'h',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const events: Captured[] = [];
+    frameworkCast<{
+      _broadcaster: unknown;
+    }>(ctx)._broadcaster = {
+      emit(event: Captured) {
+        events.push(event);
+      },
+    };
+    const b = new AcpEventBridge(
+      {
+        id: 'step',
+      },
+      ctx,
+    );
+    b.offerChildStops(async () => {
+      throw new Error('the connection forgot it');
+    });
+    launch(b, true);
+    const scope = events.find((e) => e.type === 'h:agent_started')?.scope;
+    expect(await harness.stopAgent(scope?.id ?? '')).toBe(false);
+  });
+
+  it('offers no stop once the agent answered, while its calls still finish', async () => {
+    const { harness, events, bridge: b, stopped } = started();
+    launch(b, true);
+    const scope = events.find((e) => e.type === 'h:agent_started')?.scope;
+    b.withdrawChildStops();
+    expect(await harness.stopAgent(scope?.id ?? '')).toBe(false);
+    expect(stopped).toEqual([]);
+  });
+
+  it('stops one cancellable nested agent through the harness, while its turn runs', async () => {
+    const { harness, events, bridge: b, stopped } = started();
+    launch(b, true);
+    const scope = events.find((e) => e.type === 'h:agent_started')?.scope;
+    if (!scope) {
+      throw new Error('no nested agent');
+    }
+    expect(await harness.stopAgent(scope.id)).toBe(true);
+    expect(stopped).toEqual([
+      'kid',
+    ]);
+    expect(await harness.stopAgent('no-such-agent')).toBe(false);
+    b.finalize(RESULT);
+    // Its turn is over: nothing is left to stop.
+    expect(await harness.stopAgent(scope.id)).toBe(false);
+  });
+
+  it('offers no stop for an agent its agent does not let a client stop', async () => {
+    const { harness, events, bridge: b, stopped } = started();
+    launch(b, false);
+    const start = events.find((e) => e.type === 'h:agent_started');
+    expect(start?.data.cancellable).toBe(false);
+    expect(await harness.stopAgent(start?.scope?.id ?? '')).toBe(false);
+    expect(stopped).toEqual([]);
+  });
+});
+
+describe('stopping a nested agent through a running step', () => {
+  const kid = (update: AcpChildUpdate['update'], announcement = false): AcpChildUpdate => ({
+    sessionId: 'kid',
+    announcement,
+    lineage: [
+      {
+        sessionId: 'kid',
+        title: 'general-purpose',
+        cancellable: true,
+      },
+    ],
+    update,
+  });
+
+  /** One step whose agent starts a cancellable subagent; the host stops it mid-turn. */
+  async function runOnce(opts: { fail?: boolean; emit?: false }): Promise<{
+    events: Captured[];
+    cancelled: string[];
+    duringTurn: boolean;
+    afterTurn: boolean;
+  }> {
+    const harness = new AgentHarness({
+      name: 'h',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const events: Captured[] = [];
+    frameworkCast<{
+      _broadcaster: unknown;
+    }>(ctx)._broadcaster = {
+      emit(event: Captured) {
+        events.push(event);
+      },
+    };
+    const cancelled: string[] = [];
+    let duringTurn = false;
+    const agent: AcpAgent = {
+      specificationVersion: 'acp-v1',
+      agentId: 'fake',
+      async connect(connect): Promise<AcpAgentConnection> {
+        const session: AcpSession = {
+          sessionId: 'root',
+          availableCommands: [],
+          async prompt(): Promise<AcpTurnResult> {
+            connect.host.onChildUpdate?.(
+              kid(
+                {
+                  sessionUpdate: 'subagent_update',
+                  sessionId: 'kid',
+                  state: {
+                    state: 'running',
+                  },
+                },
+                true,
+              ),
+            );
+            connect.host.onChildUpdate?.(kid(work('kid').update));
+            const scope = events.find((e) => e.type === 'h:agent_started')?.scope;
+            duringTurn = await harness.stopAgent(scope?.id ?? 'unknown');
+            if (opts.fail) {
+              throw new Error('the agent fell over');
+            }
+            return RESULT;
+          },
+          async cancel() {},
+          async cancelChild(sessionId) {
+            cancelled.push(sessionId);
+          },
+          async setMode() {},
+          async setModel() {},
+        };
+        return {
+          agentCapabilities: {},
+          authMethods: [],
+          protocolVersion: 1,
+          fingerprintFor: (): string => 'fake',
+          async authenticate() {},
+          async newSession() {
+            return session;
+          },
+          async loadSession() {
+            return session;
+          },
+          async close() {},
+        };
+      },
+    };
+    await execute(
+      step.acpAgent({
+        id: 'parent',
+        agent,
+        prompt: 'go',
+        ...(opts.emit === false
+          ? {
+              emit: false,
+            }
+          : {}),
+      }),
+      undefined,
+      ctx,
+    ).catch(() => undefined);
+    const scope = events.find((e) => e.type === 'h:agent_started')?.scope;
+    return {
+      events,
+      cancelled,
+      duringTurn,
+      afterTurn: await harness.stopAgent(scope?.id ?? 'unknown'),
+    };
+  }
+
+  it('stops it through the session while the turn runs, and offers nothing once it ended', async () => {
+    const run = await runOnce({});
+    expect(run.duringTurn).toBe(true);
+    expect(run.cancelled).toEqual([
+      'kid',
+    ]);
+    expect(run.afterTurn).toBe(false);
+  });
+
+  it('takes the offer back when the turn fails', async () => {
+    const run = await runOnce({
+      fail: true,
+    });
+    expect(run.duringTurn).toBe(true);
+    expect(run.afterTurn).toBe(false);
+  });
+});
+
+describe('a nested agent, the step emitting nothing', () => {
+  it('emits nothing of it, not even what it was asked', () => {
+    const harness = new AgentHarness({
+      name: 'h',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const events: Captured[] = [];
+    frameworkCast<{
+      _broadcaster: unknown;
+    }>(ctx)._broadcaster = {
+      emit(event: Captured) {
+        events.push(event);
+      },
+    };
+    const b = new AcpEventBridge(
+      {
+        id: 'step',
+        emit: false,
+      },
+      ctx,
+    );
+    b.begin();
+    b.forwardChild(announce('kid'));
+    b.forwardChild(
+      own('kid', {
+        sessionUpdate: 'session_message',
+        messageId: 'm1',
+        senderSessionId: 'root',
+        recipientSessionId: 'kid',
+        content: [
+          {
+            type: 'text',
+            text: 'Do it.',
+          },
+        ],
+      }),
+    );
+    expect(events.filter((e) => e.scope && e.type.startsWith('h:'))).toEqual([]);
+  });
+
+  it('a stopped one offers no second stop', async () => {
+    const harness = new AgentHarness({
+      name: 'h',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const events: Captured[] = [];
+    frameworkCast<{
+      _broadcaster: unknown;
+    }>(ctx)._broadcaster = {
+      emit(event: Captured) {
+        events.push(event);
+      },
+    };
+    const b = new AcpEventBridge(
+      {
+        id: 'step',
+      },
+      ctx,
+    );
+    const stopped: string[] = [];
+    b.offerChildStops(async (sessionId) => {
+      stopped.push(sessionId);
+    });
+    b.begin();
+    const lineage = [
+      {
+        sessionId: 'kid',
+        title: 'Explore',
+        cancellable: true,
+      },
+    ];
+    b.forwardChild({
+      ...work('kid'),
+      lineage,
+    });
+    b.forwardChild({
+      sessionId: 'kid',
+      announcement: true,
+      lineage,
+      update: {
+        sessionUpdate: 'subagent_update',
+        sessionId: 'kid',
+        state: frameworkCast<{
+          state: 'running';
+        }>({
+          state: 'idle',
+          stopReason: 'end_turn',
+        }),
+      },
+    });
+    const scope = events.find((e) => e.type === 'h:agent_started')?.scope;
+    expect(await harness.stopAgent(scope?.id ?? '')).toBe(false);
+    expect(stopped).toEqual([]);
+  });
+});
