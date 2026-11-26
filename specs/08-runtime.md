@@ -821,7 +821,12 @@ connection (`toolServer` the connection), so a model's call to an MCP server's
 tool through `mcp()` and an agent's call to the same server's tool group
 together. An agent's own tool's is the name the agent gives it, as its adapter
 reads it (`27-acp-agent-steps` § Output → harness events); one the adapter
-cannot place goes by its `kind`, and with no kind but `other`, by its title.
+cannot place goes by its `kind`, and with no kind but `other`, by its title. A
+connection's `<name>_call` tool is the operation it runs, on that connection,
+and a merged tool's server is the connection the call is routed to. A call an
+agent announced to one of the step's tools that never ran is identified as the
+bridge would have run it, and a call the agent reported only in its result as
+its announcement would have been.
 
 - `tool_call_started` — `{ name, callId, toolId, toolServer?, title?, kind?,
   locations?, status? }`.
@@ -884,12 +889,17 @@ written — by a layer tool a model or an agent calls (through the tool bridge a
 well), a code step's layer function, a `store()` hook, or `init` restoring an
 earlier plan — and tells each change as it lands, before the call that made it
 completes, a plan under a new id as the old one removed. An execution's layers
-are watched from their `init` until they are disposed. These events are the
+are watched from their `init` — a `withContext` step's from its own, a spawned
+or forked child's from its `onSpawn` — until their state is cleaned up, or the
+execution's context is gone (the harness holds it weakly). Starting to watch
+tells the plan already in the store (a restored execution's), so each turn's
+execution tells the plan it starts with, and a host joining late sees it. These events are the
 layer's, not a step's, so the layer's own `emit` option controls them
 (`ContextLayer.emit`, `plan({ emit })`), as a step's `emit` controls a step's:
 `false` silences them, a filter decides per event. The `plan()` layer's plan is its PRD, as markdown,
 from the moment one is written until it is idle again (`12-builtin-context-layers`).
-`stepId` is there when the context knows the step running.
+`stepId` is there when the context knows the step running; a write made while
+none runs (`init`, between turns) carries none.
 
 **The agent's settings** that a host shows while it works:
 

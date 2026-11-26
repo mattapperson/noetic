@@ -1865,3 +1865,44 @@ describe('gate failure direction through the real lifecycle', () => {
     expect(decision.action).toBe('deny');
   });
 });
+
+describe('evaluateServePolicy — a tool by either spelling', () => {
+  it('matches a rule written with the wire name or the own name against a call reported either way', () => {
+    for (const ruleTool of [
+      'ops_deploy',
+      'ops/deploy',
+    ]) {
+      for (const toolName of [
+        'ops_deploy',
+        'ops/deploy',
+      ]) {
+        expect(
+          evaluateServePolicy({
+            policy: {
+              rules: [
+                {
+                  tool: ruleTool,
+                  decision: 'deny',
+                },
+              ],
+            },
+            toolName,
+          }),
+        ).toBe('deny');
+      }
+    }
+    expect(
+      evaluateServePolicy({
+        policy: {
+          rules: [
+            {
+              tool: 'ops/deploy',
+              decision: 'deny',
+            },
+          ],
+        },
+        toolName: 'ops_rollback',
+      }),
+    ).toBe('allow');
+  });
+});

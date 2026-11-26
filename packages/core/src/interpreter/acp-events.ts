@@ -34,7 +34,7 @@ import type {
   ToolContent,
   ToolIdentity,
 } from '@noetic-tools/types';
-import { toolIdentityData } from '@noetic-tools/types';
+import { frameworkCast, toolIdentityData } from '@noetic-tools/types';
 import type { EmitOption } from '../runtime/broadcaster-utils';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
@@ -242,6 +242,10 @@ export class AcpEventBridge {
   private model: string | undefined;
   /** Maps an agent's title for a bridged tool call to the tool's wire name. */
   toolNameOf: (title: string) => string | undefined = () => undefined;
+  /** Which tool a call to one of the step's tools is to, from its wire name and input. */
+  bridgedIdentityOf: (wireName: string, input: unknown) => ToolIdentity = (wireName) => ({
+    id: wireName,
+  });
   /** Which of the agent's own tools a call is to, as its adapter reads it. */
   toolIdOf: (update: ToolCallUpdate) => ToolIdentity | undefined = () => undefined;
   /** The turn's subagents by child session id (spec 08 § Nested agents). */
@@ -372,6 +376,7 @@ export class AcpEventBridge {
     };
     agent.bridge.toolNameOf = this.toolNameOf;
     agent.bridge.toolIdOf = this.toolIdOf;
+    agent.bridge.bridgedIdentityOf = this.bridgedIdentityOf;
     this.children.set(info.sessionId, agent);
     agent.bridge.begin();
     agent.bridge.framework('agent_started', {
@@ -459,8 +464,14 @@ export class AcpEventBridge {
    * Name bridged tool calls by their wire name on the stream, as the
    * `callModel` stream names calls, rather than by the agent's display title.
    */
-  nameToolCalls(nameOf: (title: string) => string | undefined): void {
+  nameToolCalls(
+    nameOf: (title: string) => string | undefined,
+    identityOf?: (wireName: string, input: unknown) => ToolIdentity,
+  ): void {
     this.toolNameOf = nameOf;
+    if (identityOf) {
+      this.bridgedIdentityOf = identityOf;
+    }
   }
 
   /**
@@ -838,11 +849,23 @@ export class AcpEventBridge {
    * lifecycle the stream never saw, with the output the result recorded.
    */
   private synthesizeToolCall(item: FunctionCallItem, items: ReadonlyArray<Item>): void {
+    // Identified as its announcement would have been: by the agent's reader,
+    // else its kind, else its title.
+    const kind = frameworkCast<{
+      acpToolKind?: ToolCallUpdate['kind'];
+    }>(item).acpToolKind;
     this.calls.byId.set(item.callId, {
       name: item.name,
-      identity: {
-        id: item.name,
-      },
+      identity: this.identityOf({
+        sessionUpdate: 'tool_call',
+        toolCallId: item.callId,
+        title: item.name,
+        ...(kind
+          ? {
+              kind,
+            }
+          : {}),
+      }),
       via: 'own',
       bridge: this,
       state: 'closed',
@@ -885,9 +908,7 @@ export class AcpEventBridge {
     if (wireName) {
       this.calls.byId.set(callId, {
         name: wireName,
-        identity: {
-          id: wireName,
-        },
+        identity: this.bridgedIdentityOf(wireName, update.rawInput),
         via: 'bridged',
         bridge: this,
         state: 'announced',

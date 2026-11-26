@@ -15,6 +15,7 @@ import {
   isAssistantMessage,
   isZodSchema,
   NoeticConfigError,
+  parseDataUrl,
 } from '@noetic-tools/types';
 import type * as OpenRouterAgent from '@openrouter/agent';
 import type { ZodTypeAny } from 'zod';
@@ -243,11 +244,8 @@ function agentImageText(item: Item): string | undefined {
   const result = frameworkCast<{
     result?: unknown;
   }>(item).result;
-  if (typeof result !== 'string' || !result.startsWith('data:')) {
-    return undefined;
-  }
-  const mimeType = result.slice('data:'.length, result.search(/[;,]/));
-  return `[image: ${mimeType}]`;
+  const media = typeof result === 'string' ? parseDataUrl(result) : undefined;
+  return media ? `[image: ${media.mimeType}]` : undefined;
 }
 
 /** @internal Converts Noetic Items to OpenRouter SDK input format. */

@@ -12,6 +12,7 @@ import type {
   AgentScope,
   Context,
   ContextData,
+  Item,
   StepAcpAgent,
 } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
@@ -685,7 +686,12 @@ describe('acp-activity helpers', () => {
 describe('a call to one of the step tools', () => {
   it('presents as its tool declares, never by the name the agent announced it under', () => {
     const { bridge, events } = bridgeCtx();
-    bridge.nameToolCalls((title) => (title === 'mcp__noetic__echo' ? 'echo' : undefined));
+    bridge.nameToolCalls(
+      (title) => (title === 'mcp__noetic__echo' ? 'echo' : undefined),
+      (wireName) => ({
+        id: wireName === 'echo' ? 'tools/echo' : wireName,
+      }),
+    );
     bridge.begin();
     send(bridge, {
       sessionUpdate: 'tool_call',
@@ -712,11 +718,12 @@ describe('a call to one of the step tools', () => {
       callId: 'c1',
       toolId: 'echo',
     });
-    // One that never reached the tool is the agent's call, as it announced it.
+    // One that never reached the tool is the agent's call, as it announced it,
+    // to the tool the bridge would have run: one tool, one group.
     expect(started[1]).toEqual({
       name: 'echo',
       callId: 'c2',
-      toolId: 'echo',
+      toolId: 'tools/echo',
       title: 'mcp__noetic__echo',
       kind: 'other',
     });
@@ -821,6 +828,40 @@ describe('a call no reader can place', () => {
     expect(named(events, 'tool_call_started').map((event) => event.data.toolId)).toEqual([
       'execute',
       'execute',
+      'Something',
+    ]);
+  });
+});
+
+describe('a call the agent reported only in its result', () => {
+  it('is identified as its announcement would have been: by its kind, else its title', () => {
+    const { bridge, events } = bridgeCtx();
+    bridge.begin();
+    bridge.finalize({
+      stopReason: 'end_turn',
+      text: '',
+      items: [
+        frameworkCast<Item>({
+          id: 'r1',
+          type: 'function_call',
+          status: 'completed',
+          callId: 'r1',
+          name: 'Read a.ts',
+          arguments: '{}',
+          acpToolKind: 'read',
+        }),
+        frameworkCast<Item>({
+          id: 'r2',
+          type: 'function_call',
+          status: 'completed',
+          callId: 'r2',
+          name: 'Something',
+          arguments: '{}',
+        }),
+      ],
+    });
+    expect(named(events, 'tool_call_started').map((event) => event.data.toolId)).toEqual([
+      'read',
       'Something',
     ]);
   });

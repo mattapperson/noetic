@@ -4,9 +4,11 @@ import {
   clampProgress,
   frameworkCast,
   identifyToolCall,
+  parseDataUrl,
   presentToolCall,
   presentToolContent,
   presentToolProgress,
+  sameToolName,
   toolIdentityData,
 } from '../src/index';
 
@@ -411,5 +413,29 @@ describe('identifyToolCall', () => {
       toolId: 'x',
       toolServer: 's',
     });
+  });
+});
+
+describe('sameToolName', () => {
+  it('matches a name and its wire form either way, and nothing else', () => {
+    expect(sameToolName('plan/updatePrd', 'plan_updatePrd')).toBe(true);
+    expect(sameToolName('plan_updatePrd', 'plan/updatePrd')).toBe(true);
+    expect(sameToolName('echo', 'echo')).toBe(true);
+    expect(sameToolName('plan/updatePrd', 'plan_exitPlanMode')).toBe(false);
+  });
+});
+
+describe('parseDataUrl', () => {
+  it("reads a base64 data URL's media type and data", () => {
+    expect(parseDataUrl('data:image/png;base64,AA\nAA')).toEqual({
+      mimeType: 'image/png',
+      data: 'AA\nAA',
+    });
+  });
+
+  it('is undefined for a plain URL, raw base64, or a data URL that is not base64', () => {
+    expect(parseDataUrl('https://example.test/a.png')).toBeUndefined();
+    expect(parseDataUrl('AAAA')).toBeUndefined();
+    expect(parseDataUrl('data:text/plain,hello')).toBeUndefined();
   });
 });

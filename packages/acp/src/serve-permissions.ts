@@ -16,7 +16,7 @@ import type {
   ExecutionContext,
   SteeringDecision,
 } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import { frameworkCast, sameToolName } from '@noetic-tools/types';
 import type {
   AcpServePermissionDecision,
   AcpServePermissionPolicy,
@@ -50,7 +50,8 @@ export function evaluateServePolicy(params: {
     const matched = rules.some(
       (rule) =>
         rule.decision === tier &&
-        ((rule.tool !== undefined && rule.tool === toolName) ||
+        // Either spelling of the tool: its own name or the wire name the model sent.
+        ((rule.tool !== undefined && sameToolName(rule.tool, toolName)) ||
           (rule.kind !== undefined && rule.kind === kind)),
     );
     if (matched) {

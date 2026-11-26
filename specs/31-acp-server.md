@@ -285,7 +285,9 @@ serveAcp(harness, {
 });
 ```
 
-Rules match on tool name or the tool's declared ACP `kind`; the first decisive
+Rules match on tool name — either spelling: the tool's own name
+(`ops/deploy`) or the wire name a model sends (`ops_deploy`), against a call
+reported either way — or the tool's declared `kind`; the first decisive
 match wins, checked in order `deny` → `ask` → `allow` so an explicit refusal
 beats a broad grant, and a required ask beats a broad allow. The **default is
 `allow`** — deliberately the opposite of the client direction's `deny`. There,

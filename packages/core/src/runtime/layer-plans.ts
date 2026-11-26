@@ -14,6 +14,7 @@
 import type { LayerStateStore } from '@noetic-tools/context';
 import type { AgentPlan, Context, ContextLayer } from '@noetic-tools/types';
 import { hashString } from '@noetic-tools/types';
+import { harnessInternal } from '../util/harness-internals';
 import { emitFrameworkEvent, getBroadcaster, shouldEmit } from './broadcaster-utils';
 import { ContextImpl } from './context-impl';
 
@@ -25,9 +26,14 @@ interface Told {
   readonly id?: string;
 }
 
-/** One execution whose layers keep a plan: where to tell it, and which layers. */
+/**
+ * One execution whose layers keep a plan: where to tell it, and which layers.
+ * The context is held weakly, so a finished execution's context — its item
+ * log, its broadcaster — is never kept alive by its plan; the entry goes when
+ * the context does, or when the execution's layers are cleaned up.
+ */
 interface Watched {
-  readonly ctx: Context;
+  readonly ctx: WeakRef<Context>;
   readonly layers: Map<string, ContextLayer>;
   readonly told: Map<string, Told>;
 }
@@ -74,27 +80,35 @@ function idData(id: string | undefined): Record<string, string> {
 /** Tells each change of the plans an execution's layers keep, once, as it lands. */
 export class LayerPlanReporter {
   private readonly watched = new Map<string, Watched>();
+  /** Drops an execution's entry once its context is collected, unless another replaced it. */
+  private readonly collected = new FinalizationRegistry<{
+    readonly executionId: string;
+    readonly entry: Watched;
+  }>(({ executionId, entry }) => {
+    if (this.watched.get(executionId) === entry) {
+      this.watched.delete(executionId);
+    }
+  });
 
   /**
    * Start telling the plans `layers` keep for `ctx`'s execution. Call before
-   * the layers' `init`, so a plan it restores is told too. Layers added later
-   * (a `withContext` step) join the execution's set.
+   * the layers' `init`, so the plan `init` writes is told; a plan already in
+   * the store (a restored execution's) is told at once. Layers added later (a
+   * `withContext` step) join the execution's set.
    */
   watch(ctx: Context, layers: ReadonlyArray<ContextLayer> | undefined): void {
     const planned = (layers ?? []).filter((layer) => layer.plan !== undefined);
     if (planned.length === 0) {
       return;
     }
-    const existing = this.watched.get(ctx.id);
-    const entry: Watched = existing ?? {
-      ctx,
-      layers: new Map(),
-      told: new Map(),
-    };
+    const entry = this.entryFor(ctx);
     for (const layer of planned) {
+      if (entry.layers.has(layer.id)) {
+        continue;
+      }
       entry.layers.set(layer.id, layer);
+      this.changed(ctx.id, layer.id, ctx.harness.getLayerState(ctx.id, layer.id));
     }
-    this.watched.set(ctx.id, entry);
   }
 
   /** The execution's layers are gone: tell nothing more for it. */
@@ -102,11 +116,19 @@ export class LayerPlanReporter {
     this.watched.delete(executionId);
   }
 
+  /** One layer of the execution is gone: forget it and what was told of it. */
+  drop(executionId: string, layerId: string): void {
+    const entry = this.watched.get(executionId);
+    entry?.layers.delete(layerId);
+    entry?.told.delete(layerId);
+  }
+
   /** A layer's state was written: tell its plan if it changed. */
   changed(executionId: string, layerId: string, state: unknown): void {
     const entry = this.watched.get(executionId);
     const layer = entry?.layers.get(layerId);
-    if (!entry || !layer) {
+    const ctx = entry?.ctx.deref();
+    if (!entry || !layer || !ctx) {
       return;
     }
     const plan = planIn(layer, state);
@@ -117,7 +139,7 @@ export class LayerPlanReporter {
     }
     // Another plan, or none, in place of the one told: that one is gone.
     if (last && (plan === null || plan.id !== last.id)) {
-      this.emit(entry.ctx, layer, 'plan_removed', idData(last.id));
+      this.emit(ctx, layer, 'plan_removed', idData(last.id));
     }
     if (plan === null || hash === undefined) {
       entry.told.delete(layerId);
@@ -127,9 +149,33 @@ export class LayerPlanReporter {
       hash,
       ...idData(plan.id),
     });
-    this.emit(entry.ctx, layer, 'plan_updated', {
+    this.emit(ctx, layer, 'plan_updated', {
       plan,
     });
+  }
+
+  /** The execution's entry, for this context: a new context under a known id starts afresh. */
+  private entryFor(ctx: Context): Watched {
+    const existing = this.watched.get(ctx.id);
+    if (existing && existing.ctx.deref() === ctx) {
+      return existing;
+    }
+    const entry: Watched = {
+      ctx: new WeakRef(ctx),
+      layers: new Map(),
+      told: new Map(),
+    };
+    this.watched.set(ctx.id, entry);
+    this.collected.register(ctx, {
+      executionId: ctx.id,
+      entry,
+    });
+    return entry;
+  }
+
+  /** How many executions are watched: for tests that check nothing is kept. */
+  get size(): number {
+    return this.watched.size;
   }
 
   /** One event of `layer`'s, through the layer's own `emit` filter. */
@@ -155,6 +201,18 @@ export class LayerPlanReporter {
   }
 }
 
+/**
+ * Watch the plans `layers` keep for `ctx`'s execution, through the harness's
+ * reporter: for layers that start inside a run (a `withContext` step, a spawned
+ * child) rather than with it.
+ */
+export function watchLayerPlans(
+  ctx: Context,
+  layers: ReadonlyArray<ContextLayer> | undefined,
+): void {
+  harnessInternal<LayerPlanReporter>(ctx.harness, 'layerPlans')?.watch(ctx, layers);
+}
+
 /** `store`, telling `reporter` of every write as it lands. */
 export function reportingLayerPlans(
   store: LayerStateStore,
@@ -166,6 +224,19 @@ export function reportingLayerPlans(
         return <T>(executionId: string, layerId: string, state: T): void => {
           target.set(executionId, layerId, state);
           reporter.changed(executionId, layerId, state);
+        };
+      }
+      if (property === 'cleanup') {
+        return (executionId: string): void => {
+          target.cleanup(executionId);
+          reporter.forget(executionId);
+        };
+      }
+      if (property === 'drop' && target.drop) {
+        const drop = target.drop.bind(target);
+        return (executionId: string, layerId: string): void => {
+          drop(executionId, layerId);
+          reporter.drop(executionId, layerId);
         };
       }
       const value = Reflect.get(target, property, target);

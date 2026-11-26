@@ -434,6 +434,20 @@ export class AcpToolRunner implements AcpToolHost {
     this.records.sessionReloaded();
   }
 
+  /**
+   * Which tool a call to `wireName` with `input` is to, as the bridge would
+   * identify it running the call (spec 08 § Tool calls): one announced but
+   * never run groups with the ones that ran.
+   */
+  identityOf(wireName: string, input: unknown): ToolIdentity {
+    const tool = this.byWireName.get(wireName);
+    return tool
+      ? identifyToolCall(tool, input)
+      : {
+          id: wireName,
+        };
+  }
+
   /** The tool's wire name when `title` is how an agent titles a call to it. */
   wireNameOf(title: string): string | undefined {
     return this.tools.find((tool) => bridgedToolTitles(this.serverName, tool.name).includes(title))

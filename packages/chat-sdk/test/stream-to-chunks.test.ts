@@ -572,7 +572,7 @@ describe('streamToChatChunks — images', () => {
     );
     expect(chunks).toEqual([
       'Here:',
-      '[image: image/png]',
+      '\n\n[image: image/png]',
     ]);
   });
 });

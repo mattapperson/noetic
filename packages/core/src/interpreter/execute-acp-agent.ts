@@ -1053,7 +1053,10 @@ async function runTurn<TContext, I, O>(params: {
 }): Promise<AcpTurnResult> {
   const { step, baseCtx, resolution, bridge, tools, turnError } = params;
   if (tools) {
-    bridge.nameToolCalls((title: string) => tools.wireNameOf(title));
+    bridge.nameToolCalls(
+      (title: string) => tools.wireNameOf(title),
+      (wireName, input) => tools.identityOf(wireName, input),
+    );
   }
   bridge.begin();
   let result: AcpTurnResult;

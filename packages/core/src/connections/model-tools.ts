@@ -213,7 +213,11 @@ function withoutTarget(args: Record<string, unknown>): Record<string, unknown> {
   return rest;
 }
 
-function pickTarget(args: Record<string, unknown>, targets: ReadonlyArray<string>): string {
+/** The connection a merged tool's call goes to: its `target`, else the one connection its refs name. */
+function routedTarget(
+  args: Record<string, unknown>,
+  targets: ReadonlyArray<string>,
+): string | undefined {
   const target = args.target;
   if (typeof target === 'string' && targets.includes(target)) {
     return target;
@@ -221,7 +225,11 @@ function pickTarget(args: Record<string, unknown>, targets: ReadonlyArray<string
   const byRef = [
     ...refConnections(args),
   ].filter((name) => targets.includes(name));
-  const routed = byRef.length === 1 ? byRef[0] : undefined;
+  return byRef.length === 1 ? byRef[0] : undefined;
+}
+
+function pickTarget(args: Record<string, unknown>, targets: ReadonlyArray<string>): string {
+  const routed = routedTarget(args, targets);
   if (routed) {
     return routed;
   }
@@ -271,16 +279,19 @@ function mergedTool(
     input: ANY_OBJECT_INPUT,
     inputJsonSchema: withTarget(first.info.inputSchema, targets),
     output: ANY_OUTPUT,
-    // The operation on the connection the call targets, when it names one.
+    // The operation on the connection the call goes to, routed as the call is.
     presentation: {
-      identity: (args) => ({
-        id: first.op,
-        ...(typeof args.target === 'string' && targets.includes(args.target)
-          ? {
-              server: args.target,
-            }
-          : {}),
-      }),
+      identity: (args) => {
+        const server = routedTarget(args, targets);
+        return {
+          id: first.op,
+          ...(server
+            ? {
+                server,
+              }
+            : {}),
+        };
+      },
     },
     execute: (args, toolCtx) =>
       callThrough(runtime, {
@@ -446,6 +457,20 @@ function genericTools(turn: TurnConnections, generic: GenericExposure): Connecti
     input: ANY_OBJECT_INPUT,
     inputJsonSchema: CALL_SCHEMA,
     output: ANY_OUTPUT,
+    // The operation it runs, on its connection — as its own tool would be;
+    // a read of the connection's state is the call tool itself.
+    presentation: {
+      identity: (args) =>
+        typeof args.op === 'string' && args.op.length > 0
+          ? {
+              id: args.op,
+              server: name,
+            }
+          : {
+              id: `${sanitize(name)}_call`,
+              server: name,
+            },
+    },
     execute: (args, toolCtx) =>
       runCall(turn, generic, {
         args,

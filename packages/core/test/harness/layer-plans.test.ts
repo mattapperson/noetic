@@ -5,11 +5,17 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import type { ContextData } from '@noetic-tools/context';
 import { plan } from '@noetic-tools/context';
-import type { ContextLayer, LLMResponse } from '@noetic-tools/types';
+import type { ContextLayer, LLMResponse, Step } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
+import { withContext } from '../../src/builders/provide-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import { LayerPlanReporter, reportingLayerPlans } from '../../src/runtime/layer-plans';
+import {
+  LayerPlanReporter,
+  reportingLayerPlans,
+  watchLayerPlans,
+} from '../../src/runtime/layer-plans';
 
 //#region Helpers
 
@@ -344,6 +350,85 @@ describe('LayerPlanReporter', () => {
     ]);
   });
 
+  it('forgets an execution when the store cleans it up, and a layer when the store drops it', () => {
+    const { harness, ctx, emitted, reporter } = watchedCtx([
+      layerWith(asPlan),
+    ]);
+    const store = reportingLayerPlans(harness.layerStateStore, reporter);
+    store.set(ctx.id, 'tasks', {
+      id: 'a',
+      entries: [],
+    });
+    expect(reporter.size).toBe(1);
+    store.drop?.(ctx.id, 'tasks');
+    // Dropped: a write of the same plan is not this layer's any more.
+    store.set(ctx.id, 'tasks', {
+      id: 'a',
+      entries: [],
+    });
+    store.cleanup(ctx.id);
+    expect(reporter.size).toBe(0);
+    expect(emitted).toHaveLength(1);
+  });
+
+  it('tells the plan already in the store when it starts watching: a restored execution', () => {
+    const harness = new AgentHarness({
+      name: 'h',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const emitted: Emitted[] = [];
+    Reflect.set(ctx, '_broadcaster', {
+      emit(event: Emitted) {
+        emitted.push(event);
+      },
+    });
+    harness.layerStateStore.set(ctx.id, 'tasks', {
+      id: 'restored',
+      entries: [],
+    });
+    const reporter = new LayerPlanReporter();
+    reporter.watch(ctx, [
+      layerWith(asPlan),
+    ]);
+    // Watching the same layer again tells nothing more.
+    reporter.watch(ctx, [
+      layerWith(asPlan),
+    ]);
+    expect(emitted.map((event) => event.data)).toEqual([
+      {
+        plan: {
+          id: 'restored',
+          entries: [],
+        },
+      },
+    ]);
+  });
+
+  it("is the harness's own: a layer a step watches mid-run reports through it", () => {
+    const harness = new AgentHarness({
+      name: 'h',
+      params: {},
+    });
+    const ctx = harness.createContext();
+    const emitted: Emitted[] = [];
+    Reflect.set(ctx, '_broadcaster', {
+      emit(event: Emitted) {
+        emitted.push(event);
+      },
+    });
+    watchLayerPlans(ctx, [
+      layerWith(asPlan),
+    ]);
+    harness.layerStateStore.set(ctx.id, 'tasks', {
+      id: 'mid-run',
+      entries: [],
+    });
+    expect(emitted.map((event) => event.type)).toEqual([
+      'h:plan_updated',
+    ]);
+  });
+
   it('tells nothing for an unwatched execution or layer, a layer whose plan throws, or after forget', () => {
     const { ctx, emitted, reporter } = watchedCtx([
       layerWith(() => {
@@ -365,5 +450,54 @@ describe('LayerPlanReporter', () => {
     reporter.forget(ctx.id);
     reporter.changed(ctx.id, 'tasks', {});
     expect(emitted).toEqual([]);
+  });
+});
+
+describe('a plan layer a withContext step adds', () => {
+  it('reports its plan live, as the harness-wide layer does', async () => {
+    const harness = new AgentHarness({
+      name: 'scoped',
+      params: {},
+      agentGraph: frameworkCast<
+        NonNullable<ConstructorParameters<typeof AgentHarness>[0]['agentGraph']>
+      >(
+        withContext({
+          id: 'with-plan',
+          context: [
+            plan(),
+          ],
+          child: frameworkCast<Step<ContextData, unknown, string>>({
+            kind: 'callModel',
+            id: 'plan-step',
+            model: 'test/model',
+          }),
+        }),
+      ),
+    });
+    frameworkCast<{
+      llm: {
+        client: unknown;
+      };
+    }>(harness).llm.client = scriptedModel([
+      {
+        name: 'plan_enterPlanMode',
+        args: {},
+      },
+      {
+        name: 'plan_updatePrd',
+        args: {
+          content: '# Scoped',
+        },
+      },
+    ]);
+    const events: Emitted[] = [];
+    const reading = readTurn(harness.getFullStream(), events);
+    await harness.execute('plan it');
+    await reading;
+    expect(planEvents(events).map((event) => event.data.plan)).toEqual([
+      {
+        markdown: '# Scoped',
+      },
+    ]);
   });
 });

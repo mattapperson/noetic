@@ -209,4 +209,37 @@ export function clampProgress(value: unknown): number | undefined {
   return Math.min(1, Math.max(0, fraction));
 }
 
+/**
+ * Whether two names name the same tool: equal, or equal once each is in the
+ * form a model is sent (`plan/updatePrd` and `plan_updatePrd`). A rule or a
+ * declaration written either way matches a call reported either way.
+ * @public
+ */
+export function sameToolName(a: string, b: string): boolean {
+  const wire = (name: string): string => name.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return a === b || wire(a) === wire(b);
+}
+
+/**
+ * A base64 data URL's media type and data (`data:image/png;base64,AAAA`), or
+ * undefined for anything else — how an image an agent answered with carries
+ * its media type.
+ * @public
+ */
+export function parseDataUrl(url: string):
+  | {
+      mimeType: string;
+      data: string;
+    }
+  | undefined {
+  const match = /^data:([^;,]+);base64,([\s\S]*)$/.exec(url);
+  if (!match?.[1] || match[2] === undefined) {
+    return undefined;
+  }
+  return {
+    mimeType: match[1],
+    data: match[2],
+  };
+}
+
 //#endregion

@@ -1,4 +1,5 @@
 import type { FrameworkStreamEvent, StreamEvent } from '@noetic-tools/types';
+import { parseDataUrl } from '@noetic-tools/types';
 import type { ChatStreamChunk } from './chat-types';
 
 export interface StreamToChatChunksOptions {
@@ -131,8 +132,9 @@ export async function* streamToChatChunks(
       const image =
         event.type === 'response.output_item.done' ? imageMediaType(event.data.item) : undefined;
       if (image !== undefined) {
+        // Its own line, after any text before it.
+        yield emittedText ? `\n\n[image: ${image}]` : `[image: ${image}]`;
         emittedText = true;
-        yield `[image: ${image}]`;
       }
       continue;
     }
@@ -307,8 +309,5 @@ function imageMediaType(item: unknown): string | undefined {
     return undefined;
   }
   const result = 'result' in item ? item.result : undefined;
-  if (typeof result !== 'string' || !result.startsWith('data:')) {
-    return undefined;
-  }
-  return result.slice('data:'.length, result.search(/[;,]/));
+  return typeof result === 'string' ? parseDataUrl(result)?.mimeType : undefined;
 }

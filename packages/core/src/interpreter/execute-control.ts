@@ -35,6 +35,7 @@ import { NoeticAttr, NoeticEvent } from '../observability/genai-attributes';
 import type { ChannelStore } from '../runtime/channel-store';
 import { ContextImpl, PathNode } from '../runtime/context-impl';
 import { snapshotCwdState } from '../runtime/cwd-helpers';
+import { watchLayerPlans } from '../runtime/layer-plans';
 import { toUntil } from '../until/decider';
 import type { ItemSchemaRegistry, LayerStateStore } from './action-deps';
 import { contextToExecCtx, returnLayers, spawnLayers } from './action-deps';
@@ -236,6 +237,7 @@ function createForkLayerBridge({
         store: layerStore,
         itemSchemas: opts?.itemSchemas,
       });
+      watchLayerPlans(childContexts[index], layers);
       layerStore.adopt?.({
         parentExecutionId: parentExecCtx.executionId,
         ctx: childExecCtxs[index],

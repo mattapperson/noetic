@@ -14,7 +14,7 @@ import type {
   ToolContent,
   ToolLocation,
 } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import { frameworkCast, parseDataUrl } from '@noetic-tools/types';
 import { z } from 'zod';
 
 //#region Types
@@ -298,19 +298,15 @@ type BlockMappers = {
   [T in Exclude<ToolContent['type'], 'diff' | 'terminal'>]: (content: ContentOf<T>) => WireBlock;
 };
 
-const DATA_URL = /^data:([^;,]+);base64,(.*)$/s;
-
 /** Media carried as a data URL, as the wire's own media block; undefined for a plain URL. */
 function mediaBlock(kind: 'image' | 'audio', url: string): WireBlock | undefined {
-  const match = DATA_URL.exec(url);
-  if (!match?.[1] || match[2] === undefined) {
-    return undefined;
-  }
-  return {
-    type: kind,
-    mimeType: match[1],
-    data: match[2],
-  };
+  const media = parseDataUrl(url);
+  return media
+    ? {
+        type: kind,
+        ...media,
+      }
+    : undefined;
 }
 
 /** Something that lives at a URL: a link to it. */
@@ -323,22 +319,21 @@ function linkBlock(uri: string, name?: string): WireBlock {
 }
 
 function fileBlock(content: ContentOf<'input_file'>): WireBlock {
-  const media = content.fileData ? DATA_URL.exec(content.fileData) : null;
-  if (media?.[1]?.startsWith('audio/') && media[2] !== undefined) {
+  const media = content.fileData ? parseDataUrl(content.fileData) : undefined;
+  if (media?.mimeType.startsWith('audio/')) {
     return {
       type: 'audio',
-      mimeType: media[1],
-      data: media[2],
+      ...media,
     };
   }
   const name = content.filename ?? 'file';
-  if (media?.[1] && media[2] !== undefined) {
+  if (media) {
     return {
       type: 'resource',
       resource: {
         uri: name,
-        mimeType: media[1],
-        blob: media[2],
+        mimeType: media.mimeType,
+        blob: media.data,
       },
     };
   }
@@ -347,14 +342,14 @@ function fileBlock(content: ContentOf<'input_file'>): WireBlock {
 
 /** A video: the wire has no video block, so its bytes as a resource, or a link to it. */
 function videoBlock(url: string): WireBlock {
-  const media = DATA_URL.exec(url);
-  if (media?.[1] && media[2] !== undefined) {
+  const media = parseDataUrl(url);
+  if (media) {
     return {
       type: 'resource',
       resource: {
         uri: 'video',
-        mimeType: media[1],
-        blob: media[2],
+        mimeType: media.mimeType,
+        blob: media.data,
       },
     };
   }
@@ -704,13 +699,13 @@ async function handleImageItem(state: TurnState, event: StreamEvent): Promise<vo
   ) {
     return;
   }
-  const media = DATA_URL.exec(record.result);
+  const media = parseDataUrl(record.result);
   await notifyIfPrimary(state.params, state.primary, {
     sessionUpdate: 'agent_message_chunk',
     content: {
       type: 'image',
-      mimeType: media?.[1] ?? 'image/png',
-      data: media?.[2] ?? record.result,
+      mimeType: media?.mimeType ?? 'image/png',
+      data: media?.data ?? record.result,
     },
   });
 }

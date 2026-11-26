@@ -38,6 +38,7 @@ import { LayerPlanReporter, reportingLayerPlans } from '../runtime/layer-plans';
 import type { OutputSnapshot } from '../runtime/output-store';
 import { OutputStore } from '../runtime/output-store';
 import { awaitApproval } from '../runtime/tool-approval';
+import { setHarnessInternals } from '../util/harness-internals';
 import { ConnectionGate } from './connection-gate';
 import type { LayerStateStore, RecallCache } from './deps/context';
 import {
@@ -655,6 +656,9 @@ export class AgentHarness<
       ),
       this.layerPlans,
     );
+    setHarnessInternals(this, {
+      layerPlans: this.layerPlans,
+    });
     this.recallCache = createRecallCache();
     this.contextCache = createContextCacheStore();
     this.defaultDeliveryMode = opts.defaultDeliveryMode ?? 'next-turn';

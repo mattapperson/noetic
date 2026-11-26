@@ -1321,6 +1321,25 @@ describe('a connection tool names the tool it is to', () => {
     ).toEqual({
       id: 'ui.tap',
     });
+    // A connection's call tool is the operation it runs on that connection.
+    const call = toolNamed(unified, 'app_call');
+    expect(
+      identifyToolCall(call, {
+        op: 'ui.tap',
+        args: {},
+      }),
+    ).toEqual({
+      id: 'ui.tap',
+      server: 'app',
+    });
+    expect(
+      identifyToolCall(call, {
+        read: 'screen',
+      }),
+    ).toEqual({
+      id: 'app_call',
+      server: 'app',
+    });
     await runtime.close();
   });
 });

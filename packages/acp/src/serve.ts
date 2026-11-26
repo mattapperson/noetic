@@ -23,7 +23,12 @@ import type {
   StreamEvent,
   StreamingItem,
 } from '@noetic-tools/types';
-import { frameworkCast, NoeticConfigError, presentToolCall } from '@noetic-tools/types';
+import {
+  frameworkCast,
+  NoeticConfigError,
+  presentToolCall,
+  sameToolName,
+} from '@noetic-tools/types';
 import { clientFsAdapter, clientShellAdapter } from './client-adapters';
 import { contentBlockText } from './items';
 import { isAbsolutePath } from './paths';
@@ -88,14 +93,13 @@ function assertKindRulesResolvable(options: AcpServeOptions): void {
 }
 
 function buildPresenter(options: AcpServeOptions): Presenter {
-  const declared = new Map(
-    options.tools?.map((tool) => [
-      tool.name,
-      tool,
-    ]),
-  );
+  const declared = options.tools ?? [];
+  // A call is reported by its wire name, a tool declared by its own: either spelling finds it.
   const presentationOf = (toolName: string, args: unknown) =>
-    presentToolCall(declared.get(toolName), args);
+    presentToolCall(
+      declared.find((tool) => sameToolName(tool.name, toolName)),
+      args,
+    );
 
   const kindOf = (toolName: string): AcpToolKind | undefined =>
     presentationOf(toolName, undefined).kind;

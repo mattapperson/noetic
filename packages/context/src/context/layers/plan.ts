@@ -823,6 +823,25 @@ function buildPlanHooks(options: PlanLayerOptions): ContextLayer<PlanState>['hoo
   };
 }
 
+/**
+ * The plan the layer holds, as an agent's plan: its PRD, written as markdown,
+ * from the moment one is written until the layer goes back to idle. The plan
+ * session's slug is its id when the host gave one.
+ */
+function planOf(state: PlanState): AgentPlan | null {
+  if (state.phase === PlanPhase.Idle || !state.prd) {
+    return null;
+  }
+  return {
+    ...(state.planSlug
+      ? {
+          id: state.planSlug,
+        }
+      : {}),
+    markdown: state.prd,
+  };
+}
+
 //#endregion
 
 //#region Public API
@@ -839,25 +858,6 @@ function buildPlanHooks(options: PlanLayerOptions): ContextLayer<PlanState>['hoo
  * @param config - Optional configuration for scope, allowed tools, and limits.
  * @returns A `ContextLayer` providing plan mode, PRD storage, and execution tracking.
  */
-/**
- * The plan the layer holds, as an agent's plan: its PRD, written as markdown,
- * from the moment one is written until the layer goes back to idle. The plan
- * session's slug is its id when the host gave one.
- */
-export function planOf(state: PlanState): AgentPlan | null {
-  if (state.phase === PlanPhase.Idle || !state.prd) {
-    return null;
-  }
-  return {
-    ...(state.planSlug
-      ? {
-          id: state.planSlug,
-        }
-      : {}),
-    markdown: state.prd,
-  };
-}
-
 export function plan(config?: PlanConfig): ContextLayer<PlanState> {
   const scope: ContextScope = config?.scope ?? 'thread';
   const options = resolvePlanOptions(config);

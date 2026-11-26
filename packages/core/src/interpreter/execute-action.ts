@@ -23,6 +23,7 @@ import {
   withOffered,
 } from '../connections/step-tools';
 import type { EmitOption } from '../runtime/broadcaster-utils';
+import { watchLayerPlans } from '../runtime/layer-plans';
 import { chargeSpent } from '../util/spent';
 import type { ItemSchemaRegistry, LayerStateStore, SessionCtxExtension } from './action-deps';
 import {
@@ -1189,6 +1190,11 @@ export async function executeSpawn<TContext, I, O>(
   if (step.steers === 'forward') {
     frameworkCast<SessionCtxExtension>(childCtx)._forwardSteers = true;
   }
+  // The child's layers report their plans as the child writes them; the plan
+  // `onSpawn` already gave it is told now.
+  if (hasLayers) {
+    watchLayerPlans(childCtx, layers);
+  }
 
   // `childExecutionCtx` predates the spawn span; the child's hooks trace onto that span.
   const childTracedCtx: ExecutionContext = {
@@ -1331,6 +1337,7 @@ export async function executeWithContext<TContext, I, O>(
   const execCtx = contextToExecCtx(baseCtx);
   try {
     if (layerStore && opts?.storage && scopedLayers.length > 0) {
+      watchLayerPlans(baseCtx, scopedLayers);
       await initLayers({
         layers: scopedLayers,
         ctx: execCtx,
