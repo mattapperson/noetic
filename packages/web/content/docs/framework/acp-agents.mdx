@@ -100,7 +100,8 @@ declare const log: { debug(text: string): void };
 
 const agent = claudeCode({
   machine: localMachine('sandboxed', {
-    // `command.env` is the full environment; `bridges` the tool bridge addresses to let through.
+    // `command.env` is the full environment, `agentEnv` what the agent sets on top of yours;
+    // `bridges` the tool bridge addresses to let through.
     wrap: (command, { bridges }) => ({
       command: 'sandbox-exec',
       args: ['-p', profileFor(bridges), command.command, ...(command.args ?? [])],
