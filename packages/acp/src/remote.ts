@@ -1,13 +1,13 @@
 /**
- * Machines elsewhere, through a remote runner (`noetic-acp serve`), and the
- * runner itself.
+ * Subprocess adapters that run agents elsewhere, through a remote runner
+ * (`noetic-acp serve`), and the runner itself.
  *
- * A runner on the agent's machine starts the agent with the preset's launch
+ * A runner where the agent should run starts the agent with the preset's launch
  * settings, starts MCP servers beside it, and serves the host's tool bridge to
  * them on its own loopback interface — all over one channel, so the agent
  * needs no route back to the host. The channel is a WebSocket
- * ({@link webSocketMachine}) or the stdio of a command that starts the runner
- * there ({@link commandMachine}: `ssh host …`, `docker exec -i ctr …`).
+ * ({@link webSocketSubprocess}) or the stdio of a command that starts the runner
+ * there ({@link commandSubprocess}: `ssh host …`, `docker exec -i ctr …`).
  *
  * Node-only (`ws`, `node:child_process`), so it lives behind
  * `@noetic-tools/acp/remote`.
@@ -15,10 +15,10 @@
 
 import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
-import type { AcpMachineFactory } from '@noetic-tools/types';
 import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
 import { WebSocket } from 'ws';
-import { runnerMachine } from './runner/host';
+import type { AgentSubprocessAdapter } from './agent-subprocess';
+import { runnerSubprocess } from './runner/host';
 import type { FrameLink } from './runner/protocol';
 import { isLoopbackHost, lineFrameLink } from './runner/protocol';
 import { webSocketFrameLink } from './runner/ws-link';
@@ -32,12 +32,12 @@ export type {
   AcpRunnerOptions,
 } from './runner/serve';
 export { listenAcpRunner, serveAcpRunner, serveAcpRunnerOverStdio } from './runner/serve';
-export { runnerMachine };
+export { runnerSubprocess };
 
-//#region Machines
+//#region Adapters
 
-/** @public Options for {@link webSocketMachine}. */
-export interface WebSocketMachineOptions {
+/** @public Options for {@link webSocketSubprocess}. */
+export interface WebSocketSubprocessOptions {
   /** The runner's `wss://` URL; `ws://` only to a loopback host. */
   url: string;
   /** The runner's bearer token. */
@@ -51,14 +51,14 @@ export interface WebSocketMachineOptions {
  * a runner off the loopback interface is reached over TLS only.
  * @public
  */
-export function webSocketMachine(opts: WebSocketMachineOptions): AcpMachineFactory {
+export function webSocketSubprocess(opts: WebSocketSubprocessOptions): AgentSubprocessAdapter {
   const url = new URL(opts.url);
   if (url.protocol !== 'wss:' && !(url.protocol === 'ws:' && isLoopbackHost(url.hostname))) {
     throw new TypeError(
-      `webSocketMachine needs a wss:// URL for ${url.host}; ws:// is allowed only to a loopback host.`,
+      `webSocketSubprocess needs a wss:// URL for ${url.host}; ws:// is allowed only to a loopback host.`,
     );
   }
-  return runnerMachine(async () => {
+  return runnerSubprocess(async () => {
     const socket = new WebSocket(url, {
       headers: {
         Authorization: `Bearer ${opts.token}`,
@@ -90,8 +90,8 @@ export function webSocketMachine(opts: WebSocketMachineOptions): AcpMachineFacto
   });
 }
 
-/** @public Options for {@link commandMachine}. */
-export interface CommandMachineOptions {
+/** @public Options for {@link commandSubprocess}. */
+export interface CommandSubprocessOptions {
   /** Starts a runner over stdio, e.g. `ssh`, or `docker` with `exec -i`. */
   command: string;
   /** e.g. `['build-host', 'npx', '-y', '@noetic-tools/acp', 'serve', '--stdio']`. */
@@ -105,8 +105,8 @@ export interface CommandMachineOptions {
  * listener anywhere.
  * @public
  */
-export function commandMachine(opts: CommandMachineOptions): AcpMachineFactory {
-  return runnerMachine(async (signal): Promise<FrameLink> => {
+export function commandSubprocess(opts: CommandSubprocessOptions): AgentSubprocessAdapter {
+  return runnerSubprocess(async (signal): Promise<FrameLink> => {
     const child = spawn(
       opts.command,
       [

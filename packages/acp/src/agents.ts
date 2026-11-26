@@ -14,7 +14,7 @@
  * externalise `@noetic-tools/acp/stdio`.
  */
 
-import type { AcpAgent, AcpMachineFactory, AcpTransportFactory } from '@noetic-tools/types';
+import type { AcpAgent, AcpTransportFactory, SubprocessAdapter } from '@noetic-tools/types';
 import type { InstructionsMeta } from './connection';
 import { defineAcpAgent } from './define';
 import type { AcpToolWiring } from './tool-bridge';
@@ -125,10 +125,12 @@ export interface AcpPresetOptions {
   /** Environment overrides for the agent process — API keys, feature flags. */
   env?: Record<string, string | undefined>;
   /**
-   * The machine the agent runs on — a remote runner, a sandbox — when it is
-   * not this one. The preset's command runs there, with its tool settings.
+   * Where the agent runs — a remote runner, a sandbox. The preset's command
+   * runs there, with its tool settings. Without one the agent runs through
+   * the harness's `environment.subprocess` when that adapter has `open`, and
+   * as a local process otherwise.
    */
-  machine?: AcpMachineFactory;
+  subprocess?: SubprocessAdapter;
   /** Attach to an agent this package does not start, in place of the preset's command. */
   transport?: AcpTransportFactory;
   /**
@@ -185,7 +187,7 @@ function preset({
             command: spec.command,
             args: spec.args,
           },
-          machine: opts.machine,
+          subprocess: opts.subprocess,
         }),
     env: spec.env,
     tools: wiring,
@@ -340,7 +342,8 @@ export function customAcpAgent(opts: {
   command?: string;
   args?: ReadonlyArray<string>;
   env?: Record<string, string | undefined>;
-  machine?: AcpMachineFactory;
+  /** See {@link AcpPresetOptions.subprocess}. */
+  subprocess?: SubprocessAdapter;
   /** See {@link AcpPresetOptions.transport}. */
   transport?: AcpTransportFactory;
 }): AcpAgent {
@@ -357,7 +360,7 @@ export function customAcpAgent(opts: {
       env: opts.env,
     },
     opts: {
-      machine: opts.machine,
+      subprocess: opts.subprocess,
       transport: opts.transport,
     },
     wiring: sessionToolWiring,

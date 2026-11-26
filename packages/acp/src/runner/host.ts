@@ -1,21 +1,23 @@
 /**
- * The host's end of a remote runner: an {@link AcpMachine} whose processes run
- * on the runner's machine and whose tool bridge is reached through it.
+ * The host's end of a remote runner: an {@link AgentSubprocessAdapter} whose
+ * processes run where the runner runs and whose tool bridge is reached
+ * through it.
  *
  * Runtime-neutral: it needs only `fetch` and a {@link FrameLink}, so the
  * WebSocket and stdio links that open one live in the node entry.
  */
 
 import type {
-  AcpMachine,
-  AcpMachineFactory,
   AcpReattachHandle,
   AcpTransport,
   AcpWhenHostExits,
   SpawnCommand,
+  SubprocessLink,
   ToolBridgeAddress,
 } from '@noetic-tools/types';
 import { AcpConnectError } from '@noetic-tools/types';
+import type { AgentSubprocessAdapter } from '../agent-subprocess';
+import { agentSubprocess } from '../agent-subprocess';
 import type { FrameLink, RunnerFrame } from './protocol';
 import { chunksOf, fromBase64, RunnerFrameSchema, toBase64 } from './protocol';
 
@@ -51,19 +53,19 @@ const HOP_HEADERS = new Set([
 //#region Public API
 
 /**
- * A machine reached through a remote runner over `openLink`.
+ * Runs agents through a remote runner reached over `openLink`.
  * @public
  */
-export function runnerMachine(
+export function runnerSubprocess(
   openLink: (signal?: AbortSignal) => Promise<FrameLink>,
-): AcpMachineFactory {
-  return async ({ signal, whenHostExits = 'keep' }) => {
+): AgentSubprocessAdapter {
+  return agentSubprocess('runnerSubprocess()', async ({ signal, whenHostExits = 'keep' }) => {
     const peer = new RunnerPeer(await openLink(signal), signal);
-    // Agents this channel launches run through a keeper on the runner's
-    // machine, so they outlive the channel and a later one can reattach.
+    // Agents this channel launches run through a keeper beside the runner,
+    // so they outlive the channel and a later one can reattach.
     peer.keep(whenHostExits);
-    return peer.machine();
-  };
+    return peer.subprocessLink();
+  });
 }
 
 //#endregion
@@ -96,7 +98,7 @@ class RunnerPeer {
     );
   }
 
-  machine(): AcpMachine {
+  subprocessLink(): SubprocessLink {
     return {
       reach: (bridge) => this.reach(bridge),
       launch: (command) => this.start(command, 'launch'),

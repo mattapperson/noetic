@@ -9,14 +9,10 @@
 
 import type * as acp from '@agentclientprotocol/sdk';
 import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk';
-import type {
-  AcpMachine,
-  AcpMachineFactory,
-  AcpTransport,
-  AcpTransportFactory,
-  SpawnCommand,
-} from '@noetic-tools/types';
+import type { AcpTransport, AcpTransportFactory, SpawnCommand } from '@noetic-tools/types';
 import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
+import type { AgentSubprocessAdapter } from './agent-subprocess';
+import { agentSubprocess } from './agent-subprocess';
 
 /** @public The two ends of a loopback connection. */
 export interface AcpLoopbackPair {
@@ -103,15 +99,15 @@ export function loopbackTransport(
 }
 
 /**
- * A machine that is this process: the bridge is reached where it listens, and
- * `launch` stands the in-process agent up with the command it was given, so a
- * test can see the launch settings. It runs no processes.
+ * An adapter that runs the agent in this process: the bridge is reached where
+ * it listens, and `launch` stands the in-process agent up with the command it
+ * was given, so a test can see the launch settings. It runs no processes.
  * @public
  */
-export function loopbackMachine(
+export function loopbackSubprocess(
   toAgent: (conn: AgentSideConnection, command: SpawnCommand) => acp.Agent,
-): AcpMachineFactory {
-  return async (): Promise<AcpMachine> => ({
+): AgentSubprocessAdapter {
+  return agentSubprocess('loopbackSubprocess()', async () => ({
     reach: async (bridge) => bridge,
     launch: (command) =>
       loopbackTransport((conn) => toAgent(conn, command))({
@@ -120,9 +116,9 @@ export function loopbackMachine(
     async spawn(command) {
       throw new AcpConnectError({
         agentId: 'loopback',
-        message: `A loopback machine runs no processes, so it cannot start '${command.command}'.`,
+        message: `loopbackSubprocess() runs no processes, so it cannot start '${command.command}'.`,
       });
     },
     close: async () => undefined,
-  });
+  }));
 }

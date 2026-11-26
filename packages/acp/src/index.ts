@@ -67,11 +67,13 @@ export { turnUsage } from './turn-usage';
 //#region Transports
 
 /** @public */
+export type { AgentSubprocessAdapter } from './agent-subprocess';
+/** @public */
 export { spawnOn } from './spawn';
 /** @public */
 export type { AcpLoopbackPair } from './transport-loopback';
 /** @public */
-export { createAcpLoopbackPair, loopbackMachine, loopbackTransport } from './transport-loopback';
+export { createAcpLoopbackPair, loopbackSubprocess, loopbackTransport } from './transport-loopback';
 
 //#endregion
 

@@ -20,7 +20,7 @@ import { z } from 'zod';
 import { defineAcpAgent } from '../src/define';
 import { claudeToolId } from '../src/tool-ids';
 import { claudeToolWiring } from '../src/tool-wiring';
-import { loopbackMachine } from '../src/transport-loopback';
+import { loopbackSubprocess } from '../src/transport-loopback';
 
 //#region Helpers
 
@@ -123,7 +123,7 @@ function agentStep(
       command: {
         command: 'scripted',
       },
-      machine: loopbackMachine(agent),
+      subprocess: loopbackSubprocess(agent),
       tools: claudeToolWiring,
       toolIdOf: claudeToolId,
     }),
@@ -663,7 +663,7 @@ describe("a plan layer's plan in an agent step, over the wire", () => {
             command: {
               command: 'scripted',
             },
-            machine: loopbackMachine(agent),
+            subprocess: loopbackSubprocess(agent),
             tools: claudeToolWiring,
             toolIdOf: claudeToolId,
           }),

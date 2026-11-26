@@ -1,6 +1,6 @@
 /**
  * MCP over a process someone else starts: `McpStdioServer.spawn` launches the
- * server where it must run (another machine, a container) and hands back its
+ * server where it must run (another host, a container) and hands back its
  * stdio as a `ByteStream`; this carries newline-delimited JSON-RPC
  * over them, as the stdio transport does over a local subprocess.
  */
@@ -8,7 +8,7 @@
 import { ReadBuffer, serializeMessage } from '@modelcontextprotocol/sdk/shared/stdio.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
-import type { AcpMachineFactory, ByteStream, Spawn, SpawnCommand } from '@noetic-tools/types';
+import type { ByteStream, Spawn, SpawnCommand, SubprocessAdapter } from '@noetic-tools/types';
 
 //#region Public API
 
@@ -27,15 +27,15 @@ export class SpawnedTransport implements Transport {
   constructor(
     private readonly spawn: Spawn,
     private readonly command: SpawnCommand,
-    private readonly machine?: AcpMachineFactory,
+    private readonly subprocess?: SubprocessAdapter,
   ) {}
 
   async start(): Promise<void> {
     this.process = await this.spawn(
       this.command,
-      this.machine
+      this.subprocess
         ? {
-            machine: this.machine,
+            subprocess: this.subprocess,
           }
         : undefined,
     );

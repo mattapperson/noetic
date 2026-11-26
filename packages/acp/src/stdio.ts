@@ -11,15 +11,17 @@
 import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import type {
-  AcpMachine,
-  AcpMachineFactory,
   AcpTransport,
   AcpTransportFactory,
   AcpWhenHostExits,
   SpawnCommand,
+  SubprocessLink,
+  SubprocessOpenOptions,
   ToolBridgeAddress,
 } from '@noetic-tools/types';
 import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
+import type { AgentSubprocessAdapter } from './agent-subprocess';
+import { agentSubprocess } from './agent-subprocess';
 import type { KeeperLink } from './keeper/client';
 import { attachKeeper, keeperHandleOf, startKeeper } from './keeper/client';
 import { serverEnv } from './server-env';
@@ -69,8 +71,8 @@ export function stdioAcpTransport(spec: StdioAgentSpec): AcpTransportFactory {
     );
 }
 
-/** @public Options for {@link localMachine}. */
-export interface LocalMachineOptions {
+/** @public Options for {@link localSubprocess}. */
+export interface LocalSubprocessOptions {
   /**
    * Run the agent through a keeper, so it can outlive this host and a later
    * host can reattach to it (`AcpTransport.reattach`). Default `true`. Without
@@ -88,7 +90,7 @@ export interface LocalMachineOptions {
    * Rewrite the agent's command just before it starts — wrap it in a sandbox
    * (`sandbox-exec`, `bwrap`), swap in a binary the host ships. `command.env`
    * is the complete environment the agent would get; `bridges` are the tool
-   * bridge addresses this machine handed out, so a sandbox can let their
+   * bridge addresses this link handed out, so a sandbox can let their
    * ports through. The returned command runs with exactly its own `args`,
    * `env` (the given one when it names none) and `cwd`, as the leader of its
    * own process group, with or without a keeper.
@@ -97,7 +99,7 @@ export interface LocalMachineOptions {
   /** The agent's stderr. Default: this process's stderr. */
   onStderr?: (chunk: string) => void;
   /**
-   * Told of each agent this machine starts as its own child, once it runs: a
+   * Told of each agent this adapter starts as its own child, once it runs: a
    * host that tracks its processes (to list them, or to stop what is left
    * when it shuts down) learns them here. Only with `keeper: false`: a kept
    * agent is its keeper's child, not this process's, and is not reported;
@@ -107,7 +109,7 @@ export interface LocalMachineOptions {
   onLaunch?: (agent: LocalAgentProcess) => void | Promise<void>;
 }
 
-/** @public An agent process {@link LocalMachineOptions.onLaunch} reports. */
+/** @public An agent process {@link LocalSubprocessOptions.onLaunch} reports. */
 export interface LocalAgentProcess {
   /**
    * The command's own process, which leads the agent's process group (POSIX):
@@ -119,14 +121,14 @@ export interface LocalAgentProcess {
   readonly exited: Promise<void>;
 }
 
-/** @public The command {@link LocalMachineOptions.wrap} receives: `env` is complete. */
+/** @public The command {@link LocalSubprocessOptions.wrap} receives: `env` is complete. */
 export interface LocalAgentCommand extends SpawnCommand {
   readonly env: Readonly<Record<string, string>>;
 }
 
-/** @public What {@link LocalMachineOptions.wrap} is told besides the command. */
+/** @public What {@link LocalSubprocessOptions.wrap} is told besides the command. */
 export interface LocalWrapInfo {
-  /** Every tool bridge address `reach` handed out on this machine, in order. */
+  /** Every tool bridge address `reach` handed out on this link, in order. */
   readonly bridges: ReadonlyArray<ToolBridgeAddress>;
   /**
    * The variables the agent itself sets — its definition's and its tool
@@ -149,151 +151,155 @@ function definedEnv(env: Record<string, string | undefined>): Record<string, str
 }
 
 /**
- * This machine: the agent runs through a keeper (see
- * {@link LocalMachineOptions.keeper}), which also serves the tool bridge to it
+ * Runs agents as local processes: the agent runs through a keeper (see
+ * {@link LocalSubprocessOptions.keeper}), which also serves the tool bridge to it
  * on a port that outlives the host; an MCP server beside it is a child
  * process. The agent gets this process's environment; an MCP server, as the
  * MCP SDK starts one, only `serverEnv`'s short list.
  * @public
  */
-export function localMachine(
+export function localSubprocess(
   agentId = 'local',
-  options: LocalMachineOptions = {},
-): AcpMachineFactory {
-  return async ({ signal, whenHostExits = 'keep' }): Promise<AcpMachine> => {
-    const started = new Set<AcpTransport>();
-    const bridges: ToolBridgeAddress[] = [];
-    const useKeeper = options.keeper !== false;
-    let keeper: Promise<KeeperLink | undefined> | undefined;
-    const keeperOptions = {
-      whenHostExits,
-      detachedTimeoutMs: options.detachedTimeoutMs ?? 0,
-    };
-    const withStderr = (link: KeeperLink | undefined): KeeperLink | undefined => {
-      if (link && options.onStderr) {
-        link.onStderr = options.onStderr;
-      }
-      return link;
-    };
-    const openKeeper = (): Promise<KeeperLink | undefined> => {
-      keeper ??= useKeeper
-        ? startKeeper(agentId, keeperOptions).then(withStderr)
-        : Promise.resolve(undefined);
-      return keeper;
-    };
-    /** The command as it will run: the host's wrapper applied, env complete. */
-    const prepare = async (command: SpawnCommand): Promise<SpawnCommand> => {
-      const env = definedEnv({
-        ...process.env,
-        ...command.env,
-      });
-      if (!options.wrap) {
-        return {
-          ...command,
-          env,
-        };
-      }
-      const wrapped = await options.wrap(
-        {
-          ...command,
-          env,
-        },
-        {
-          bridges: [
-            ...bridges,
-          ],
-          agentEnv: definedEnv(command.env ?? {}),
-        },
-      );
+  options: LocalSubprocessOptions = {},
+): AgentSubprocessAdapter {
+  return agentSubprocess('localSubprocess()', (opts) => openLocal(agentId, options, opts));
+}
+
+async function openLocal(
+  agentId: string,
+  options: LocalSubprocessOptions,
+  { signal, whenHostExits = 'keep' }: SubprocessOpenOptions,
+): Promise<SubprocessLink> {
+  const started = new Set<AcpTransport>();
+  const bridges: ToolBridgeAddress[] = [];
+  const useKeeper = options.keeper !== false;
+  let keeper: Promise<KeeperLink | undefined> | undefined;
+  const keeperOptions = {
+    whenHostExits,
+    detachedTimeoutMs: options.detachedTimeoutMs ?? 0,
+  };
+  const withStderr = (link: KeeperLink | undefined): KeeperLink | undefined => {
+    if (link && options.onStderr) {
+      link.onStderr = options.onStderr;
+    }
+    return link;
+  };
+  const openKeeper = (): Promise<KeeperLink | undefined> => {
+    keeper ??= useKeeper
+      ? startKeeper(agentId, keeperOptions).then(withStderr)
+      : Promise.resolve(undefined);
+    return keeper;
+  };
+  /** The command as it will run: the host's wrapper applied, env complete. */
+  const prepare = async (command: SpawnCommand): Promise<SpawnCommand> => {
+    const env = definedEnv({
+      ...process.env,
+      ...command.env,
+    });
+    if (!options.wrap) {
       return {
-        ...wrapped,
-        env: wrapped.env ?? env,
+        ...command,
+        env,
       };
-    };
-    signal?.addEventListener(
-      'abort',
-      () => {
-        void keeper?.then((link) => link?.stop());
+    }
+    const wrapped = await options.wrap(
+      {
+        ...command,
+        env,
       },
       {
-        once: true,
+        bridges: [
+          ...bridges,
+        ],
+        agentEnv: definedEnv(command.env ?? {}),
       },
     );
-    const start = async (
-      command: SpawnCommand,
-      env: Record<string, string | undefined>,
-      onLaunch?: (agent: LocalAgentProcess) => void | Promise<void>,
-    ): Promise<AcpTransport> => {
-      const transport = await spawnStdio(
-        agentId,
-        {
-          ...command,
-          env,
-        },
-        {
-          signal,
-          whenHostExits,
-          onStderr: options.onStderr,
-          onLaunch,
-        },
-      );
+    return {
+      ...wrapped,
+      env: wrapped.env ?? env,
+    };
+  };
+  signal?.addEventListener(
+    'abort',
+    () => {
+      void keeper?.then((link) => link?.stop());
+    },
+    {
+      once: true,
+    },
+  );
+  const start = async (
+    command: SpawnCommand,
+    env: Record<string, string | undefined>,
+    onLaunch?: (agent: LocalAgentProcess) => void | Promise<void>,
+  ): Promise<AcpTransport> => {
+    const transport = await spawnStdio(
+      agentId,
+      {
+        ...command,
+        env,
+      },
+      {
+        signal,
+        whenHostExits,
+        onStderr: options.onStderr,
+        onLaunch,
+      },
+    );
+    started.add(transport);
+    return transport;
+  };
+  return {
+    reach: async (bridge) => {
+      const link = await openKeeper();
+      if (!link) {
+        bridges.push(bridge);
+        return bridge;
+      }
+      const url = await link.reach(new URL(bridge.url).pathname, bridge.url);
+      const reached = {
+        ...bridge,
+        url,
+      };
+      bridges.push(reached);
+      return reached;
+    },
+    launch: async (command) => {
+      const prepared = await prepare(command);
+      const link = await openKeeper();
+      if (!link) {
+        return await start(prepared, prepared.env ?? {}, options.onLaunch);
+      }
+      const transport = await link.launch(prepared);
       started.add(transport);
       return transport;
-    };
-    return {
-      reach: async (bridge) => {
-        const link = await openKeeper();
-        if (!link) {
-          bridges.push(bridge);
-          return bridge;
-        }
-        const url = await link.reach(new URL(bridge.url).pathname, bridge.url);
-        const reached = {
-          ...bridge,
-          url,
-        };
-        bridges.push(reached);
-        return reached;
-      },
-      launch: async (command) => {
-        const prepared = await prepare(command);
-        const link = await openKeeper();
-        if (!link) {
-          return await start(prepared, prepared.env ?? {}, options.onLaunch);
-        }
-        const transport = await link.launch(prepared);
-        started.add(transport);
-        return transport;
-      },
-      attach: async (handle) => {
-        const named = keeperHandleOf(handle);
-        if (!named) {
-          throw new AcpConnectError({
-            agentId,
-            message: `ACP agent '${agentId}' cannot be reattached: its handle names no keeper.`,
-          });
-        }
-        const link = attachKeeper(agentId, named, whenHostExits);
-        keeper = link.then(withStderr);
-        const transport = (await link).transport();
-        started.add(transport);
-        return transport;
-      },
-      spawn: (command) => start(command, serverEnv(command.env)),
-      async close() {
-        // In parallel: each stop may take its whole grace period.
-        const closing = [
-          ...started,
-        ].map((transport) => transport.close().catch(() => undefined));
-        started.clear();
-        closing.push(
-          (keeper ?? Promise.resolve(undefined))
-            .then((link) => link?.stop())
-            .catch(() => undefined),
-        );
-        await Promise.all(closing);
-      },
-    };
+    },
+    attach: async (handle) => {
+      const named = keeperHandleOf(handle);
+      if (!named) {
+        throw new AcpConnectError({
+          agentId,
+          message: `ACP agent '${agentId}' cannot be reattached: its handle names no keeper.`,
+        });
+      }
+      const link = attachKeeper(agentId, named, whenHostExits);
+      keeper = link.then(withStderr);
+      const transport = (await link).transport();
+      started.add(transport);
+      return transport;
+    },
+    spawn: (command) => start(command, serverEnv(command.env)),
+    async close() {
+      // In parallel: each stop may take its whole grace period.
+      const closing = [
+        ...started,
+      ].map((transport) => transport.close().catch(() => undefined));
+      started.clear();
+      closing.push(
+        (keeper ?? Promise.resolve(undefined)).then((link) => link?.stop()).catch(() => undefined),
+      );
+      await Promise.all(closing);
+    },
   };
 }
 

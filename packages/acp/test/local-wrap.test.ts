@@ -1,5 +1,5 @@
 /**
- * `localMachine({ wrap, onStderr })`: a host starts the agent from its own
+ * `localSubprocess({ wrap, onStderr })`: a host starts the agent from its own
  * argv (a sandbox wrapper) with exactly its own environment, and reads the
  * agent's stderr — through a keeper or without one (spec 27 § A wrapped
  * launch). Real processes, no mocks.
@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SpawnCommand, ToolBridgeAddress } from '@noetic-tools/types';
 import type { LocalAgentCommand, LocalWrapInfo } from '../src/stdio';
-import { localMachine } from '../src/stdio';
+import { localSubprocess } from '../src/stdio';
 
 const FIXTURE = join(import.meta.dir, 'fixtures', 'wrapped-agent.ts');
 
@@ -78,7 +78,7 @@ describe.each([
     'through its keeper',
     true,
   ],
-])('localMachine wrap, %s', (_label, keeper) => {
+])('localSubprocess wrap, %s', (_label, keeper) => {
   it('runs the wrapped argv with exactly its env and cwd, and hands stderr to the host', async () => {
     let stderr = '';
     const seen: Array<{
@@ -86,7 +86,7 @@ describe.each([
       info: LocalWrapInfo;
     }> = [];
     const cwd = realpathSync(tmpdir());
-    const machine = await localMachine('wrapped', {
+    const link = await localSubprocess('wrapped', {
       keeper,
       onStderr: (chunk) => {
         stderr += chunk;
@@ -111,14 +111,14 @@ describe.each([
           cwd,
         };
       },
-    })({});
+    }).open({});
     const bridge: ToolBridgeAddress = {
       serverName: 'noetic',
       url: 'http://127.0.0.1:9/mcp/x',
       headers: [],
     };
-    const reached = await machine.reach(bridge);
-    const transport = await machine.launch({
+    const reached = await link.reach(bridge);
+    const transport = await link.launch({
       command: 'claude-agent-acp',
       args: [
         '--flag',
@@ -154,20 +154,20 @@ describe.each([
 
     // And it is the agent's stream: an ACP line goes there and back.
     expect(await echo(transport, PING)).toContain(PING);
-    await machine.close();
+    await link.close();
   });
 });
 
-describe('localMachine without wrap', () => {
+describe('localSubprocess without wrap', () => {
   it('runs the command as given, on the complete environment', async () => {
     let stderr = '';
-    const machine = await localMachine('plain', {
+    const link = await localSubprocess('plain', {
       keeper: false,
       onStderr: (chunk) => {
         stderr += chunk;
       },
-    })({});
-    const transport = await machine.launch({
+    }).open({});
+    const transport = await link.launch({
       command: process.execPath,
       args: [
         FIXTURE,
@@ -181,24 +181,24 @@ describe('localMachine without wrap', () => {
     expect(report.only).toBe('given');
     expect(report.env.includes('PATH')).toBe(true);
     await transport.close();
-    await machine.close();
+    await link.close();
   });
 });
 
-describe('localMachine onLaunch', () => {
+describe('localSubprocess onLaunch', () => {
   it('reports the agent it starts itself, and its exit once it is stopped', async () => {
     const spawned: Array<{
       pid: number;
       exited: Promise<void>;
     }> = [];
-    const machine = await localMachine('tracked', {
+    const link = await localSubprocess('tracked', {
       keeper: false,
       onStderr: () => undefined,
       onLaunch: (agent) => {
         spawned.push(agent);
       },
-    })({});
-    const transport = await machine.launch({
+    }).open({});
+    const transport = await link.launch({
       command: process.execPath,
       args: [
         FIXTURE,
@@ -216,7 +216,7 @@ describe('localMachine onLaunch', () => {
     expect(() => process.kill(agent.pid, 0)).toThrow();
 
     // An MCP server beside it is not the agent.
-    const server = await machine.spawn({
+    const server = await link.spawn({
       command: process.execPath,
       args: [
         FIXTURE,
@@ -224,18 +224,18 @@ describe('localMachine onLaunch', () => {
     });
     expect(spawned).toHaveLength(1);
     await server.close();
-    await machine.close();
+    await link.close();
   });
 
   it("reports nothing for a kept agent, which is its keeper's child", async () => {
     const spawned: number[] = [];
-    const machine = await localMachine('kept', {
+    const link = await localSubprocess('kept', {
       onStderr: () => undefined,
       onLaunch: (agent) => {
         spawned.push(agent.pid);
       },
-    })({});
-    const transport = await machine.launch({
+    }).open({});
+    const transport = await link.launch({
       command: process.execPath,
       args: [
         FIXTURE,
@@ -243,14 +243,14 @@ describe('localMachine onLaunch', () => {
     });
     expect(await echo(transport, PING)).toContain(PING);
     expect(spawned).toEqual([]);
-    await machine.close();
+    await link.close();
   });
 });
 
-describe('localMachine onLaunch that throws', () => {
+describe('localSubprocess onLaunch that throws', () => {
   it('treats a rejected promise as a throw', async () => {
     let pid: number | undefined;
-    const machine = await localMachine('rejects', {
+    const link = await localSubprocess('rejects', {
       keeper: false,
       onStderr: () => undefined,
       onLaunch: async (agent) => {
@@ -258,9 +258,9 @@ describe('localMachine onLaunch that throws', () => {
         await Promise.resolve();
         throw new Error('registry is down');
       },
-    })({});
+    }).open({});
     await expect(
-      machine.launch({
+      link.launch({
         command: process.execPath,
         args: [
           FIXTURE,
@@ -268,20 +268,20 @@ describe('localMachine onLaunch that throws', () => {
       }),
     ).rejects.toThrow('onLaunch');
     expect(() => process.kill(pid ?? 0, 0)).toThrow();
-    await machine.close();
+    await link.close();
   });
 
   it('stops the agent and fails the launch, leaving nothing running', async () => {
     let pid: number | undefined;
-    const machine = await localMachine('throws', {
+    const link = await localSubprocess('throws', {
       keeper: false,
       onStderr: () => undefined,
       onLaunch: (agent) => {
         pid = agent.pid;
         throw new Error('registry is full');
       },
-    })({});
-    const launching = machine.launch({
+    }).open({});
+    const launching = link.launch({
       command: process.execPath,
       args: [
         FIXTURE,
@@ -290,6 +290,6 @@ describe('localMachine onLaunch that throws', () => {
     await expect(launching).rejects.toThrow('onLaunch');
     expect(pid).toBeDefined();
     expect(() => process.kill(pid ?? 0, 0)).toThrow();
-    await machine.close();
+    await link.close();
   });
 });

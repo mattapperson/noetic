@@ -37,7 +37,7 @@ export interface ToolEntryHosts {
   /** What the document may use of each connection; absent allows every connection. */
   readonly allowlist?: ConnectionAllowlist;
   readonly mcp?: McpAllowlist;
-  /** Where a stdio `{ mcp }` server starts: the node's ACP agent's machine. Absent starts it here. */
+  /** Starts a stdio `{ mcp }` server where the node's ACP agent runs. Absent starts it here. */
   readonly spawn?: Spawn;
   /** The connections the node's document declares; its `{ mcp }` entries are the document's own servers. */
   readonly connections?: ConnectionManifestEntries;

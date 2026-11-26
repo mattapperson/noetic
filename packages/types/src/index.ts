@@ -46,7 +46,6 @@ export * from './types/profile';
 export * from './types/runtime';
 export * from './types/schema';
 export * from './types/shell-adapter';
-export * from './types/spawn';
 export * from './types/spend';
 export * from './types/steering';
 export * from './types/step';

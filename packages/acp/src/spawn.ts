@@ -1,26 +1,27 @@
 /**
- * Start a process on an agent's machine and hold its stdio — the seam a stdio
- * MCP server that depends on that machine is started through, with Noetic
+ * Start a process where an agent runs and hold its stdio — the seam a stdio
+ * MCP server that must run beside the agent is started through, with Noetic
  * still its MCP client on the host.
  */
 
-import type { AcpMachineFactory, AcpTransport, Spawn, SpawnCommand } from '@noetic-tools/types';
+import type { AcpTransport, Spawn, SpawnCommand, SubprocessAdapter } from '@noetic-tools/types';
+import { openLink } from './agent-subprocess';
 
 /**
- * Each call opens the machine, starts `command` there, and releases the
- * machine when the process's stream closes.
+ * Each call opens a link through `adapter`, starts `command` there, and
+ * closes the link when the process's stream closes.
  * @public
  */
-export function spawnOn(machine: AcpMachineFactory, signal?: AbortSignal): Spawn {
+export function spawnOn(adapter: SubprocessAdapter, signal?: AbortSignal): Spawn {
   return async (command: SpawnCommand): Promise<AcpTransport> => {
-    const opened = await machine({
+    const link = await openLink(adapter, {
       signal,
     });
     let process: AcpTransport;
     try {
-      process = await opened.spawn(command);
+      process = await link.spawn(command);
     } catch (e) {
-      await opened.close().catch(() => undefined);
+      await link.close().catch(() => undefined);
       throw e;
     }
     return {
@@ -30,7 +31,7 @@ export function spawnOn(machine: AcpMachineFactory, signal?: AbortSignal): Spawn
         try {
           await process.close();
         } finally {
-          await opened.close();
+          await link.close();
         }
       },
     };

@@ -80,9 +80,9 @@ delivers events by webhook), `profiles`, `extensions`, `timeoutMs`,
 `requestTimeoutMs`, `pollIntervalMs` and `clientInfo`. A header or environment
 variable given twice is `CONNECTION_INVALID`. The options of an entry —
 `policy`, `expose`, `look`, `pool` — live on the entry, never on `mcp()`. A stdio server that must run
-somewhere else (the machine an ACP agent runs on, a container) takes
+somewhere else (where an ACP agent runs, a container) takes
 `spawn`, a `Spawn` from `@noetic-tools/types` — `(command, options?) => Promise<ByteStream>`,
-where `options.machine` is the place the harness runs processes (`27-acp-agent-steps` § The harness's machine):
+where `options.subprocess` is the harness's subprocess adapter (`27-acp-agent-steps` § The subprocess adapter):
 the caller starts the process there and hands back its stdio as a
 `{ readable, writable, close }` stream, and the bridge speaks MCP over it as it
 does over a local subprocess. An ACP agent's `AcpAgent.spawn` is one, so a
@@ -710,8 +710,8 @@ interface ConnectionIdentity { surface: string; instance: string; epoch?: number
 
 `ConnectOptions` carries `redact(value)`: a provider calls it with every
 credential it holds (a bearer token, an OAuth token), and the harness scrubs
-that value as it scrubs resolved secrets. It carries `machine` too, the
-harness's `environment.subprocess.open`, which `mcp()` hands to its `spawn`.
+that value as it scrubs resolved secrets. It carries `subprocess` too, the
+harness's `environment.subprocess`, which `mcp()` hands to its `spawn`.
 
 Each `ConnectionOperationInfo` in a manifest may carry `annotations` — the
 server's hints about the operation: `title`, `readOnlyHint`,

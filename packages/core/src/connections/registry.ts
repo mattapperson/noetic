@@ -19,7 +19,6 @@
  */
 
 import type {
-  AcpMachineFactory,
   AnyProfile,
   ArtifactStore,
   Connection,
@@ -43,6 +42,7 @@ import type {
   SecretResolver,
   StorageAdapter,
   StreamChangedEventData,
+  SubprocessAdapter,
   TriggerGaveUpEventData,
 } from '@noetic-tools/types';
 import type { AttachedEntry, AttachedScope } from '../types/connection-entry';
@@ -98,8 +98,8 @@ export interface ConnectionRuntimeOptions {
   readonly storage: StorageAdapter;
   readonly artifacts: ArtifactStore;
   readonly secrets?: SecretResolver;
-  /** Where the harness runs processes (`environment.subprocess.open`), handed to providers as they connect. */
-  readonly machine?: AcpMachineFactory;
+  /** The harness's `environment.subprocess`, handed to providers as they connect. */
+  readonly subprocess?: SubprocessAdapter;
   readonly hooks?: GateHooks;
   readonly onFrameworkEvent?: (event: ConnectionFrameworkEventRecord) => void;
   /** Profiles known up front (from the graph's handles); handles add theirs when they resolve. */
@@ -898,7 +898,7 @@ class Runtime implements ConnectionRuntime {
         ],
         redact: this.redact,
         secrets: this.options.secrets,
-        machine: this.options.machine,
+        subprocess: this.options.subprocess,
       });
       if (entry.state === 'closed') {
         await runEvery(connections.map((connection) => () => connection.release()));
@@ -1051,7 +1051,7 @@ class Runtime implements ConnectionRuntime {
         ],
         redact: this.redact,
         secrets: this.options.secrets,
-        machine: this.options.machine,
+        subprocess: this.options.subprocess,
       }),
       onLease: (lease, change) => this.emitLease(name, lease, change),
     });

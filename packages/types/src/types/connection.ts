@@ -11,7 +11,6 @@
 
 import { z } from 'zod';
 import type { Expression } from '../schemas/expression';
-import type { AcpMachineFactory } from './acp';
 import type { ArtifactStore } from './artifact-store';
 import type {
   AnyExtension,
@@ -24,7 +23,7 @@ import type {
   SenseDescriptor,
   SenseId,
 } from './profile';
-import type { Spawn } from './spawn';
+import type { Spawn, SubprocessAdapter } from './subprocess-adapter';
 
 export * from './connection-values';
 
@@ -411,10 +410,10 @@ export interface ConnectOptions {
   /** The harness's `environment.secrets`, for a provider that reads its credentials by name. */
   readonly secrets?: SecretResolver;
   /**
-   * Where the harness runs processes (`environment.subprocess.open`), for a
-   * provider that starts one through a {@link Spawn}.
+   * The harness's `environment.subprocess`, for a provider that starts a
+   * process through a {@link Spawn}.
    */
-  readonly machine?: AcpMachineFactory;
+  readonly subprocess?: SubprocessAdapter;
 }
 
 /** @public A live connection, as a provider implements it. Steps and tools never hold one directly. */

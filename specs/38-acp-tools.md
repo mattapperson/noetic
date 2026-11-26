@@ -28,7 +28,7 @@ call (see Layers).
 |---|---|---|
 | Tool call pipeline | `core` (`runtime/tool-call.ts`) | `executeToolCall` — steering on raw args, validation, `needsApproval`, execution, stringify — and `createToolResultItem`. Shared by the `callModel` tool loop and the ACP tool runner. |
 | Tool runner | `core` (`interpreter/acp-tools.ts`) | Builds the tool listing and implements `AcpToolHost.call` with the step's `ctx`, layers, and event bridge. |
-| Contract | `types` | `AcpToolHost` on `AcpClientHost.tools`; `AcpAgent.refusesTools`; `AcpMachine.reach`. Core never imports `acp`. |
+| Contract | `types` | `AcpToolHost` on `AcpClientHost.tools`; `AcpAgent.refusesTools`; `SubprocessLink.reach`. Core never imports `acp`. |
 | Tool bridge | `acp` (`tool-bridge.ts`, `tool-wiring.ts`, `tool-permissions.ts`) | Starts the server for a connection, applies the agent's settings, answers the agent's permission requests for bridged tools. |
 | MCP server | `acp` (`mcp/server.ts`, `mcp/node.ts`) | `tools/list` and `tools/call` over the host, on `@modelcontextprotocol/server`; loopback streamable HTTP on `@modelcontextprotocol/node` (hono, no express). `node.ts` needs `node:http`, so the bridge loads it on first use and the `.` entry stays runtime-neutral. |
 
@@ -255,8 +255,9 @@ the nested run returns.
 ## Transport and lifetime
 
 - The server listens on `127.0.0.1` at a random port and path. The agent's
-  machine carries it to the agent (`AcpMachine.reach`, spec 27): this machine
-  hands back the same address; the remote runner hands back a port on its own
+  subprocess adapter carries it to the agent (`SubprocessLink.reach`, spec 27):
+  `localSubprocess()` hands back its keeper's port, or the same address
+  without a keeper; the remote runner hands back a port on its own
   loopback interface that forwards over the runner's channel, so the address
   the agent and its launch settings name is always one it can reach. Every request
   must carry the connection's bearer token (compared in constant time), a `Host`
@@ -339,7 +340,7 @@ output, never an extension tool's.
 tools (`AcpAgent.refusesTools`): `ACP_TRANSPORT_CANNOT_LAUNCH` when its wiring
 has launch settings, else `ACP_TRANSPORT_CANNOT_REACH` — at build time for an
 eager agent, since no server ever passes through to an agent's own MCP
-client. Give it a command and a `machine`
+client. Give it a command and a `subprocess` adapter
 instead.
 
 ## Sessions

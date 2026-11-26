@@ -1183,7 +1183,7 @@ export function toolCallingAgent(
           refusesTools: {
             code: 'ACP_TRANSPORT_CANNOT_REACH',
             reason: 'its transport has no `reach()`.',
-            hint: 'Give it a machine.',
+            hint: 'Give it a command.',
           },
         }),
     async connect(connect): Promise<AcpAgentConnection> {

@@ -169,10 +169,10 @@ export class McpProvider implements ConnectionProvider {
           : {
               redact: opts.redact,
             }),
-        ...(opts.machine === undefined
+        ...(opts.subprocess === undefined
           ? {}
           : {
-              machine: opts.machine,
+              subprocess: opts.subprocess,
             }),
       });
     } catch (error) {

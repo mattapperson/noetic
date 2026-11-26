@@ -95,9 +95,9 @@ interface AcpSession {
 ```
 
 `AcpConnectOptions` carries `reattach` (reach that agent instead of starting
-one) and `whenHostExits` (`'keep'`, the default, or `'stop'`); an
-`AcpMachine` may offer `attach(handle)`, and an `AcpTransport` its `reattach`
-handle.
+one) and `whenHostExits` (`'keep'`, the default, or `'stop'`); a
+`SubprocessLink` may offer `attach(handle)`, and an `AcpTransport` its
+`reattach` handle.
 
 A session's `modes` and `configOptions` come from the answer that opened it —
 `session/new`, or `session/load` for a loaded session — and stay current:
@@ -138,31 +138,33 @@ interface AcpTransport {
 }
 ```
 
-`ShellAdapter` cannot carry it: a shell command runs once and returns. The
-harness's `SubprocessAdapter` can, through `open` (§ The harness's machine).
+`ShellAdapter` cannot carry it: a shell command runs once and returns. A
+`SubprocessAdapter` can, through `open` (§ The subprocess adapter).
 
 An agent is reached one of two ways:
 
-- **A command on a machine** — how every preset runs. An `AcpMachine` is opened
-  once per connection, before the agent starts:
+- **A command, run through a subprocess adapter** — how every preset runs.
+  The adapter's `open` hands back a `SubprocessLink`, once per connection,
+  before the agent starts:
 
   ```ts
-  interface AcpMachine {
+  interface SubprocessLink {
     reach(bridge: ToolBridgeAddress): Promise<ToolBridgeAddress>;
     launch(command: SpawnCommand): Promise<AcpTransport>;
-    spawn: Spawn; // (command: SpawnCommand) => Promise<AcpTransport>
+    spawn: Spawn; // (command: SpawnCommand) => Promise<ByteStream>
+    attach?(handle: AcpReattachHandle): Promise<AcpTransport>;
     close(): Promise<void>;
   }
   ```
 
   `reach` carries the tool bridge (spec 38) to where the agent can use it,
   `launch` starts the agent with launch settings built from that address, and
-  `spawn` starts a process beside it — a stdio MCP server that depends on that
-  machine — whose stdio comes back, so Noetic stays its client. A command
-  agent's `AcpAgent.spawn` is `spawnOn(machine)`; `Spawn`, `SpawnCommand` and
+  `spawn` starts a process beside it — a stdio MCP server that must run there
+  — whose stdio comes back, so Noetic stays its client. A command agent's
+  `AcpAgent.spawn` is `spawnOn(adapter)`; `Spawn`, `SpawnCommand` and
   `ByteStream` live in `@noetic-tools/types`, so `@noetic-tools/mcp` takes the
   same seam (`mcp({ command, spawn })`) without importing this package. Closing
-  the agent's stream releases the machine.
+  the agent's stream closes the link.
 - **A transport** — `AcpTransportFactory`, for an agent someone else started.
   It cannot carry the bridge or apply launch settings, so a step that gives it
   `tools` fails (`AcpAgent.refusesTools`):
@@ -172,63 +174,93 @@ An agent is reached one of two ways:
   `ACP_AGENT_CANNOT_TAKE_TOOLS`: Gemini starts no MCP server in a folder it
   does not trust (`38-acp-tools` § Gemini CLI and folder trust).
 
-### The harness's machine
+### The subprocess adapter
 
-Where processes run is the harness's to say, like its storage and its
-filesystem. `SubprocessAdapter.open` is an `AcpMachineFactory`: the place that
-adapter's processes run, for a process whose stdio the caller holds.
+The subprocess adapter is the one place processes run: a harness's step
+children, and — through `open` — processes whose stdio the caller holds, an
+ACP agent and a stdio MCP server beside it. Where they run is the harness's to
+say, like its storage and its filesystem.
 
 ```ts
+interface SubprocessAdapter {
+  // spawn, get, stop, pause, resume, isAlive, reattach, listLive (spec 08)
+  open?(options: SubprocessOpenOptions): Promise<SubprocessLink>;
+}
+
+interface SubprocessOpenOptions {
+  signal?: AbortSignal;
+  whenHostExits?: AcpWhenHostExits;
+}
+```
+
+```ts
+const runner = webSocketSubprocess({ url, token });
 new AgentHarness({
   environment: {
-    subprocess: { ...createInMemorySubprocessAdapter(), open: webSocketMachine({ url, token }) },
+    subprocess: {
+      ...createInMemorySubprocessAdapter(),
+      open: (options) => runner.open(options),
+    },
   },
 });
 ```
 
-A command agent runs on the first of these that is given:
+A command agent runs through the first of these:
 
-1. the `machine` the agent names (`claudeCode({ machine })`);
-2. the harness's `environment.subprocess.open`;
-3. this machine (`localMachine`).
+1. the `subprocess` adapter the agent names (`claudeCode({ subprocess })`);
+2. the harness's `environment.subprocess`, when that adapter has `open`;
+3. `localSubprocess()`, a local process.
 
-The core passes the harness's to `AcpAgent.connect` as
-`AcpConnectOptions.machine`, on a first connection and on a reattach alike, so
-a resumed step reaches the agent it left running through the same place
-(§ Resuming a step) and a host writes that place once, not on every agent.
+An agent given an adapter with no `open` fails to connect with
+`ACP_SUBPROCESS_CANNOT_OPEN`.
+
+The core passes the harness's adapter to `AcpAgent.connect` as
+`AcpConnectOptions.subprocess`, on a first connection and on a reattach alike,
+so a resumed step reaches the agent it left running through the same adapter
+(§ Resuming a step) and a host names it once, not on every agent.
 
 A process started beside the agent follows it. A `Spawn` takes
-`{ machine }` as its second argument, and `agent.spawn` starts the process on
-the agent's own machine, else on the one it is given, else here. A connection
-provider is given the harness's as `ConnectOptions.machine`, and `mcp()` hands
-it to its server's `spawn`, so `mcp({ command, spawn: agent.spawn })` and a
-JSON `acp-agent` node's stdio `{ "mcp" }` entries start where the agent runs.
-A stdio `mcp()` server given no `spawn` is a local subprocess, as before.
+`{ subprocess }` as its second argument, and `agent.spawn` starts the process
+through the agent's own adapter, else the one it is given when that has
+`open`, else locally. A connection provider is given the harness's as
+`ConnectOptions.subprocess`, and `mcp()` hands it to its server's `spawn`, so
+`mcp({ command, spawn: agent.spawn })` and a JSON `acp-agent` node's stdio
+`{ "mcp" }` entries start where the agent runs. A stdio `mcp()` server given
+no `spawn` is a local subprocess.
 
-An adapter with no `open` — the in-memory and local adapters — leaves every
-agent on this machine.
+An adapter with no `open` — the in-memory adapter, and
+`@noetic-tools/platform-node`'s local one — leaves every agent a local
+process.
 
-| Machine or transport | Use |
+The adapters `@noetic-tools/acp` builds are `AgentSubprocessAdapter`s: `open`
+is always there, and they run agents and the processes beside them, and no
+step children. Their `spawn` rejects with
+`ACP_SUBPROCESS_RUNS_NO_STEPS`; `get` and `reattach` return `null`, `listLive`
+an empty list, `isAlive` `false`, and `stop`, `pause` and `resume`
+`not_found`. A harness that runs steps and agents in different places joins
+two adapters, as above.
+
+| Subprocess adapter or transport | Use |
 |---|---|
-| `localMachine(agentId?, { keeper?, detachedTimeoutMs?, wrap?, onStderr?, onLaunch? })` (`@noetic-tools/acp/stdio`) | This machine. `launch` starts the agent through its keeper (§ A local agent outlives its host), `reach` serves the bridge on the keeper's own loopback port, `attach` reaches a kept agent again; `spawn` starts a child process. `keeper: false` (or no keeper script on disk, as in a single-file bundle) starts the agent as a child process and `reach` returns the bridge's own address. The default for every preset on a harness that names no machine (§ The harness's machine), loaded through a lazy `import()`. |
-| `webSocketMachine({ url, token, ca? })` (`@noetic-tools/acp/remote`) | A remote runner over WebSocket. Every upgrade carries the runner's bearer token; `ws://` is refused except to a loopback host, so a hop off the machine is TLS. |
-| `commandMachine({ command, args })` (`@noetic-tools/acp/remote`) | A remote runner started by a local command and spoken to over its stdio: `ssh host npx -y @noetic-tools/acp serve --stdio`, `docker exec -i ctr noetic-acp serve --stdio`. The command's own channel carries everything. |
-| `runnerMachine(openLink)` (`@noetic-tools/acp/remote`) | A remote runner over any `FrameLink`. |
-| `loopbackMachine(toAgent)`, `loopbackTransport(toAgent)` | An in-process agent over the real wire protocol, with no process — the way to test an ACP-backed step. The machine is reached where the bridge listens. |
+| `localSubprocess(agentId?, { keeper?, detachedTimeoutMs?, wrap?, onStderr?, onLaunch? })` (`@noetic-tools/acp/stdio`) | A local process. `launch` starts the agent through its keeper (§ A local agent outlives its host), `reach` serves the bridge on the keeper's own loopback port, `attach` reaches a kept agent again; `spawn` starts a child process. `keeper: false` (or no keeper script on disk, as in a single-file bundle) starts the agent as a child process and `reach` returns the bridge's own address. The default for every preset on a harness whose adapter has no `open` (§ The subprocess adapter), loaded through a lazy `import()`. |
+| `webSocketSubprocess({ url, token, ca? })` (`@noetic-tools/acp/remote`) | A remote runner over WebSocket. Every upgrade carries the runner's bearer token; `ws://` is refused except to a loopback host, so a hop off the host is TLS. |
+| `commandSubprocess({ command, args })` (`@noetic-tools/acp/remote`) | A remote runner started by a local command and spoken to over its stdio: `ssh host npx -y @noetic-tools/acp serve --stdio`, `docker exec -i ctr noetic-acp serve --stdio`. The command's own channel carries everything. |
+| `runnerSubprocess(openLink)` (`@noetic-tools/acp/remote`) | A remote runner over any `FrameLink`. |
+| `loopbackSubprocess(toAgent)`, `loopbackTransport(toAgent)` | An in-process agent over the real wire protocol, with no process — the way to test an ACP-backed step. The adapter's link reaches the bridge where it listens. |
 | `stdioAcpTransport` (`@noetic-tools/acp/stdio`) | An attached child process. |
 | custom transport | Anything yielding a duplex byte stream to an agent already running. |
 
 **A local agent's process tree.** Agents are usually started through a wrapper
 — `npx`, or a Node launcher that runs a native binary as its child — so the
 process Noetic spawns is rarely the agent itself. The keeper, and
-`stdioAcpTransport` and a `localMachine` without one, start every process as the leader of its own process group
+`stdioAcpTransport` and a `localSubprocess` without one, start every process as the leader of its own process group
 (POSIX) and, when the transport closes or its signal aborts, stop the whole
 group: end its stdin, `SIGTERM`, a two-second grace period, then `SIGKILL`; on
 Windows, `taskkill /T /F` on its tree, even when the immediate child already
 exited, so its descendants still stop. A leader that exited but is not yet
 reaped makes its group refuse signals (EPERM on macOS); shutdown then waits for
 it to be reaped rather than failing. A child that is not a group leader is
-signalled itself. `localMachine().close()` stops everything it started in
+signalled itself. Closing a `localSubprocess()` link stops everything it started in
 parallel. Every wait is bounded, so an
 uncooperative child cannot hang the host, and our ends of the pipes are
 released last, so a grandchild that inherited them cannot keep the host alive.
@@ -242,8 +274,8 @@ gets the same shutdown from `stopProcessTree(child, { graceMs? })`
 
 **A wrapped launch.** A host that must start the agent its own way — inside a
 sandbox (`sandbox-exec`, `bwrap`), with an environment it built, from a
-binary it ships — keeps the machine and changes the command:
-`localMachine(id, { wrap })`. `wrap(command, { bridges, agentEnv })` runs just before
+binary it ships — keeps the adapter and changes the command:
+`localSubprocess(id, { wrap })`. `wrap(command, { bridges, agentEnv })` runs just before
 the agent starts. It receives the command the preset built, with `env` already
 the complete environment the agent would get (this process's, plus the
 preset's and the tool wiring's), `agentEnv` — the preset's and the wiring's
@@ -253,7 +285,7 @@ so a sandbox can let exactly those loopback ports through. The command it
 returns runs with exactly its own `args`, `env` and `cwd` — nothing is merged
 back in — as the leader of its own process group, through the keeper or not,
 with the shutdown above. `onStderr` receives the agent's stderr, which
-otherwise goes to the host's. `onLaunch` is told of each agent the machine
+otherwise goes to the host's. `onLaunch` is told of each agent the adapter
 starts as its own child, once it runs — `{ pid, exited }`, where `pid` leads
 the agent's process group and `exited` settles when that process has exited
 — so a host that keeps a list of its processes, or stops what is left when
@@ -269,7 +301,7 @@ started it can die in the middle — a crash, Ctrl-C, a deploy. By default the
 agent keeps working, and a resumed run takes it over where it is, with
 everything it did meanwhile.
 
-**The keeper.** `localMachine()` starts each agent through a keeper: a small
+**The keeper.** `localSubprocess()` starts each agent through a keeper: a small
 Node process (`@noetic-tools/acp`'s `keeper/main`), detached into its own
 session and process group so the host's Ctrl-C or crash does not reach it. The
 keeper owns the agent's stdio and serves the host over a private local socket —
@@ -321,7 +353,7 @@ else.
 
 **`killAgentsOnExit`** on the harness asks every agent it starts for
 `whenHostExits: 'stop'`: a kept agent stops when its host's connection drops,
-and an agent started directly (a `transport`, or a `localMachine` without a
+and an agent started directly (a `transport`, or a `localSubprocess` without a
 keeper) has its process group killed when the host process exits normally — a
 host killed by a signal cannot run that, and such an agent sees its stdin close
 instead.
@@ -369,8 +401,8 @@ waiting requests become its root's before anything is trimmed.
 
 ### The remote runner
 
-`noetic-acp serve` (the `@noetic-tools/acp` bin, Node) runs on the agent's
-machine and serves one host per channel — a WebSocket, or its own stdio with
+`noetic-acp serve` (the `@noetic-tools/acp` bin, Node) runs where the agent
+should run and serves one host per channel — a WebSocket, or its own stdio with
 `--stdio`. When the channel closes, the MCP servers it started stop; the agent
 is kept (§ A runner keeps its agents). Over that one
 channel, as JSON frames (`HostFrame` / `RunnerFrame`):
@@ -389,15 +421,15 @@ channel, as JSON frames (`HostFrame` / `RunnerFrame`):
   still checks the bearer token, `Host`, and `Origin` itself.
 
 So the agent needs no route back to the host, and the one channel is the only
-network hop. This one design covers ssh (`commandMachine` over `ssh`),
+network hop. This one design covers ssh (`commandSubprocess` over `ssh`),
 containers (`docker exec -i`) and WebSocket, in place of an ssh reverse
 forward or a container host-gateway address.
 
 #### A runner keeps its agents
 
-A runner keeps the agents a host launches through it exactly as a local
-machine does (§ A local agent outlives its host): after a `keep` frame, it
-launches each agent through a keeper on the runner's own machine, and serves
+A runner keeps the agents a host launches through it exactly as
+`localSubprocess()` does (§ A local agent outlives its host): after a `keep`
+frame, it launches each agent through a keeper beside the runner, and serves
 the bridge to it on the keeper's port, which forwards to the channel's port
 while a channel is open. When the channel drops — the host died, the network
 went, an ssh session ended — the runner lets the keeper go without stopping it,
@@ -405,9 +437,9 @@ so the agent keeps working under the keeper's `whenHostExits`, and holds what
 it sends. A `--stdio` runner exits with its channel; the keeper, in its own
 session, does not.
 
-A later host reconnects with `machine.attach(handle)`: over a new channel —
+A later host reconnects with the link's `attach(handle)`: over a new channel —
 to the same WebSocket runner, or through a new `--stdio` runner on the same
-machine and user — an `attach` frame makes the runner connect to that keeper
+host and user — an `attach` frame makes the runner connect to that keeper
 and carry the agent's stream, and the host's `reach` points the keeper's port at
 the new channel. From there it is the local reattach: `attachSession`, then
 `resumeTurn`. The runner connects only to a keeper socket in its own user's
@@ -419,7 +451,7 @@ bounds how long a kept agent may run with no host; the default is no limit.
 The runner listens on `127.0.0.1` by default; any other address needs
 `--tls-cert` and `--tls-key`. Its token comes from `NOETIC_ACP_RUNNER_TOKEN`
 (or is made up and printed). `--cwd` sets the working directory for a start
-that names none; a working directory missing on the runner's machine is an
+that names none; a working directory missing where the runner runs is an
 error.
 
 Without an allowlist the runner starts whatever the host asks. `--agent <id>`
@@ -442,11 +474,11 @@ own `NOETIC_PI_COMMAND`, else `pi`) itself, over what a host sends
 what the agent does once started: any agent runs what the host's permission
 answers let it. The runner trusts whoever holds its token or its stdio, and
 warns so on stderr when it starts.
-`spawnOn(machine)` opens a machine per process, for a stdio MCP server that
+`spawnOn(adapter)` opens a link per process, for a stdio MCP server that
 must run where the agent runs. Such a server starts as the MCP SDK starts a
-local one: with that machine's `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and
-`USER` plus its own `env`, never the rest of the machine's environment
-(`localMachine()` and the runner alike). Only the agent `launch` starts gets
+local one: with `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER` from the
+environment there, plus its own `env`, never the rest of that environment
+(`localSubprocess()` and the runner alike). Only the agent `launch` starts gets
 the whole environment.
 
 ## Client-side capabilities
@@ -616,7 +648,7 @@ A connection tool's idempotency key is `<execution>:tool:<callId>`, where
 it is the model's call id on `callModel` (`35-connections` § Durability).
 
 A stdio server that must run where the agent runs is `mcp({ name, command,
-args, env, spawn: agent.spawn })`: `AcpAgent.spawn` — `spawnOn(machine)` for a
+args, env, spawn: agent.spawn })`: `AcpAgent.spawn` — `spawnOn(adapter)` for a
 preset — starts it there and carries its stdio back to noetic. Because nothing
 reaches the agent's own MCP client, an agent whose adapter drops a
 `session/new` server list — pi-acp does — still gets the tools.
@@ -868,8 +900,8 @@ and removes it when the step finishes. A resumed step that finds one, written by
 the same agent id:
 
 0. with a reattach handle, reaches the agent that kept working (§ A local agent
-   outlives its host), on the machine a first connection would use (§ The
-   harness's machine), and attaches to the live session. Its first turn collects
+   outlives its host), through the adapter a first connection would use (§ The
+   subprocess adapter), and attaches to the live session. Its first turn collects
    the turn the dead host left running — every update of it as this step's
    output, the requests the agent still waits on answered by this host, then its
    result — instead of prompting. Only when no turn was running does it prompt,

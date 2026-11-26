@@ -16,7 +16,7 @@ import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { AcpMachineFactory } from '@noetic-tools/types';
+import type { SubprocessAdapter } from '@noetic-tools/types';
 import type { McpAuth, McpFetch, McpHttpServer, McpServerTarget, McpStdioServer } from './config';
 import { isStdioTarget, isTransportTarget, namedRecord } from './config';
 import type { HttpTransportOptions } from './sse-transport';
@@ -105,8 +105,8 @@ export function originAwareFetch(
 export interface TransportHooks {
   /** Registers a credential so the harness scrubs it (`ConnectOptions.redact`). */
   readonly redact?: (value: string) => void;
-  /** Where the harness runs processes (`ConnectOptions.machine`), passed to a stdio server's `spawn`. */
-  readonly machine?: AcpMachineFactory;
+  /** The harness's subprocess adapter (`ConnectOptions.subprocess`), passed to a stdio server's `spawn`. */
+  readonly subprocess?: SubprocessAdapter;
 }
 
 function redactTokens(
@@ -320,7 +320,7 @@ export async function createTransport(
               cwd: target.cwd,
             }),
       },
-      hooks.machine,
+      hooks.subprocess,
     );
   }
   if (isStdioTarget(target)) {

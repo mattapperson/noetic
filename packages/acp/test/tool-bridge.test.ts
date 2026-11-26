@@ -40,7 +40,7 @@ import {
   opencodeToolWiring,
   piToolWiring,
 } from '../src/tool-wiring';
-import { loopbackMachine } from '../src/transport-loopback';
+import { loopbackSubprocess } from '../src/transport-loopback';
 
 //#region Tools under test
 
@@ -520,7 +520,7 @@ async function runAcpPath(gateLog: GateLog, agentLog: AgentLog): Promise<Item[]>
       command: {
         command: 'claude-shaped',
       },
-      machine: loopbackMachine(claudeShapedAgent(agentLog)),
+      subprocess: loopbackSubprocess(claudeShapedAgent(agentLog)),
       tools: claudeToolWiring,
     }),
     prompt: 'go',

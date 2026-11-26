@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { PassThrough, Readable, Writable } from 'node:stream';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import type { AcpMachineFactory, Spawn, SpawnCommand } from '@noetic-tools/types';
+import type { Spawn, SpawnCommand, SubprocessAdapter } from '@noetic-tools/types';
 import { frameworkCast, isNoeticConfigError } from '@noetic-tools/types';
 import type { McpConfig } from '../src/config';
 import { mcp } from '../src/provider';
@@ -22,7 +22,7 @@ function echoServer(): TestServer {
 
 /**
  * A `spawn` that "starts" the server in this process: it serves MCP over stdio
- * on a pair of byte pipes, as a process on another machine would over its
+ * on a pair of byte pipes, as a process on another host would over its
  * stdin and stdout.
  */
 function inProcessSpawn(server: TestServer): {
@@ -139,26 +139,24 @@ describe('stdio over spawn', () => {
     expect(fake.closed()).toBe(1);
   });
 
-  it('tells the spawn where the harness runs processes', async () => {
-    const given: Array<AcpMachineFactory | undefined> = [];
+  it("hands the spawn the harness's subprocess adapter", async () => {
+    const given: Array<SubprocessAdapter | undefined> = [];
     const fake = inProcessSpawn(echoServer());
-    const machine: AcpMachineFactory = async () => {
-      throw new Error('not opened');
-    };
+    const subprocess = frameworkCast<SubprocessAdapter>({});
     const provider = mcp({
       command: 'issues-mcp',
       spawn: async (command, options) => {
-        given.push(options?.machine);
+        given.push(options?.subprocess);
         return await fake.spawn(command);
       },
     });
     const [connection] = await provider.connect({
       ...connectOptions('remote'),
-      machine,
+      subprocess,
     });
     await connection?.release();
     expect(given).toEqual([
-      machine,
+      subprocess,
     ]);
   });
 

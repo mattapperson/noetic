@@ -1,9 +1,9 @@
 /**
  * The environment a stdio MCP server starts with, wherever it starts. The MCP
  * SDK's stdio client passes a server only a short list of this process's
- * variables (`getDefaultEnvironment()`), so a server noetic starts on an
- * agent's machine gets the same list from that machine, never the rest of
- * its environment. The list is the SDK's (sudo's defaults):
+ * variables (`getDefaultEnvironment()`), so a server noetic starts beside
+ * an agent gets the same list from the environment there, never the rest of
+ * it. The list is the SDK's (sudo's defaults):
  * https://github.com/modelcontextprotocol/typescript-sdk/blob/main/src/client/stdio.ts
  */
 

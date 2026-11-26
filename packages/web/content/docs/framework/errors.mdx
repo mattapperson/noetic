@@ -660,13 +660,25 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Cause:** `step.acpAgent()` gives `tools` to an agent attached through a custom `transport`. Noetic did not start that agent, and the transport has no `reach()` to carry the tool bridge to wherever it runs. With `tools` left out, such an agent simply gets none.
 
-**Fix:** Give the agent a command and a `machine` instead — `localMachine()` for this machine, or `webSocketMachine()` / `commandMachine()` from `@noetic-tools/acp/remote` for a remote runner (`noetic-acp serve`) — or leave `tools` off the step.
+**Fix:** Give the agent a command and a `subprocess` adapter instead — `localSubprocess()` for a local process, or `webSocketSubprocess()` / `commandSubprocess()` from `@noetic-tools/acp/remote` for a remote runner (`noetic-acp serve`) — or leave `tools` off the step.
 
 #### ACP_TRANSPORT_CANNOT_LAUNCH
 
 **Cause:** As `ACP_TRANSPORT_CANNOT_REACH`, for an agent whose wiring has launch settings (Claude Code, Codex, opencode, pi): attached to an agent someone else started, those settings cannot be applied, so its tools would not match `callModel`.
 
-**Fix:** Give the preset a `machine` instead of a `transport`; the machine's `launch()` starts the agent with those settings.
+**Fix:** Give the preset a `subprocess` adapter instead of a `transport`; its link's `launch()` starts the agent with those settings.
+
+#### ACP_SUBPROCESS_CANNOT_OPEN
+
+**Cause:** An ACP agent was given a `subprocess` adapter with no `open`, or `spawnOn()` was. Such an adapter hands back no stdio, so no agent can run there.
+
+**Fix:** Use an adapter with `open` — `localSubprocess()` from `@noetic-tools/acp/stdio`, or `webSocketSubprocess()` / `commandSubprocess()` from `@noetic-tools/acp/remote` — or add `open` to yours.
+
+#### ACP_SUBPROCESS_RUNS_NO_STEPS
+
+**Cause:** A step subprocess was dispatched to an adapter `@noetic-tools/acp` built (`localSubprocess()`, `webSocketSubprocess()`, `commandSubprocess()`, `loopbackSubprocess()`), usually because it was set as `environment.subprocess` on its own. Those adapters run ACP agents and the processes beside them, and no step children.
+
+**Fix:** Give the adapter to the agent (`claudeCode({ subprocess })`), or keep an adapter that runs steps on the harness and add the agent adapter's `open` to it: `{ ...createInMemorySubprocessAdapter(), open: (options) => runner.open(options) }`.
 
 #### ACP_AGENT_CANNOT_TAKE_TOOLS
 

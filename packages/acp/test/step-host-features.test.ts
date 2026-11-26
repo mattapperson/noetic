@@ -15,7 +15,7 @@ import type { AgentScope, ContextData, HeldCall, HeldCallHandler } from '@noetic
 import { isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { claudeCode } from '../src/agents';
 import { defineAcpAgent } from '../src/define';
-import { loopbackMachine } from '../src/transport-loopback';
+import { loopbackSubprocess } from '../src/transport-loopback';
 
 //#region Agent
 
@@ -114,7 +114,7 @@ function emptyLog(): AgentLog {
 
 function agent(log: AgentLog, script?: AgentScript, sessionMeta?: Record<string, unknown>) {
   return claudeCode({
-    machine: loopbackMachine(agentFor(log, script)),
+    subprocess: loopbackSubprocess(agentFor(log, script)),
     ...(sessionMeta
       ? {
           sessionMeta,
@@ -407,7 +407,7 @@ describe('an agent step, as a host sees it', () => {
           command: {
             command: 'plain',
           },
-          machine: loopbackMachine(agentFor(emptyLog())),
+          subprocess: loopbackSubprocess(agentFor(emptyLog())),
         }),
         prompt: 'go',
         tools: [],

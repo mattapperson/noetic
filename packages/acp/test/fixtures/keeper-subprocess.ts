@@ -1,25 +1,25 @@
 /**
- * The machines the keeper tests run their agent on: this one, a WebSocket
+ * Where the keeper tests run their agent: a local process, a WebSocket
  * runner, or a runner started over stdio (as ssh or docker exec would).
  */
 
 import { fileURLToPath } from 'node:url';
-import type { AcpMachineFactory } from '@noetic-tools/types';
-import { commandMachine, webSocketMachine } from '../../src/remote';
+import type { SubprocessAdapter } from '@noetic-tools/types';
+import { commandSubprocess, webSocketSubprocess } from '../../src/remote';
 
 const BIN = fileURLToPath(new URL('../../src/bin.ts', import.meta.url));
 
-export type MachineKind = 'local' | 'ws' | 'stdio';
+export type SubprocessKind = 'local' | 'ws' | 'stdio';
 
-export function machineFor(kind: string): AcpMachineFactory | undefined {
+export function subprocessFor(kind: string): SubprocessAdapter | undefined {
   if (kind === 'ws') {
-    return webSocketMachine({
+    return webSocketSubprocess({
       url: process.env.NOETIC_TEST_RUNNER_URL ?? '',
       token: process.env.NOETIC_TEST_RUNNER_TOKEN ?? '',
     });
   }
   if (kind === 'stdio') {
-    return commandMachine({
+    return commandSubprocess({
       command: process.execPath,
       args: [
         BIN,

@@ -17,7 +17,7 @@ export type { ToolBridgeAddress } from '@noetic-tools/types';
 
 /** @public What a preset's launch settings are built from. */
 export interface ToolBridgeLaunch {
-  /** The bridge as the agent reaches it, from its own machine. */
+  /** The bridge as the agent reaches it, from where it runs. */
   readonly bridge: ToolBridgeAddress;
   readonly tools: ReadonlyArray<AcpTool>;
   /** The user's own MCP servers for the session. */
@@ -70,7 +70,7 @@ export interface ToolBridgeCredentials {
 //#region Public API
 
 /**
- * Start the loopback MCP server, carry it to the agent's machine, and work
+ * Start the loopback MCP server, carry it to where the agent runs, and work
  * out the agent's launch settings from the address it reaches there. The
  * node-only server module loads on first use, so the package's main entry
  * stays runtime-neutral.
@@ -82,7 +82,7 @@ export async function startToolBridge(opts: {
   tools: ReadonlyArray<AcpTool>;
   mcpServers: ReadonlyArray<AcpMcpServer>;
   env?: Record<string, string | undefined>;
-  /** Carries the bridge to the agent's machine; this machine's loopback by default. */
+  /** Carries the bridge to where the agent runs; the host's loopback by default. */
   reach?: (bridge: ToolBridgeAddress) => Promise<ToolBridgeAddress>;
   /** Serve under the path and token an earlier host gave a reattached agent. */
   reuse?: ToolBridgeCredentials;

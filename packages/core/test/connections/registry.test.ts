@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
 import type {
-  AcpMachineFactory,
   ConnectionEvent,
   ConnectionProvider,
   ConnectionsConfig,
   EventStreamMessage,
   NoeticError,
   SteeringDecision,
+  SubprocessAdapter,
 } from '@noetic-tools/types';
 import {
   defineProfile,
@@ -19,6 +19,7 @@ import {
   secret,
 } from '@noetic-tools/types';
 import { z } from 'zod';
+import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
 import type { GateHooks } from '../../src/connections/gates';
 import type { InMemoryConnectionOptions } from '../../src/connections/in-memory-connection';
 import {
@@ -368,32 +369,30 @@ describe('resolve', () => {
     expect(isNoeticConfigError(e) && e.code).toBe('CONNECTION_UNKNOWN');
   });
 
-  test('hands a provider the place the harness runs processes', async () => {
-    const machine: AcpMachineFactory = async () => {
-      throw new Error('not opened');
-    };
+  test("hands a provider the harness's subprocess adapter", async () => {
+    const subprocess = createInMemorySubprocessAdapter();
     const inner = createInMemoryConnection(appOptions());
-    let given: AcpMachineFactory | undefined;
+    let given: SubprocessAdapter | undefined;
     const runtime = createConnectionRuntime({
       connections: {
         app: {
           name: 'app',
           async connect(opts) {
-            given = opts.machine;
+            given = opts.subprocess;
             return await inner.connect(opts);
           },
         },
       },
       storage: makeStorage(),
       artifacts: createInMemoryArtifactStore(),
-      machine,
+      subprocess,
     });
     opened.push(runtime);
     await runtime.resolve({
       name: 'app',
       scope: scope(),
     });
-    expect(given).toBe(machine);
+    expect(given).toBe(subprocess);
   });
 
   test('connects lazily, reports status and emits connection_changed', async () => {

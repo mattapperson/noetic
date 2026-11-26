@@ -17,24 +17,24 @@ import { LineSplitter } from '../src/keeper/protocol';
 import type { AcpRunnerListener } from '../src/remote';
 import { listenAcpRunner } from '../src/remote';
 import { MemoryFs, RecordingShell } from './_helpers';
-import type { MachineKind } from './fixtures/keeper-machines';
-import { machineFor } from './fixtures/keeper-machines';
+import type { SubprocessKind } from './fixtures/keeper-subprocess';
+import { subprocessFor } from './fixtures/keeper-subprocess';
 
-/** Where the 'ws' machine's runner listens, for the first host's process. */
+/** Where the 'ws' runner listens, for the first host's process. */
 let runnerEnv: Record<string, string> = {};
 
 const POSIX = process.platform !== 'win32';
 const HOST = fileURLToPath(new URL('./fixtures/keeper-host.ts', import.meta.url));
 const AGENT = fileURLToPath(new URL('./fixtures/keeper-agent.ts', import.meta.url));
 
-function keptAgent(machine: MachineKind) {
+function keptAgent(kind: SubprocessKind) {
   return customAcpAgent({
     agentId: 'kept',
     command: process.execPath,
     args: [
       AGENT,
     ],
-    machine: machineFor(machine),
+    subprocess: subprocessFor(kind),
   });
 }
 
@@ -50,7 +50,7 @@ interface Started {
 async function firstHost(
   whenHostExits: 'keep' | 'stop',
   prompt: string,
-  machine: MachineKind = 'local',
+  kind: SubprocessKind = 'local',
 ): Promise<Started> {
   const host = spawn(
     process.execPath,
@@ -58,7 +58,7 @@ async function firstHost(
       HOST,
       whenHostExits,
       prompt,
-      machine,
+      kind,
     ],
     {
       env: {
@@ -285,13 +285,13 @@ describe.skipIf(!POSIX)('a kept agent on a remote runner', () => {
     runnerEnv = {};
   });
 
-  for (const machine of [
+  for (const kind of [
     'ws',
     'stdio',
-  ] satisfies MachineKind[]) {
-    it(`over ${machine}: a new host reconnects and takes the turn over`, async () => {
-      const remote = keptAgent(machine);
-      const { host, handle, sessionId } = await firstHost('keep', 'ask', machine);
+  ] satisfies SubprocessKind[]) {
+    it(`over ${kind}: a new host reconnects and takes the turn over`, async () => {
+      const remote = keptAgent(kind);
+      const { host, handle, sessionId } = await firstHost('keep', 'ask', kind);
       // The host dies: its channel to the runner drops (and a stdio runner exits).
       await crash(host);
 

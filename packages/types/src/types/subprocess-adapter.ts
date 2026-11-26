@@ -1,5 +1,3 @@
-import type { AcpMachineFactory } from './acp';
-
 //#region Status
 
 /** @public Lifecycle states for a subprocess handle. */
@@ -225,13 +223,155 @@ export interface SubprocessAdapter {
    */
   listLive(): Promise<ReadonlyArray<SubprocessHandle>>;
   /**
-   * Opens the place this adapter's processes run, for a process whose stdio
-   * the caller holds: an ACP agent, and a stdio MCP server beside it. An agent
-   * that names no machine of its own starts here, and a resumed step reaches
-   * the agent it left running through the machine's `attach`. Absent on an
-   * adapter that hands back no stdio; such an agent starts on this machine.
+   * Opens a link to where this adapter's processes run, for a process whose
+   * stdio the caller holds: an ACP agent, and a stdio MCP server beside it. A
+   * resumed step reaches the agent it left running through the link's
+   * `attach`. Absent on an adapter that hands back no stdio.
    */
-  open?: AcpMachineFactory;
+  open?(options: SubprocessOpenOptions): Promise<SubprocessLink>;
+}
+
+//#endregion
+
+//#region Processes whose stdio the caller holds
+
+/**
+ * A duplex byte stream: a process's stdio, or a socket.
+ * @public
+ */
+export interface ByteStream {
+  /** Bytes arriving from the far end (a process's stdout). */
+  readonly readable: ReadableStream<Uint8Array>;
+  /** Bytes sent to the far end (a process's stdin). */
+  readonly writable: WritableStream<Uint8Array>;
+  /** Tear the stream down and release what holds it (process, socket, …). */
+  close(): Promise<void>;
+}
+
+/** @public A process to start. */
+export interface SpawnCommand {
+  readonly command: string;
+  readonly args?: ReadonlyArray<string>;
+  /**
+   * Added to the environment where the process runs: for an agent
+   * (`SubprocessLink.launch`) all of it; for an MCP server
+   * (`SubprocessLink.spawn`, a `Spawn`) only the MCP SDK's default list
+   * (`HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `USER`), as the SDK starts a
+   * local server.
+   */
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  /** Working directory where the process runs. */
+  readonly cwd?: string;
+}
+
+/** @public What the caller of a {@link Spawn} knows about where processes run. */
+export interface SpawnOptions {
+  /**
+   * The harness's `environment.subprocess`. A `Spawn` bound to no adapter of
+   * its own starts the process here when this one has `open`.
+   */
+  readonly subprocess?: SubprocessAdapter;
+}
+
+/**
+ * Starts a process and returns its stdio as a byte stream: how a stdio MCP
+ * server that must run where an ACP agent runs is started, with noetic still
+ * its MCP client. `@noetic-tools/acp` implements it (`spawnOn(adapter)`,
+ * `AcpAgent.spawn`); `@noetic-tools/mcp` takes it (`mcp({ command, spawn })`).
+ * @public
+ */
+export type Spawn = (command: SpawnCommand, options?: SpawnOptions) => Promise<ByteStream>;
+
+/**
+ * A bidirectional byte stream to an ACP agent — the substrate JSON-RPC frames
+ * ride on. A {@link SubprocessLink} hands one back.
+ * @public
+ */
+export type AcpTransport = ByteStream & {
+  /**
+   * Set when the agent behind this stream outlives the host and can be
+   * reattached (a local agent run by its keeper). JSON, opaque outside the
+   * package that made it.
+   */
+  readonly reattach?: AcpReattachHandle;
+  /**
+   * Let go of the agent without stopping it, as a host that goes away does,
+   * so a later host can still reattach. Present only with {@link reattach}.
+   */
+  detach?(): Promise<void>;
+};
+
+/**
+ * How to reach an agent that outlived its host: JSON a durable run stores with
+ * the step and hands back to `AcpConnectOptions.reattach` on resume. Opaque to
+ * everything but the package that made it.
+ * @public
+ */
+export type AcpReattachHandle = Readonly<Record<string, unknown>>;
+
+/**
+ * What happens to an agent when its host goes away without closing it — a
+ * crash, Ctrl-C, a killed process. `'keep'` (the default) keeps the agent
+ * working and holds everything it sends until a host reattaches; `'stop'`
+ * stops its whole process tree as soon as the host is gone.
+ * @public
+ */
+export type AcpWhenHostExits = 'keep' | 'stop';
+
+/**
+ * Where a tool bridge can be reached: an MCP streamable HTTP endpoint and the
+ * headers every request must carry (always the bridge's bearer token).
+ * @public
+ */
+export interface ToolBridgeAddress {
+  readonly serverName: string;
+  readonly url: string;
+  readonly headers: ReadonlyArray<{
+    name: string;
+    value: string;
+  }>;
+}
+
+/** @public What {@link SubprocessAdapter.open} is given. */
+export interface SubprocessOpenOptions {
+  /** Aborting this signal closes the link. */
+  signal?: AbortSignal;
+  /** See {@link AcpWhenHostExits}. */
+  whenHostExits?: AcpWhenHostExits;
+}
+
+/**
+ * One link to where an adapter's processes run, opened once per connection
+ * before the agent starts. The tool bridge listens on the host's loopback
+ * interface, so the link first carries it to where the agent can reach it,
+ * then starts the agent with launch settings that may name that address.
+ * @public
+ */
+export interface SubprocessLink {
+  /**
+   * An address the agent can use to reach `bridge`. The same address when the
+   * agent runs beside the host; a channel to it from anywhere else. A
+   * non-loopback hop is TLS.
+   */
+  reach(bridge: ToolBridgeAddress): Promise<ToolBridgeAddress>;
+  /** Start the agent and return its ACP byte stream. */
+  launch(command: SpawnCommand): Promise<AcpTransport>;
+  /**
+   * Start a process beside the agent — a stdio MCP server that must run
+   * there — and carry its stdio back, so noetic stays its client. It gets the
+   * MCP SDK's default environment there plus `env`, as a local server does,
+   * not the agent's.
+   */
+  spawn: Spawn;
+  /**
+   * The stream to an agent an earlier host launched through this adapter,
+   * which outlived it ({@link AcpTransport.reattach}). Rejects with
+   * `AcpConnectError` when that agent is gone. Absent where agents never
+   * outlive their host.
+   */
+  attach?(handle: AcpReattachHandle): Promise<AcpTransport>;
+  /** Release the link and everything started through it. */
+  close(): Promise<void>;
 }
 
 //#endregion

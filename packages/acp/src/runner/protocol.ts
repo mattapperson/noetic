@@ -2,10 +2,10 @@
  * The frames between a host and a remote runner (`noetic-acp serve`), carried
  * as JSON over one WebSocket or one stdio pipe.
  *
- * The one channel carries everything a connection needs on the agent's
- * machine: processes the host starts there (the agent, and MCP servers beside
+ * The one channel carries everything a connection needs where the agent
+ * runs: processes the host starts there (the agent, and MCP servers beside
  * it), their stdio, and the tool bridge — HTTP requests the agent sends to a
- * loopback port on its machine, answered by the host's bridge.
+ * loopback port beside it, answered by the host's bridge.
  */
 
 import { z } from 'zod';
@@ -31,7 +31,7 @@ export const HostFrameSchema = z.discriminatedUnion('t', [
   }),
   /**
    * Start a process; its stdio becomes stream `id`. `launch` is the agent,
-   * `spawn` an MCP server beside it (`AcpMachine.launch` and `.spawn`).
+   * `spawn` an MCP server beside it (`SubprocessLink.launch` and `.spawn`).
    */
   z.object({
     t: z.literal('start'),
@@ -55,8 +55,8 @@ export const HostFrameSchema = z.discriminatedUnion('t', [
     id: Id,
   }),
   /**
-   * Run the agents this channel launches through a keeper on the runner's
-   * machine, so they outlive the channel; `whenHostExits` says what happens
+   * Run the agents this channel launches through a keeper beside the
+   * runner, so they outlive the channel; `whenHostExits` says what happens
    * to them when it drops. Sent once, first, by hosts that keep agents.
    */
   z.object({

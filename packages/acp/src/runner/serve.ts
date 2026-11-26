@@ -1,5 +1,5 @@
 /**
- * The remote runner: started on the agent's machine, it runs what a host asks
+ * The remote runner: started where the agent should run, it runs what a host asks
  * for over one channel — the agent with its launch settings, MCP servers
  * beside it — and serves the host's tool bridge to them on a loopback port.
  *

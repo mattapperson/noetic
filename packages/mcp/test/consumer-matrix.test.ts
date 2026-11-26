@@ -39,7 +39,7 @@ import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
 import { defineAcpAgent } from '../../acp/src/define';
 import { claudeToolWiring } from '../../acp/src/tool-wiring';
-import { loopbackMachine } from '../../acp/src/transport-loopback';
+import { loopbackSubprocess } from '../../acp/src/transport-loopback';
 import type { ContextData } from '../../core/src/index';
 import {
   AgentHarness,
@@ -232,7 +232,7 @@ function claudeShaped(log: AgentLog): AcpAgent {
       command: 'claude-shaped',
     },
     tools: claudeToolWiring,
-    machine: loopbackMachine((conn) => {
+    subprocess: loopbackSubprocess((conn) => {
       let servers: ReadonlyArray<AcpMcpServer> = [];
       return {
         async initialize() {

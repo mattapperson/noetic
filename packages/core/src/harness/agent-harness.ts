@@ -479,7 +479,7 @@ export class AgentHarness<
       storage: this.config.storage ?? createInMemoryStorage(),
       artifacts: this.artifacts,
       secrets: environment?.secrets,
-      machine: adapters.subprocess.open?.bind(adapters.subprocess),
+      subprocess: adapters.subprocess,
       verifier: opts.verification,
       broadcasters: () =>
         [

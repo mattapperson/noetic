@@ -1,7 +1,7 @@
 /**
- * An agent that names no machine starts where the harness runs processes
- * (`environment.subprocess.open`): its launch, the tool bridge's route, a
- * reattach and a process started beside it all go through that machine.
+ * An agent that names no subprocess adapter runs through the harness's
+ * (`environment.subprocess`): its launch, the tool bridge's route, a reattach
+ * and a process started beside it all go through that adapter's `open`.
  */
 
 import { describe, expect, it } from 'bun:test';
@@ -11,14 +11,17 @@ import { AgentHarness, createInMemorySubprocessAdapter, execute, step } from '@n
 import type {
   AcpAgent,
   AcpClientHost,
-  AcpMachine,
-  AcpMachineFactory,
   AcpReattachHandle,
   SpawnCommand,
+  SubprocessAdapter,
+  SubprocessLink,
+  SubprocessOpenOptions,
 } from '@noetic-tools/types';
 import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
+import type { AgentSubprocessAdapter } from '../src/agent-subprocess';
+import { agentSubprocess } from '../src/agent-subprocess';
 import { defineAcpAgent } from '../src/define';
-import { loopbackMachine } from '../src/transport-loopback';
+import { loopbackSubprocess } from '../src/transport-loopback';
 
 interface Seen {
   launched: SpawnCommand[];
@@ -57,16 +60,16 @@ function quietAgent(): acp.Agent {
   };
 }
 
-/** A loopback machine that records what it was asked to start and reach again. */
-function recordingMachine(log: Seen): AcpMachineFactory {
-  const inner = loopbackMachine((_conn, command) => {
+/** A loopback adapter that records what it was asked to start and reach again. */
+function recording(log: Seen): AgentSubprocessAdapter {
+  const inner = loopbackSubprocess((_conn, command) => {
     log.launched.push(command);
     return quietAgent();
   });
-  return async (opts): Promise<AcpMachine> => {
-    const machine = await inner(opts);
+  return agentSubprocess('recording', async (opts) => {
+    const link = await inner.open(opts);
     return {
-      ...machine,
+      ...link,
       async spawn(command) {
         log.spawned.push(command);
         return {
@@ -84,31 +87,31 @@ function recordingMachine(log: Seen): AcpMachineFactory {
         });
       },
     };
-  };
+  });
 }
 
-function agentOn(machine?: AcpMachineFactory): AcpAgent {
+function agentOn(subprocess?: SubprocessAdapter): AcpAgent {
   return defineAcpAgent({
     agentId: 'placed',
     command: {
       command: 'agent-acp',
     },
-    ...(machine
+    ...(subprocess
       ? {
-          machine,
+          subprocess,
         }
       : {}),
   });
 }
 
-async function runOn(environment: AcpMachineFactory, agent: AcpAgent): Promise<void> {
+async function runOn(environment: AgentSubprocessAdapter, agent: AcpAgent): Promise<void> {
   const ctx = new AgentHarness({
-    name: 'environment-machine',
+    name: 'environment-subprocess',
     params: {},
     environment: {
       subprocess: {
         ...createInMemorySubprocessAdapter(),
-        open: environment,
+        open: (options) => environment.open(options),
       },
     },
   }).createContext();
@@ -123,10 +126,10 @@ async function runOn(environment: AcpMachineFactory, agent: AcpAgent): Promise<v
   );
 }
 
-describe("the harness's subprocess machine", () => {
-  it('starts an agent that names no machine of its own', async () => {
+describe("the harness's subprocess adapter", () => {
+  it('starts an agent that names no adapter of its own', async () => {
     const environment = seen();
-    await runOn(recordingMachine(environment), agentOn());
+    await runOn(recording(environment), agentOn());
     expect(environment.launched.map((command) => command.command)).toEqual([
       'agent-acp',
     ]);
@@ -135,13 +138,13 @@ describe("the harness's subprocess machine", () => {
   it('calls open on its adapter', async () => {
     const environment = seen();
     class Placed {
-      private readonly machine = recordingMachine(environment);
-      open(opts: Parameters<AcpMachineFactory>[0]): Promise<AcpMachine> {
-        return this.machine(opts);
+      private readonly inner = recording(environment);
+      open(options: SubprocessOpenOptions): Promise<SubprocessLink> {
+        return this.inner.open(options);
       }
     }
     const ctx = new AgentHarness({
-      name: 'environment-machine',
+      name: 'environment-subprocess',
       params: {},
       environment: {
         subprocess: Object.assign(new Placed(), createInMemorySubprocessAdapter()),
@@ -159,10 +162,10 @@ describe("the harness's subprocess machine", () => {
     expect(environment.launched).toHaveLength(1);
   });
 
-  it('leaves an agent on the machine it names', async () => {
+  it('leaves an agent on the adapter it names', async () => {
     const environment = seen();
     const own = seen();
-    await runOn(recordingMachine(environment), agentOn(recordingMachine(own)));
+    await runOn(recording(environment), agentOn(recording(own)));
     expect(own.launched).toHaveLength(1);
     expect(environment.launched).toHaveLength(0);
   });
@@ -176,11 +179,11 @@ describe("the harness's subprocess machine", () => {
       .connect({
         host: frameworkCast<AcpClientHost>({
           cwd: '/work',
-          threadId: 'environment-machine',
+          threadId: 'environment-subprocess',
           onSessionUpdate: () => undefined,
         }),
         reattach: handle,
-        machine: recordingMachine(environment),
+        subprocess: recording(environment),
       })
       .catch((e: unknown) => e);
     assert(gone instanceof AcpConnectError);
@@ -189,20 +192,20 @@ describe("the harness's subprocess machine", () => {
     ]);
   });
 
-  it('starts a process beside the agent, unless the agent names a machine', async () => {
+  it('starts a process beside the agent, unless the agent names an adapter', async () => {
     const environment = seen();
     const own = seen();
     const cat = {
       command: 'cat',
     };
     const options = {
-      machine: recordingMachine(environment),
+      subprocess: recording(environment),
     };
     await agentOn().spawn?.(cat, options);
     expect(environment.spawned).toEqual([
       cat,
     ]);
-    await agentOn(recordingMachine(own)).spawn?.(cat, options);
+    await agentOn(recording(own)).spawn?.(cat, options);
     expect(own.spawned).toEqual([
       cat,
     ]);

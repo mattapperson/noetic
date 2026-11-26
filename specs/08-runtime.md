@@ -209,12 +209,12 @@ interface SubprocessAdapter {
    */
   listLive(): Promise<ReadonlyArray<SubprocessHandle>>;
   /**
-   * Open the place this adapter's processes run, for a process whose stdio the
-   * caller holds: an ACP agent, and a stdio MCP server beside it. Absent on an
-   * adapter that hands back no stdio. See 27-acp-agent-steps § The harness's
-   * machine.
+   * Open a link to where this adapter's processes run, for a process whose
+   * stdio the caller holds: an ACP agent, and a stdio MCP server beside it.
+   * Absent on an adapter that hands back no stdio. See 27-acp-agent-steps
+   * § The subprocess adapter.
    */
-  open?: AcpMachineFactory;
+  open?(options: SubprocessOpenOptions): Promise<SubprocessLink>;
 }
 ```
 
