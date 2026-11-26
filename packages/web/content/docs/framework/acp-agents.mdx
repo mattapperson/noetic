@@ -837,7 +837,7 @@ Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, 
 |---|---|
 | `loopbackTransport(toAgent)` | Stands an in-process agent on the far end of a real protocol connection. The recommended way to test an ACP step. |
 | `loopbackMachine(toAgent)` | The same agent as a machine, so a test step can give it tools. |
-| `localMachine()` | This machine: the default for every preset. Lives at `@noetic-tools/acp/stdio`. |
+| `localMachine()` | This machine: where a preset runs when neither it nor the harness names another. Lives at `@noetic-tools/acp/stdio`. |
 | `spawnOn(machine)` | A `Spawn` that starts a process on `machine` and returns its stdio; a command agent's `agent.spawn`. |
 | `SubprocessAdapter.open` | The harness's machine (`environment.subprocess.open`): where an agent that names no `machine` runs and reattaches. |
 | `webSocketMachine(opts)`, `commandMachine(opts)`, `runnerMachine(openLink)` | A remote runner over WebSocket, over a command's stdio, or over any `FrameLink`. Live at `@noetic-tools/acp/remote`. |

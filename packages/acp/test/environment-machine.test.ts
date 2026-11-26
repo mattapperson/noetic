@@ -132,6 +132,33 @@ describe("the harness's subprocess machine", () => {
     ]);
   });
 
+  it('calls open on its adapter', async () => {
+    const environment = seen();
+    class Placed {
+      private readonly machine = recordingMachine(environment);
+      open(opts: Parameters<AcpMachineFactory>[0]): Promise<AcpMachine> {
+        return this.machine(opts);
+      }
+    }
+    const ctx = new AgentHarness({
+      name: 'environment-machine',
+      params: {},
+      environment: {
+        subprocess: Object.assign(new Placed(), createInMemorySubprocessAdapter()),
+      },
+    }).createContext();
+    await execute(
+      step.acpAgent({
+        id: 'placed',
+        agent: agentOn(),
+        prompt: 'go',
+      }),
+      undefined,
+      ctx,
+    );
+    expect(environment.launched).toHaveLength(1);
+  });
+
   it('leaves an agent on the machine it names', async () => {
     const environment = seen();
     const own = seen();

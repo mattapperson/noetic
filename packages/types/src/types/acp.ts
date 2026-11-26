@@ -46,9 +46,9 @@ export const ACP_AGENT_STEP_KIND = 'acp-agent';
  * A bidirectional byte stream to an ACP agent — the substrate JSON-RPC frames
  * ride on.
  *
- * This is deliberately *not* built on {@link SubprocessAdapter}: that contract
- * returns a durable handle (`id`/`status`/`metadata`) with no attached stdio,
- * and {@link ShellAdapter} is one-shot. ACP needs a long-lived duplex pipe.
+ * {@link ShellAdapter} is one-shot and a {@link SubprocessAdapter} handle has
+ * no attached stdio; ACP needs a long-lived duplex pipe, which the adapter's
+ * `open` hands back through a machine.
  * @public
  */
 export type AcpTransport = ByteStream & {
