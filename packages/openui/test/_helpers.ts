@@ -90,6 +90,7 @@ export function makeExecCtx(): ExecutionContext & {
     // No layer under test touches the filesystem or shell.
     fs: frameworkCast<ExecutionContext['fs']>({}),
     shell: frameworkCast<ExecutionContext['shell']>({}),
+    adapters: frameworkCast<ExecutionContext['adapters']>({}),
     tokenize: (text: string) => Math.ceil(text.length / 4),
     trace: {
       setAttribute: () => {},

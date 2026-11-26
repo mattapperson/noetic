@@ -6,15 +6,11 @@
  * protocol code — that is the whole point of standardising on ACP. Any agent
  * not listed here works through {@link customAcpAgent}.
  *
- * The stdio transport is reached through a dynamic `import()`, so this module
- * has no static `node:*` import and nothing loads `child_process` until a
- * connection is actually opened. Note that is a runtime property, not a
- * bundling one: the specifier is static, so a bundler still resolves and
- * includes `./stdio`. A browser build wanting it excluded should alias or
- * externalise `@noetic-tools/acp/stdio`.
+ * A preset starts nothing itself: its command runs through a subprocess
+ * adapter, so this module imports no `node:*`.
  */
 
-import type { AcpAgent, AcpMachineFactory, AcpTransportFactory } from '@noetic-tools/types';
+import type { AcpAgent, AcpTransportFactory } from '@noetic-tools/types';
 import type { InstructionsMeta } from './connection';
 import { defineAcpAgent } from './define';
 import type { AcpToolWiring } from './tool-bridge';
@@ -125,10 +121,13 @@ export interface AcpPresetOptions {
   /** Environment overrides for the agent process — API keys, feature flags. */
   env?: Record<string, string | undefined>;
   /**
-   * The machine the agent runs on — a remote runner, a sandbox — when it is
-   * not this one. The preset's command runs there, with its tool settings.
+   * Where the agent runs — a remote runner, a sandbox: the name of one of the
+   * harness's `environment.subprocess` adapters. The preset's command runs
+   * there, with its tool settings. A step's own `subprocess` name comes
+   * first. Without either the agent runs through the harness's default. The
+   * adapter it lands on must have `open`.
    */
-  machine?: AcpMachineFactory;
+  subprocess?: string;
   /** Attach to an agent this package does not start, in place of the preset's command. */
   transport?: AcpTransportFactory;
   /**
@@ -185,7 +184,7 @@ function preset({
             command: spec.command,
             args: spec.args,
           },
-          machine: opts.machine,
+          subprocess: opts.subprocess,
         }),
     env: spec.env,
     tools: wiring,
@@ -340,7 +339,8 @@ export function customAcpAgent(opts: {
   command?: string;
   args?: ReadonlyArray<string>;
   env?: Record<string, string | undefined>;
-  machine?: AcpMachineFactory;
+  /** See {@link AcpPresetOptions.subprocess}. */
+  subprocess?: string;
   /** See {@link AcpPresetOptions.transport}. */
   transport?: AcpTransportFactory;
 }): AcpAgent {
@@ -357,7 +357,7 @@ export function customAcpAgent(opts: {
       env: opts.env,
     },
     opts: {
-      machine: opts.machine,
+      subprocess: opts.subprocess,
       transport: opts.transport,
     },
     wiring: sessionToolWiring,

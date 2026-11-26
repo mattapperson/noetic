@@ -145,6 +145,16 @@ export interface StepAcpAgentOpts<TContext, O, I = unknown>
   output?: StandardSchemaV1<unknown, O>;
   /** Session reuse + teardown policy across steps. */
   session?: AcpSessionPolicy;
+  /**
+   * The harness subprocess adapter the agent runs through, by its name in
+   * `environment.subprocess`. Comes before one the agent names. Default: the
+   * agent's, else the harness's default.
+   */
+  subprocess?: string;
+  /** The harness filesystem adapter that serves the agent's `fs/*` calls, by name. Default: the harness's default. */
+  fs?: string;
+  /** The harness shell adapter that serves the agent's `terminal/*` calls, by name. Default: the harness's default. */
+  shell?: string;
   emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
 }
 

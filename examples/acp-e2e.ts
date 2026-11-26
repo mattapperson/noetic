@@ -38,6 +38,7 @@ import {
   validateWorkflow,
 } from '@noetic-tools/core';
 import { frameworkCast } from '@noetic-tools/core/unstable';
+import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 import { z } from 'zod';
 
 //#region Fake agent
@@ -178,9 +179,13 @@ function ok(label: string, cond: boolean): void {
 }
 
 async function main(): Promise<void> {
+  // A spawned agent (paths H and I) starts through the harness's subprocess adapter.
   const harness = new AgentHarness({
     name: 'acp-e2e',
     params: {},
+    environment: {
+      subprocess: createLocalSubprocessAdapter(),
+    },
   });
 
   // ── Path A: programmatic, via AgentHarness.run() ──────────────────────────
@@ -400,6 +405,9 @@ async function main(): Promise<void> {
       params: {},
       callModelDefaults: {
         provider: 'openrouter',
+      },
+      environment: {
+        subprocess: createLocalSubprocessAdapter(),
       },
     });
     const planThenDelegate = callModel<ContextData, string>({

@@ -2,7 +2,8 @@
  * `defineAcpAgent` — the one-call constructor behind every agent preset.
  *
  * Under ACP an "adapter" is just a way to reach a JSON-RPC peer, so an agent is
- * fully described by its id plus how to start it (a command on a machine) or
+ * fully described by its id plus how to start it (a command, run through a
+ * subprocess adapter) or
  * attach to it (a transport). Everything else — the handshake, sessions,
  * prompts, permissions, terminals — is protocol-generic and lives in
  * {@link openAcpConnection}.
@@ -12,21 +13,21 @@ import type {
   AcpAgent,
   AcpAgentConnection,
   AcpConnectOptions,
-  AcpMachine,
-  AcpMachineFactory,
   AcpReattachHandle,
   AcpToolRefusal,
   AcpTransport,
   AcpTransportFactory,
   AcpWhenHostExits,
   SpawnCommand,
+  SubprocessAdapter,
+  SubprocessChoice,
   ToolBridgeAddress,
 } from '@noetic-tools/types';
-import { AcpConnectError } from '@noetic-tools/types';
+import { AcpConnectError, NoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
 import type { InstructionsMeta } from './connection';
 import { openAcpConnection } from './connection';
-import { spawnOn } from './spawn';
+import { cannotOpen, openLink, spawnOn } from './spawn';
 import type { AcpToolWiring, ToolBridge, ToolBridgeCredentials } from './tool-bridge';
 import { startToolBridge } from './tool-bridge';
 import { sessionToolWiring } from './tool-wiring';
@@ -41,10 +42,15 @@ export interface DefineAcpAgentOptions {
    * messages. Free-form — the set of agents is open.
    */
   agentId: string;
-  /** Starts the agent: this command, run on {@link machine}. */
+  /** Starts the agent: this command, run through {@link subprocess}. */
   command?: SpawnCommand;
-  /** Where {@link command} runs. This machine by default. */
-  machine?: AcpMachineFactory;
+  /**
+   * Where {@link command} runs: the name of one of the harness's
+   * `environment.subprocess` adapters. A step's own `subprocess` name comes
+   * first. Without either it runs through the harness's default. The adapter
+   * it lands on must have `open`.
+   */
+  subprocess?: string;
   /**
    * Opens the byte stream to an agent this package does not start. Used in
    * place of `command`.
@@ -86,6 +92,7 @@ export interface DefineAcpAgentOptions {
 interface Opened {
   open(env: Record<string, string>): Promise<AcpTransport>;
   reach(bridge: ToolBridgeAddress): Promise<ToolBridgeAddress>;
+  /** Releases what was opened. Only the first call does anything. */
   close(): Promise<void>;
 }
 
@@ -103,8 +110,15 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
   return {
     specificationVersion: 'acp-v1',
     agentId: def.agentId,
+    ...(def.command && def.subprocess !== undefined
+      ? {
+          subprocess: def.subprocess,
+        }
+      : {}),
     refusesTools: def.command ? undefined : attachedRefusal(def.tools ?? sessionToolWiring),
-    spawn: def.command ? spawnOn(def.machine ?? lazyLocalMachine(def.agentId)) : undefined,
+    spawn: def.command
+      ? (command, options) => spawnOn(subprocessOf(def, options?.subprocess))(command)
+      : undefined,
     ...(def.toolIdOf
       ? {
           toolIdOf: def.toolIdOf,
@@ -120,16 +134,17 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
         cwd: opts.host.cwd,
         signal,
         whenHostExits,
+        subprocess: opts.subprocess,
       });
       let bridge: ToolBridge | undefined;
       try {
         bridge = await openBridge(def, opts, {
           reach: opened.reach,
         });
-        const transport = await opened.open(bridge?.env ?? {});
+        const transport = closingWith(await opened.open(bridge?.env ?? {}), opened);
         return await openAcpConnection({
           agentId: def.agentId,
-          transport: closingWith(transport, opened),
+          transport,
           host: opts.host,
           signal,
           tools: bridge,
@@ -140,6 +155,7 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
         });
       } catch (e) {
         await bridge?.close();
+        // A failed handshake has closed the stream, and the link with it.
         await opened.close().catch(() => undefined);
         throw e;
       }
@@ -158,7 +174,7 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
  */
 function attachedRefusal(wiring: AcpToolWiring): AcpToolRefusal {
   const hint =
-    'Give the agent a command and a `machine` instead of a `transport` — `webSocketMachine()` or `commandMachine()` from @noetic-tools/acp/remote reach a remote runner (`noetic-acp serve`) — or leave `tools` off this step.';
+    'Give the agent a command and a subprocess adapter instead of a `transport` — `createWebSocketSubprocessAdapter()` or `createCommandSubprocessAdapter()` from @noetic-tools/platform-node reach a remote runner (`noetic-acp serve`) — or leave `tools` off this step.';
   if (wiring.launchEnv) {
     return {
       code: 'ACP_TRANSPORT_CANNOT_LAUNCH',
@@ -175,17 +191,19 @@ function attachedRefusal(wiring: AcpToolWiring): AcpToolRefusal {
   };
 }
 
-/** A command starts on its machine; a transport attaches as it is. */
+/** A command starts through its subprocess adapter; a transport attaches as it is. */
 async function openTarget(
   def: DefineAcpAgentOptions,
   {
     cwd,
     signal,
     whenHostExits,
+    subprocess: given,
   }: {
     cwd: string;
     signal: AbortSignal | undefined;
     whenHostExits: AcpWhenHostExits;
+    subprocess: SubprocessChoice | undefined;
   },
 ): Promise<Opened> {
   const command = def.command;
@@ -214,13 +232,17 @@ async function openTarget(
       close: async () => undefined,
     };
   }
-  const machine: AcpMachine = await (def.machine ?? lazyLocalMachine(def.agentId))({
-    signal,
-    whenHostExits,
-  });
+  const link = await openLink(
+    subprocessOf(def, given),
+    {
+      signal,
+      whenHostExits,
+    },
+    `ACP agent '${def.agentId}'`,
+  );
   return {
     open: (env) =>
-      machine.launch({
+      link.launch({
         ...command,
         cwd,
         env: {
@@ -229,24 +251,45 @@ async function openTarget(
           ...env,
         },
       }),
-    reach: (bridge) => machine.reach(bridge),
-    close: () => machine.close(),
+    reach: (bridge) => link.reach(bridge),
+    close: once(() => link.close()),
   };
 }
 
 /**
- * Defer the `node:child_process` import until a connection is actually opened,
- * so importing `@noetic-tools/acp` in a browser or worker stays safe.
+ * Where a command agent runs, among the harness's adapters: the one the step
+ * names, else the one the agent names, else the default.
+ *
+ * @throws `NoeticConfigError` `ADAPTER_UNKNOWN` for a name the harness lacks,
+ * `SUBPROCESS_NAME_WITHOUT_HARNESS` for a name with no harness set to find
+ * it in, `SUBPROCESS_CANNOT_OPEN` for no name and no harness set.
  */
-function lazyLocalMachine(agentId: string): AcpMachineFactory {
-  return async (opts) => {
-    const { localMachine } = await import('./stdio');
-    return await localMachine(agentId)(opts);
-  };
+function subprocessOf(
+  def: DefineAcpAgentOptions,
+  given: SubprocessChoice | undefined,
+): SubprocessAdapter {
+  const name = given?.name ?? def.subprocess;
+  if (given) {
+    return given.adapters.get(name);
+  }
+  if (name !== undefined) {
+    throw new NoeticConfigError({
+      code: 'SUBPROCESS_NAME_WITHOUT_HARNESS',
+      message: `ACP agent '${def.agentId}' names the subprocess adapter '${name}', and was given no harness adapters to find it among.`,
+      hint: 'Run the agent as a step, so the harness passes its `environment.subprocess`.',
+    });
+  }
+  throw cannotOpen(
+    `ACP agent '${def.agentId}' has no subprocess adapter to start its command through.`,
+  );
 }
 
-/** Closing the agent's stream releases the machine it runs on. */
-function closingWith(transport: AcpTransport, opened: Opened): AcpTransport {
+/**
+ * The agent's stream, taking the link it came through with it: closing the
+ * stream, or letting go of the agent, closes the link. A link stops only
+ * what it still holds, so closing it after `detach` leaves the agent running.
+ */
+function closingWith(transport: AcpTransport, opened: Pick<Opened, 'close'>): AcpTransport {
   const detach = transport.detach?.bind(transport);
   return {
     readable: transport.readable,
@@ -263,17 +306,31 @@ function closingWith(transport: AcpTransport, opened: Opened): AcpTransport {
         await opened.close();
       }
     },
-    // Letting go keeps the machine: it runs the agent a later host reattaches to.
     ...(detach
       ? {
-          detach,
+          detach: once(async () => {
+            try {
+              await detach();
+            } finally {
+              await opened.close();
+            }
+          }),
         }
       : {}),
   };
 }
 
+/** `release`, run by the first call only; later calls wait for that run. */
+function once(release: () => Promise<void>): () => Promise<void> {
+  let released: Promise<void> | undefined;
+  return () => {
+    released ??= release();
+    return released;
+  };
+}
+
 /**
- * Reach the agent an earlier host started, through the machine that runs it:
+ * Reach the agent an earlier host started, through the adapter that runs it:
  * the stream from its keeper, and the bridge served again under the path and
  * token the agent was given, at the address it already uses.
  */
@@ -290,32 +347,35 @@ async function reattachTo(
       message: `ACP agent '${def.agentId}' attaches through a transport and cannot be reattached.`,
     });
   }
-  const machine = await (def.machine ?? lazyLocalMachine(def.agentId))({
-    signal,
-    whenHostExits,
-  });
+  const link = await openLink(
+    subprocessOf(def, opts.subprocess),
+    {
+      signal,
+      whenHostExits,
+    },
+    `ACP agent '${def.agentId}'`,
+  );
+  const close = once(() => link.close());
   let bridge: ToolBridge | undefined;
   let attached: AcpTransport | undefined;
   try {
-    if (!machine.attach) {
+    if (!link.attach) {
       throw new AcpConnectError({
         agentId: def.agentId,
-        message: `The machine ACP agent '${def.agentId}' runs on cannot reattach to an agent.`,
+        message: `The subprocess adapter ACP agent '${def.agentId}' runs through cannot reattach to an agent.`,
       });
     }
-    const transport = await machine.attach(handle);
+    const transport = closingWith(await link.attach(handle), {
+      close,
+    });
     attached = transport;
     bridge = await openBridge(def, opts, {
-      reach: (address) => machine.reach(address),
+      reach: (address) => link.reach(address),
       reuse: bridgeOf(handle),
     });
     return await openAcpConnection({
       agentId: def.agentId,
-      transport: closingWith(transport, {
-        open: async () => transport,
-        reach: (address) => machine.reach(address),
-        close: () => machine.close(),
-      }),
+      transport,
       host: opts.host,
       signal,
       tools: bridge,
@@ -327,22 +387,12 @@ async function reattachTo(
     });
   } catch (e) {
     await bridge?.close();
-    await letGoOf(attached, machine);
+    // This host did not adopt the agent: let go of it, so it keeps running
+    // for a host that can — never stop it. Letting go closes the link.
+    await attached?.detach?.().catch(() => undefined);
+    await close().catch(() => undefined);
     throw e;
   }
-}
-
-/**
- * A reattach that failed before this host adopted the agent: let go of it, so
- * it keeps running for a host that can — never stop it. Only a machine that
- * reached nothing is closed.
- */
-async function letGoOf(attached: AcpTransport | undefined, machine: AcpMachine): Promise<void> {
-  if (attached?.detach) {
-    await attached.detach().catch(() => undefined);
-    return;
-  }
-  await machine.close().catch(() => undefined);
 }
 
 const BridgeCredentialsSchema = z.object({
@@ -356,20 +406,20 @@ function bridgeOf(handle: AcpReattachHandle): ToolBridgeCredentials | undefined 
   return parsed.success ? parsed.data : undefined;
 }
 
-/** The handle a later host reattaches with: the machine's, plus the bridge it must serve again. */
+/** The handle a later host reattaches with: the link's, plus the bridge it must serve again. */
 function reattachHandle(
-  machine: AcpReattachHandle | undefined,
+  handle: AcpReattachHandle | undefined,
   bridge: ToolBridge | undefined,
 ): AcpReattachHandle | undefined {
-  if (!machine) {
+  if (!handle) {
     return undefined;
   }
   return bridge
     ? {
-        ...machine,
+        ...handle,
         bridge: bridge.credentials,
       }
-    : machine;
+    : handle;
 }
 
 /** Start the tool bridge when the step gave tools, before the agent starts. */

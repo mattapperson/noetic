@@ -1,7 +1,7 @@
 /**
  * A stdio MCP server sees the same environment however it starts: as a local
  * subprocess of the MCP SDK's client (a `callModel` step's server), or through
- * an ACP agent's machine — this one, or a runner — beside the agent.
+ * an ACP agent — a local one, or one on a runner.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -9,9 +9,10 @@ import { join } from 'node:path';
 import type { Spawn } from '@noetic-tools/types';
 import { z } from 'zod';
 import type { AcpRunnerListener } from '../../acp/src/remote';
-import { listenAcpRunner, webSocketMachine } from '../../acp/src/remote';
+import { listenAcpRunner } from '../../acp/src/remote';
 import { spawnOn } from '../../acp/src/spawn';
-import { localMachine } from '../../acp/src/stdio';
+import { createLocalSubprocessAdapter } from '../../platform-node/src/local-subprocess-adapter';
+import { createWebSocketSubprocessAdapter } from '../../platform-node/src/runner-subprocess-adapters';
 import { mcp } from '../src/provider';
 import { connectOptions } from './_helpers';
 
@@ -85,12 +86,12 @@ describe('the environment a stdio MCP server starts with', () => {
     await listener.close();
   });
 
-  it('is the same locally, through this machine and through a runner, and holds none of the host’s secrets', async () => {
+  it('is the same locally, through the local adapter and through a runner, and holds none of the host’s secrets', async () => {
     const local = await serverEnvThrough(undefined);
-    const machine = await serverEnvThrough(spawnOn(localMachine()));
+    const beside = await serverEnvThrough(spawnOn(createLocalSubprocessAdapter()));
     const runner = await serverEnvThrough(
       spawnOn(
-        webSocketMachine({
+        createWebSocketSubprocessAdapter({
           url: listener.url,
           token: TOKEN,
         }),
@@ -98,7 +99,7 @@ describe('the environment a stdio MCP server starts with', () => {
     );
     expect(local.SERVER_SETTING).toBe('on');
     expect(local[HOST_SECRET]).toBeUndefined();
-    expect(machine).toEqual(local);
+    expect(beside).toEqual(local);
     expect(runner).toEqual(local);
     // It starts three servers, each a fresh process.
   }, 30e3);

@@ -3,9 +3,15 @@
  * that answers with the mark of the host that served it.
  */
 
-import type { AcpAgent, AcpClientHost, AcpToolHost } from '@noetic-tools/types';
+import type {
+  AcpAgentConnection,
+  AcpClientHost,
+  AcpConnectOptions,
+  AcpToolHost,
+} from '@noetic-tools/types';
+import { createLocalSubprocessAdapter } from '../../../platform-node/src/local-subprocess-adapter';
 import { claudeCode, codex } from '../../src/agents';
-import { MemoryFs, RecordingShell } from '../_helpers';
+import { MemoryFs, RecordingShell, through } from '../_helpers';
 
 export const LIVE_AGENTS = {
   'claude-code': claudeCode,
@@ -18,8 +24,15 @@ export function isLiveAgentId(id: string): id is LiveAgentId {
   return Object.hasOwn(LIVE_AGENTS, id);
 }
 
-export function liveAgent(id: LiveAgentId): AcpAgent {
-  return LIVE_AGENTS[id]();
+/** Connects the preset by hand, as a harness whose subprocess adapter is the local one would. */
+export function connectLive(
+  id: LiveAgentId,
+  opts: Omit<AcpConnectOptions, 'subprocess'>,
+): Promise<AcpAgentConnection> {
+  return LIVE_AGENTS[id]().connect({
+    ...opts,
+    subprocess: through(createLocalSubprocessAdapter()),
+  });
 }
 
 function textOf(args: unknown): string {

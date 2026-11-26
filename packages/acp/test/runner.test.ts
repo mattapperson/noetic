@@ -11,13 +11,17 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AgentHarness, execute, step, tool } from '@noetic-tools/core';
-import type { AcpMachineFactory, Item } from '@noetic-tools/types';
+import type { Item, SubprocessAdapter } from '@noetic-tools/types';
 import { isNoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
+import {
+  createCommandSubprocessAdapter,
+  createWebSocketSubprocessAdapter,
+} from '../../platform-node/src/runner-subprocess-adapters';
 import { codex, customAcpAgent } from '../src/agents';
 import { defineAcpAgent } from '../src/define';
 import type { AcpRunnerListener } from '../src/remote';
-import { commandMachine, listenAcpRunner, webSocketMachine } from '../src/remote';
+import { listenAcpRunner } from '../src/remote';
 import { claudeToolWiring } from '../src/tool-wiring';
 
 const FIXTURE = join(import.meta.dir, 'fixtures', 'tool-agent.ts');
@@ -41,13 +45,16 @@ interface Seen {
   env: string | null;
 }
 
-async function runAgent(machine: AcpMachineFactory): Promise<{
+async function runAgent(subprocess: SubprocessAdapter): Promise<{
   seen: Seen;
   items: Item[];
 }> {
   const ctx = new AgentHarness({
     name: 'runner',
     params: {},
+    environment: {
+      subprocess,
+    },
   }).createContext();
   const out = await execute(
     step.acpAgent({
@@ -63,7 +70,6 @@ async function runAgent(machine: AcpMachineFactory): Promise<{
             NOETIC_TOOL_AGENT_MARK: 'launched-remotely',
           },
         },
-        machine,
         tools: claudeToolWiring,
       }),
       prompt: 'call echo',
@@ -105,7 +111,7 @@ describe('remote runner over WebSocket', () => {
 
   it('serves the bridge on the runner, and the call matches callModel', async () => {
     const { seen, items } = await runAgent(
-      webSocketMachine({
+      createWebSocketSubprocessAdapter({
         url: listener.url,
         token: TOKEN,
       }),
@@ -122,16 +128,18 @@ describe('remote runner over WebSocket', () => {
   });
 
   it('refuses a wrong token', async () => {
-    const failure = await webSocketMachine({
+    const failure = await createWebSocketSubprocessAdapter({
       url: listener.url,
       token: 'wrong-token-wrong-token',
-    })({}).catch((e: unknown) => e);
+    })
+      .open({})
+      .catch((e: unknown) => e);
     expect(String(failure)).toContain('refused the connection');
   });
 
   it('refuses a plain ws:// URL off the loopback interface', () => {
     expect(() =>
-      webSocketMachine({
+      createWebSocketSubprocessAdapter({
         url: 'ws://build-host.example:7000',
         token: TOKEN,
       }),
@@ -162,11 +170,11 @@ describe('remote runner rules', () => {
       ],
     });
     try {
-      const machine = await webSocketMachine({
+      const link = await createWebSocketSubprocessAdapter({
         url: listener.url,
         token: TOKEN,
-      })({});
-      const failure = await machine
+      }).open({});
+      const failure = await link
         .launch({
           command: 'sh',
           args: [
@@ -176,7 +184,7 @@ describe('remote runner rules', () => {
         })
         .catch((e: unknown) => e);
       expect(String(failure)).toContain('does not start');
-      await machine.close();
+      await link.close();
     } finally {
       await listener.close();
     }
@@ -214,7 +222,7 @@ describe('remote runner rules', () => {
     try {
       expect(listener.url).toStartWith('wss://');
       const { seen } = await runAgent(
-        webSocketMachine({
+        createWebSocketSubprocessAdapter({
           url: listener.url,
           token: TOKEN,
           ca: readFileSync(cert, 'utf8'),
@@ -230,7 +238,7 @@ describe('remote runner rules', () => {
 describe('remote runner over stdio', () => {
   it('runs through a command that starts the runner, as ssh would', async () => {
     const { seen, items } = await runAgent(
-      commandMachine({
+      createCommandSubprocessAdapter({
         command: process.execPath,
         args: [
           BIN,
@@ -288,14 +296,11 @@ describe('attached transports', () => {
     ).toBe('ACP_TRANSPORT_CANNOT_REACH');
   });
 
-  it('a preset on a machine takes tools', () => {
+  it('a preset on a runner takes tools', () => {
     expect(
       codeFor(
         codex({
-          machine: webSocketMachine({
-            url: 'ws://127.0.0.1:1',
-            token: TOKEN,
-          }),
+          subprocess: 'runner',
         }),
       ),
     ).toBeUndefined();

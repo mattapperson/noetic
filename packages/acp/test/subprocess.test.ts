@@ -1,21 +1,29 @@
 /**
- * An agent's machine carries the tool bridge to the agent: the address it
- * reaches is the one the launch settings and `session/new` name, and the
- * machine is released with the connection.
+ * An agent's subprocess adapter carries the tool bridge to the agent: the
+ * address its link reaches is the one the launch settings and `session/new`
+ * name, and the link closes with the connection.
  */
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type * as acp from '@agentclientprotocol/sdk';
-import { AgentHarness, execute, step, tool } from '@noetic-tools/core';
-import type { AcpAgent, AcpMachine, AcpMachineFactory, SpawnCommand } from '@noetic-tools/types';
+import {
+  AgentHarness,
+  createInMemorySubprocessAdapter,
+  createLinkSubprocessAdapter,
+  execute,
+  step,
+  tool,
+} from '@noetic-tools/core';
+import type { AcpAgent, SpawnCommand, SubprocessAdapter } from '@noetic-tools/types';
 import { isNoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { gemini } from '../src/agents';
 import { defineAcpAgent } from '../src/define';
-import { localMachine } from '../src/stdio';
+import { openLocalLink } from '../src/stdio';
 import { claudeToolWiring, codexToolWiring } from '../src/tool-wiring';
-import { loopbackMachine } from '../src/transport-loopback';
+import { loopbackLink } from '../src/transport-loopback';
+import { through } from './_helpers';
 
 const echo = tool({
   name: 'echo',
@@ -76,18 +84,18 @@ function quietAgent(
   };
 }
 
-/** A loopback machine whose `reach` marks the address, as a remote one rewrites it. */
-function markingMachine(log: Seen, fail = false): AcpMachineFactory {
-  const inner = loopbackMachine(quietAgent(log));
-  return async (opts): Promise<AcpMachine> => {
-    const machine = await inner(opts);
+/** A loopback adapter whose `reach` marks the address, as a remote one rewrites it. */
+function marking(log: Seen, fail = false): SubprocessAdapter {
+  const open = loopbackLink(quietAgent(log));
+  return createLinkSubprocessAdapter(async (opts) => {
+    const link = await open(opts);
     return {
-      ...machine,
+      ...link,
       async reach(bridge) {
         if (fail) {
           throw new Error('no route to the bridge');
         }
-        const url = `${bridge.url}?via=machine`;
+        const url = `${bridge.url}?via=link`;
         log.reached.push(url);
         return {
           ...bridge,
@@ -96,13 +104,16 @@ function markingMachine(log: Seen, fail = false): AcpMachineFactory {
       },
       async close() {
         log.closed += 1;
-        await machine.close();
+        await link.close();
       },
     };
-  };
+  });
 }
 
-async function runWithTools(machine: AcpMachineFactory, wiring = claudeToolWiring): Promise<void> {
+async function runWithTools(
+  subprocess: SubprocessAdapter,
+  wiring = claudeToolWiring,
+): Promise<void> {
   await runAgent(
     defineAcpAgent({
       agentId: 'remote',
@@ -112,16 +123,19 @@ async function runWithTools(machine: AcpMachineFactory, wiring = claudeToolWirin
           '--acp',
         ],
       },
-      machine,
       tools: wiring,
     }),
+    subprocess,
   );
 }
 
-async function runAgent(agent: AcpAgent): Promise<void> {
+async function runAgent(agent: AcpAgent, subprocess: SubprocessAdapter): Promise<void> {
   const ctx = new AgentHarness({
-    name: 'machine',
+    name: 'subprocess',
     params: {},
+    environment: {
+      subprocess,
+    },
   }).createContext();
   await execute(
     step.acpAgent({
@@ -137,10 +151,10 @@ async function runAgent(agent: AcpAgent): Promise<void> {
   );
 }
 
-describe('AcpMachine', () => {
+describe('an agent subprocess adapter', () => {
   it('names the reached address in session/new and launches the command there', async () => {
     const log = seen();
-    await runWithTools(markingMachine(log));
+    await runWithTools(marking(log));
     expect(log.reached).toHaveLength(1);
     const server = log.servers.find((s) => s.name === 'noetic');
     assert(server && 'type' in server && server.type === 'http');
@@ -158,70 +172,73 @@ describe('AcpMachine', () => {
 
   it('gives launch settings the reached address', async () => {
     const log = seen();
-    await runWithTools(markingMachine(log), codexToolWiring);
+    await runWithTools(marking(log), codexToolWiring);
     const config = log.commands[0]?.env?.CODEX_CONFIG;
     assert(config);
-    expect(config).toContain('?via=machine');
+    expect(config).toContain('?via=link');
     expect(log.servers).toHaveLength(0);
   });
 
   it('trusts the Gemini workspace only when asked, and refuses tools without it', async () => {
     const untrusted = seen();
-    const refusal = await runAgent(
-      gemini({
-        machine: markingMachine(untrusted),
-      }),
-    ).catch((e: unknown) => e);
+    const refusal = await runAgent(gemini(), marking(untrusted)).catch((e: unknown) => e);
     assert(isNoeticConfigError(refusal));
     expect(refusal.code).toBe('ACP_AGENT_CANNOT_TAKE_TOOLS');
     expect(untrusted.commands).toHaveLength(0);
     const trusted = seen();
     await runAgent(
       gemini({
-        machine: markingMachine(trusted),
         trustWorkspace: true,
       }),
+      marking(trusted),
     );
     expect(trusted.commands[0]?.env?.GEMINI_CLI_TRUST_WORKSPACE).toBe('true');
     expect(trusted.servers.map((server) => server.name)).toContain('noetic');
   });
 
-  it('releases the machine and the bridge when reach fails', async () => {
+  it('closes the link and the bridge when reach fails', async () => {
     const log = seen();
-    const failure = await runWithTools(markingMachine(log, true)).catch((e: unknown) => e);
+    const failure = await runWithTools(marking(log, true)).catch((e: unknown) => e);
     expect(failure).toBeInstanceOf(Error);
     expect(String(failure)).toContain('no route to the bridge');
     expect(log.commands).toHaveLength(0);
     expect(log.closed).toBe(1);
   });
 
-  it('a loopback machine runs no processes', async () => {
-    const machine = await loopbackMachine(quietAgent(seen()))({});
-    const failure = await machine
+  it('loopbackLink() runs no processes', async () => {
+    const link = await loopbackLink(quietAgent(seen()))({});
+    const failure = await link
       .spawn({
         command: 'docs-mcp',
       })
       .catch((e: unknown) => e);
     expect(String(failure)).toContain('docs-mcp');
   });
+
+  it('refuses an agent whose adapter has no open', async () => {
+    const refusal = await runWithTools(createInMemorySubprocessAdapter()).catch((e: unknown) => e);
+    assert(isNoeticConfigError(refusal));
+    expect(refusal.code).toBe('SUBPROCESS_CANNOT_OPEN');
+    expect(refusal.hint).toContain('createLocalSubprocessAdapter()');
+  });
 });
 
-describe('localMachine', () => {
+describe('openLocalLink', () => {
   it('without a keeper, reaches the bridge where it listens', async () => {
-    const machine = await localMachine('local', {
+    const link = await openLocalLink({
       keeper: false,
-    })({});
+    });
     const bridge = {
       serverName: 'noetic',
       url: 'http://127.0.0.1:9/mcp/x',
       headers: [],
     };
-    expect(await machine.reach(bridge)).toBe(bridge);
-    await machine.close();
+    expect(await link.reach(bridge)).toBe(bridge);
+    await link.close();
   });
 
   it("with its keeper, reaches the bridge on the keeper's own port, same path and headers", async () => {
-    const machine = await localMachine()({});
+    const link = await openLocalLink();
     const bridge = {
       serverName: 'noetic',
       url: 'http://127.0.0.1:9/mcp/x',
@@ -232,18 +249,18 @@ describe('localMachine', () => {
         },
       ],
     };
-    const reached = await machine.reach(bridge);
+    const reached = await link.reach(bridge);
     const url = new URL(reached.url);
     expect(url.hostname).toBe('127.0.0.1');
     expect(url.port).not.toBe('9');
     expect(url.pathname).toBe('/mcp/x');
     expect(reached.headers).toEqual(bridge.headers);
-    await machine.close();
+    await link.close();
   });
 
   it('spawns a process beside the agent and carries its stdio', async () => {
-    const machine = await localMachine()({});
-    const process = await machine.spawn({
+    const link = await openLocalLink();
+    const process = await link.spawn({
       command: 'cat',
     });
     const writer = process.writable.getWriter();
@@ -253,33 +270,40 @@ describe('localMachine', () => {
     expect(new TextDecoder().decode(chunk.value)).toBe('ping\n');
     reader.releaseLock();
     writer.releaseLock();
-    await machine.close();
+    await link.close();
   });
 });
 
 describe('AcpAgent.spawn', () => {
-  it("starts a process on the agent's own machine, and none for an attached agent", async () => {
+  it("starts a process through the harness's adapter, and none for an attached agent", async () => {
     const spawned: SpawnCommand[] = [];
     const agent = defineAcpAgent({
       agentId: 'spawning',
       command: {
         command: 'agent',
       },
-      machine: async (opts) => {
-        const machine = await localMachine()(opts);
+    });
+    const subprocess = through(
+      createLinkSubprocessAdapter(async (opts) => {
+        const link = await openLocalLink({}, opts);
         return {
-          ...machine,
+          ...link,
           spawn: async (command) => {
             spawned.push(command);
-            return await machine.spawn(command);
+            return await link.spawn(command);
           },
         };
-      },
-    });
+      }),
+    );
     assert(agent.spawn);
-    const process = await agent.spawn({
-      command: 'cat',
-    });
+    const process = await agent.spawn(
+      {
+        command: 'cat',
+      },
+      {
+        subprocess,
+      },
+    );
     const writer = process.writable.getWriter();
     await writer.write(new TextEncoder().encode('pong\n'));
     const reader = process.readable.getReader();

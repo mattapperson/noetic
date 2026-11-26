@@ -40,6 +40,7 @@ export function contextToExecCtx(ctx: Context, overrides?: ExecCtxOverrides): Ex
     cost: overrides?.cost ?? ctx.cost,
     fs: ctx.harness.fs,
     shell: ctx.harness.shell,
+    adapters: ctx.harness.adapters,
     callModel: overrides?.callModel,
     approve: approverOf(ctx),
     tokenize: estimateTokens,

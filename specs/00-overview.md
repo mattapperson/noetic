@@ -24,7 +24,7 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
         ↑                        ↑
 @noetic-tools/core  ←  @noetic-tools/eval
       ↑
-      ├── @noetic-tools/platform-node
+      ├── @noetic-tools/platform-node  →  @noetic-tools/acp
       ├── @noetic/platform-browser
       └── @noetic-tools/platform-cloudflare-worker
 
@@ -35,21 +35,21 @@ The insight: six patterns (ReAct, Ralph Wiggum, Task Trees, A2A, Recursive LLMs,
 @noetic-tools/verify  →  @noetic-tools/types  (+ open-verification)
 ```
 
-`@noetic-tools/core` depends only on the `AcpAgent` *type* in `@noetic-tools/types`; it never imports `@noetic-tools/acp` (the dependency edge above runs client → contract, never core → client).
+`@noetic-tools/core` depends only on the `AcpAgent` *type* in `@noetic-tools/types`; it never imports `@noetic-tools/acp` (the dependency edge above runs client → contract, never core → client). `@noetic-tools/platform-node` is the one platform package that depends on `@noetic-tools/acp`: its local subprocess adapter opens links with the keeper there.
 
-- **`@noetic-tools/types`** — The dependency-free foundation. Owns the conversation `Item` data model, LLM config (`LlmProviderConfig`, `ModelParams`, `LLMResponse`, `TokenUsage`), execution context + steering contracts, the platform adapter interfaces (`FsAdapter`, `ShellAdapter`, `SubprocessAdapter`, `ArtifactStore`), the error model (`NoeticErrorImpl`), the `Item` schema, and the `ContextLayer` contract (`types/context-layer.ts`, also exposed at the `@noetic-tools/types/contract` subpath). Depends on nothing in the workspace.
+- **`@noetic-tools/types`** — The dependency-free foundation. Owns the conversation `Item` data model, LLM config (`LlmProviderConfig`, `ModelParams`, `LLMResponse`, `TokenUsage`), execution context + steering contracts, the platform adapter interfaces (`FsAdapter`, `ShellAdapter`, `SubprocessAdapter`, `ArtifactStore`), the frames a host and a remote runner exchange (`HostFrame`, `RunnerFrame`, `FrameLink`), the error model (`NoeticErrorImpl`), the `Item` schema, and the `ContextLayer` contract (`types/context-layer.ts`, also exposed at the `@noetic-tools/types/contract` subpath). Depends on nothing in the workspace.
 
 - **`@noetic-tools/context`** — The context layer system: lifecycle, budget allocation, projector/view assembly (`assembleView`, `allocateBudgets`), scope/storage helpers, and the built-in layer factories. Depends only on `@noetic-tools/types`; re-exports the `ContextLayer` contract so it is the one-stop import for context-layer authoring.
 
 - **`@noetic-tools/core`** — Step primitives and execution infrastructure. Runtime-agnostic: no `node:*` imports, no browser-only APIs. Depends on `@noetic-tools/types` and `@noetic-tools/context` and re-exports their public surface, so every symbol importable from `@noetic-tools/core` (including the `ContextLayer` contract and built-in layers) stays importable from it. The context subsystem remains tree-shakable because it has no transitive dependency on the interpreter or runtime modules.
 
-- **`@noetic-tools/platform-node`** — Node.js ≥ 20 concrete adapter implementations: local filesystem, local shell, local subprocess, durable IPC, agent-ipc server/client, step bootstrap. Consumed by `@noetic-tools/cli`, `@noetic-tools/code-agent`, and any Node-target user code. See `25-platform-packages`.
+- **`@noetic-tools/platform-node`** — Node.js ≥ 20 concrete adapter implementations: local filesystem, local shell, the local subprocess adapter (steps, commands, and processes whose stdio the caller holds, such as an ACP agent), subprocess adapters that reach a remote runner by WebSocket or by a command's stdio, durable IPC, agent-ipc server/client, step bootstrap. Depends on `@noetic-tools/core` and `@noetic-tools/acp`. Consumed by `@noetic-tools/cli`, `@noetic-tools/code-agent`, and any Node-target user code. See `25-platform-packages`.
 
 - **`@noetic/platform-browser`** — Browser / edge-runtime glue: runtime-neutral adapter re-exports. Contains no `node:*` imports. See `25-platform-packages`.
 
-- **`@noetic-tools/platform-cloudflare-worker`** — Cloudflare Workers: storage with `swap` over D1 and a Durable Object's SQLite, an event endpoint, two presets that wake parked turns (a Durable Object alarm, a Cloudflare Workflow per turn), and Cron Trigger ticks as a turn of a Durable Object's harness or as a scan. Contains no `node:*` imports and imports no Cloudflare package. See `25-platform-packages`.
+- **`@noetic-tools/platform-cloudflare-worker`** — Cloudflare Workers: storage with `swap` over D1 and a Durable Object's SQLite, an event endpoint, two presets that wake parked turns (a Durable Object alarm, a Cloudflare Workflow per turn), and subprocess adapters that reach a remote runner over a WebSocket (one a Durable Object accepted, or one a Worker dials), and Cron Trigger ticks as a turn of a Durable Object's harness or as a scan. Contains no `node:*` imports and imports no Cloudflare package. See `25-platform-packages`.
 
-- **`@noetic-tools/acp`** — Both directions of the Agent Client Protocol. The client side lets any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, …) run as a Noetic step: the protocol library, capability negotiation, the session/turn drivers, the client-side `fs/*` + `terminal/*` + permission handlers backed by Noetic's own adapters, the transports (stdio, loopback), and the agent presets (`27-acp-agent-steps`). The server side (`toAcpAgent()`, `serveAcp()` at `./server`) exposes an `AgentHarness` *as* an ACP agent so editors like Zed can drive it (`30-acp-server`). Depends only on `@noetic-tools/types` — never on `@noetic-tools/core`.
+- **`@noetic-tools/acp`** — Both directions of the Agent Client Protocol. The client side lets any ACP-speaking coding agent (Claude Code, Codex, Gemini CLI, …) run as a Noetic step: the protocol library, capability negotiation, the session/turn drivers, the client-side `fs/*` + `terminal/*` + permission handlers backed by Noetic's own adapters, the transports (stdio, loopback), the keeper and the remote runner's server, and the agent presets (`27-acp-agent-steps`). It exports no subprocess adapter: those live in core and the platform packages, which open their links with what this package exports. The server side (`toAcpAgent()`, `serveAcp()` at `./server`) exposes an `AgentHarness` *as* an ACP agent so editors like Zed can drive it (`30-acp-server`). Depends only on `@noetic-tools/types` — never on `@noetic-tools/core`.
 
 - **`@noetic-tools/agent-plugins`** — An [Agent Plugins](https://agent-plugins.org) v1 client: discovers plugin packages (a closed `plugin.json` manifest plus the two portable component types, Agent Skills and MCP servers) and exposes skills through the `agentPlugins()` context layer using the spec's progressive disclosure model. `pluginConnections()` turns plugin MCP servers into `mcp()` connection entries (`expose: 'call'`) for the harness or a turn. Depends on `@noetic-tools/mcp` and `@noetic-tools/types` — never on `@noetic-tools/core` or `@noetic-tools/context`. See `30-agent-plugins`.
 

@@ -21,6 +21,7 @@ import type {
   SessionScope,
   SteeringDecision,
   StorageAdapter,
+  SubprocessChoice,
   Tool,
   ToolApprover,
 } from '@noetic-tools/types';
@@ -73,6 +74,7 @@ export interface HarnessConnectionsOptions {
   readonly storage: StorageAdapter;
   readonly artifacts: ArtifactStore;
   readonly secrets?: SecretResolver;
+  readonly subprocess?: SubprocessChoice;
   /** Every session broadcaster, for events that concern no one context. */
   readonly broadcasters: () => Iterable<EventBroadcaster>;
 }
@@ -276,6 +278,7 @@ export function createHarnessConnections(options: HarnessConnectionsOptions): Ha
     storage: options.storage,
     artifacts: options.artifacts,
     secrets: options.secrets,
+    subprocess: options.subprocess,
     hooks: gateHooks(options.harness),
     onFrameworkEvent: (event) => broadcast(options, event),
   });

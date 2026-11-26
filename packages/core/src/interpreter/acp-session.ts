@@ -16,7 +16,11 @@ import type {
 } from '@noetic-tools/types';
 import { frameworkCast, isAcpConnectError, NoeticConfigError } from '@noetic-tools/types';
 import { runtimeOf } from '../connections/model-tools';
-import type { AcpLiveSession, AcpSessionStore } from '../runtime/acp-session-store';
+import type {
+  AcpAdapterNames,
+  AcpLiveSession,
+  AcpSessionStore,
+} from '../runtime/acp-session-store';
 import { acpSessionsOf } from '../runtime/acp-session-store';
 import type { AcpToolRunner } from './acp-tools';
 import { resolveLazy } from './action-tools';
@@ -309,6 +313,8 @@ export async function openSession<TContext, I, O>(opts: {
   /** The fingerprint that earlier attempt's session was opened with. */
   fingerprint?: string;
   settings: SessionSettings;
+  /** The harness adapters the step uses. */
+  adapters: AcpAdapterNames;
 }): Promise<SessionResolution> {
   let resumed = false;
   let reattached = false;
@@ -319,6 +325,7 @@ export async function openSession<TContext, I, O>(opts: {
     keepAlive,
     rootId: rootContextId(opts.baseCtx),
     reuseKey,
+    adapters: opts.adapters,
   };
   // Registered under a key even without `session.reuse`: anything kept past
   // its step has to be reachable, or nothing can ever close it.
@@ -329,6 +336,10 @@ export async function openSession<TContext, I, O>(opts: {
       host: opts.host,
       signal: abortSignalOf(opts.baseCtx),
       whenHostExits: whenHostExitsOf(opts.baseCtx),
+      subprocess: {
+        adapters: opts.baseCtx.adapters.subprocess,
+        name: opts.step.subprocess,
+      },
     };
     const kept = await reattachTo(opts.agent, connectOptions, {
       reattach: opts.reattach,

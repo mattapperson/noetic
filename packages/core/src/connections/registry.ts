@@ -42,6 +42,7 @@ import type {
   SecretResolver,
   StorageAdapter,
   StreamChangedEventData,
+  SubprocessChoice,
   TriggerGaveUpEventData,
 } from '@noetic-tools/types';
 import type { AttachedEntry, AttachedScope } from '../types/connection-entry';
@@ -97,6 +98,8 @@ export interface ConnectionRuntimeOptions {
   readonly storage: StorageAdapter;
   readonly artifacts: ArtifactStore;
   readonly secrets?: SecretResolver;
+  /** The harness's subprocess adapters, handed to providers as they connect. */
+  readonly subprocess?: SubprocessChoice;
   readonly hooks?: GateHooks;
   readonly onFrameworkEvent?: (event: ConnectionFrameworkEventRecord) => void;
   /** Profiles known up front (from the graph's handles); handles add theirs when they resolve. */
@@ -127,7 +130,8 @@ export interface ConnectionRuntime extends ConnectionRegistry {
    * provider and options is that connection; it is not connected twice.
    *
    * @throws NoeticConfigError `CONNECTION_NAME_TAKEN` when a name is held with a
-   * different provider or options, `CONNECTION_INVALID` for a malformed entry
+   * different provider or options, or by a step on another subprocess
+   * adapter, `CONNECTION_INVALID` for a malformed entry
    * or one that sets `pool`.
    */
   attach(root: Context, entries: ReadonlyArray<AttachedEntry>): Promise<void>;
@@ -237,6 +241,8 @@ interface Entry {
   readonly home: Map<string, Entry>;
   /** The turn's root context, for an attached entry: its events go to that turn. */
   readonly root?: Context;
+  /** See `AttachedEntry.subprocess`. */
+  readonly subprocess?: string;
   readonly viewed: boolean;
   readonly pool?: ConnectionPool;
   connection?: Connection;
@@ -573,7 +579,10 @@ class Runtime implements ConnectionRuntime {
     }
     const held = this.entries.get(entry.name) ?? attachment.entries.get(entry.name);
     if (held) {
-      if (!sameConfig(held.config, entry.config)) {
+      // A connection a step attached runs its process where that step's
+      // agent runs, so a step on another subprocess adapter cannot share it.
+      const elsewhere = held.home === attachment.entries && held.subprocess !== entry.subprocess;
+      if (!sameConfig(held.config, entry.config) || elsewhere) {
         throw nameTakenError(entry.name, entry.where, held.scope);
       }
       return [];
@@ -584,6 +593,11 @@ class Runtime implements ConnectionRuntime {
       scope: entry.scope,
       home: attachment.entries,
       root,
+      ...(entry.subprocess === undefined
+        ? {}
+        : {
+            subprocess: entry.subprocess,
+          }),
       viewed: entry.viewed === true && entry.config.expose !== 'call',
       state: 'connecting',
       effects: 0,
@@ -883,6 +897,17 @@ class Runtime implements ConnectionRuntime {
     return entry.connecting;
   }
 
+  /** The harness's subprocess adapters, with the one the entry's step names put first. */
+  private subprocessFor(entry: Entry): SubprocessChoice | undefined {
+    const choice = this.options.subprocess;
+    return choice && entry.subprocess !== undefined
+      ? {
+          ...choice,
+          name: entry.subprocess,
+        }
+      : choice;
+  }
+
   private async connect(entry: Entry): Promise<void> {
     this.setState(entry, 'connecting');
     try {
@@ -895,6 +920,7 @@ class Runtime implements ConnectionRuntime {
         ],
         redact: this.redact,
         secrets: this.options.secrets,
+        subprocess: this.subprocessFor(entry),
       });
       if (entry.state === 'closed') {
         await runEvery(connections.map((connection) => () => connection.release()));
@@ -1047,6 +1073,7 @@ class Runtime implements ConnectionRuntime {
         ],
         redact: this.redact,
         secrets: this.options.secrets,
+        subprocess: this.options.subprocess,
       }),
       onLease: (lease, change) => this.emitLease(name, lease, change),
     });

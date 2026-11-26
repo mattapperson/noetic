@@ -1,5 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import path from 'node:path';
+import type { LocalLinkOptions } from '@noetic-tools/acp/stdio';
+import { openLocalLink } from '@noetic-tools/acp/stdio';
 import type {
   ProcessSubprocessRequest,
   SpawnedSubprocess,
@@ -9,6 +11,7 @@ import type {
   SubprocessControlResult,
   SubprocessHandle,
   SubprocessHandleMetadata,
+  SubprocessOpen,
   SubprocessRequest,
   SubprocessStopResult,
 } from '@noetic-tools/core';
@@ -25,9 +28,19 @@ import type { LocalSpawnFn } from './local-subprocess/step-spawner';
 import { spawnStepChild } from './local-subprocess/step-spawner';
 import type { ProcessSignaller } from './local-subprocess/types';
 
+export type {
+  LocalAgentCommand,
+  LocalAgentProcess,
+  LocalWrapInfo,
+} from '@noetic-tools/acp/stdio';
 export type { ProcessSignaller, SubprocessSignal } from './local-subprocess/types';
 
-export interface CreateLocalSubprocessAdapterOptions {
+/**
+ * Options for {@link createLocalSubprocessAdapter}. Those of
+ * `LocalLinkOptions` (`keeper`, `detachedTimeoutMs`, `wrap`, `onStderr`,
+ * `onLaunch`, `agentId`) shape the processes `open` holds.
+ */
+export interface CreateLocalSubprocessAdapterOptions extends LocalLinkOptions {
   spawnFn?: LocalSpawnFn;
   signaller?: ProcessSignaller;
   /**
@@ -167,9 +180,17 @@ function buildProcessMetadata(
 
 //#region Factory
 
+/**
+ * Runs everything on this machine: steps in a child Noetic runtime (or in
+ * this process, without a `registryEntry`), commands to completion, and
+ * processes whose stdio the caller holds (`open`) — an ACP agent, run through
+ * a keeper so it can outlive this host, and the stdio MCP servers beside it.
+ */
 export function createLocalSubprocessAdapter(
   options: CreateLocalSubprocessAdapterOptions = {},
-): SubprocessAdapter {
+): SubprocessAdapter & {
+  open: SubprocessOpen;
+} {
   const signaller = options.signaller ?? defaultProcessSignaller;
   const spawnFn: LocalSpawnFn =
     options.spawnFn ?? ((command, args, opts) => spawn(command, args.slice(), opts));
@@ -422,6 +443,7 @@ export function createLocalSubprocessAdapter(
   }
 
   return {
+    open: (linkOptions) => openLocalLink(options, linkOptions),
     async spawn(request) {
       if (isStepRequest(request)) {
         return spawnStepHandle(request);

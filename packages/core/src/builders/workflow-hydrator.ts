@@ -16,6 +16,7 @@ import type {
   ExecuteStepFn,
   McpAllowlist,
   OutputCodec,
+  RunCodeGrant,
   Step,
   SubprocessAdapter,
   Tool,
@@ -93,11 +94,19 @@ export interface HydrationContext {
    */
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   /**
-   * Resolves a named subprocess adapter ref declared on a `runCode` node's
-   * `subprocess` field. When a node omits the ref, the step falls back to
-   * `ctx.subprocess` at execution time.
+   * Resolves the name a `runCode` node's `subprocess` field gives. A name it
+   * does not know is looked up among the harness's subprocess adapters, when
+   * `runCodeBounds` allows it; a node that names none runs through
+   * `ctx.subprocess`.
    */
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
+  /**
+   * What `runCode` nodes are held to when the host did not write the
+   * document: the harness subprocess adapters they may name. Set by
+   * `parseAndRunWorkflow` and `dynamicWorkflow`, dropped for named subflow
+   * refs, which the host wrote. Callers never set it.
+   */
+  runCodeBounds?: RunCodeGrant;
   /**
    * Named sub-workflow documents that `subflow` nodes resolve via `ref`.
    * Resolution is lazy (first execution), so a live map view may gain
@@ -268,6 +277,7 @@ function hydrateInvokeToolNode(
           harness: execCtx.harness,
           fs: execCtx.fs,
           shell: execCtx.shell,
+          adapters: execCtx.adapters,
           context: layerState,
           assembledView: execCtx.itemLog.items,
           lastStepMeta: execCtx.lastStepMeta,

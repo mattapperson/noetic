@@ -25,6 +25,9 @@ interface Context<TContext = ContextData, TState = unknown> {
   readonly resourceId?: string;
   readonly harness: AgentHarness;
   readonly fs: FsAdapter;
+  readonly shell: ShellAdapter;
+  readonly subprocess: SubprocessAdapter;
+  readonly adapters: AdapterSets;
   readonly itemLog: ItemLog;
   readonly lastStepMeta: StepMeta | null;
   readonly lastLayerUsage?: LastLayerUsage;
@@ -58,7 +61,10 @@ interface Context<TContext = ContextData, TState = unknown> {
 | `threadId` | `string` | Thread identifier for context scoping |
 | `resourceId` | `string` | Resource identifier for context scoping (optional) |
 | `harness` | `AgentHarness` | Reference to the owning agent harness. Access params via `ctx.harness.config.params`. |
-| `fs` | `FsAdapter` | Filesystem adapter delegated from `ctx.harness.fs`. Use for all filesystem operations inside steps and tools. |
+| `fs` | `FsAdapter` | Filesystem adapter delegated from `ctx.harness.fs`: the default one. Use for all filesystem operations inside steps and tools. |
+| `shell` | `ShellAdapter` | The default shell adapter, from `ctx.harness.shell`. |
+| `subprocess` | `SubprocessAdapter` | The default subprocess adapter, from `ctx.harness.subprocess`. |
+| `adapters` | `AdapterSets` | Every `fs`, `shell` and `subprocess` adapter the harness has, by name. `adapters.fs.get('builder')` returns a named one, `get()` the default, `defaultName` its name, and `list()` each one's `{ name, displayName?, description?, default }`. See [Named adapters](/docs/framework/runtime#named-adapters). |
 | `itemLog` | `ItemLog` | Conversation history |
 | `lastStepMeta` | `StepMeta \| null` | Metadata from the last executed step |
 | `lastLayerUsage` | `LastLayerUsage \| undefined` | Per-context-layer breakdown of the context window from the most recent `callModel`. Undefined until the first LLM call completes. |

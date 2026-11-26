@@ -102,11 +102,95 @@ const harness = new AgentHarness({
 | `storage.checkpointStore` | `CheckpointStore` | a store over `storage.adapter` | Store used by `checkpoint()` / `restore()`. Defaults to one over `storage.adapter` when an adapter is given, so durable storage alone makes runs resumable on a new harness. The harness `durability: false` option turns it off; with no adapter and no store, checkpoint/restore are no-ops. See [Durability](/docs/framework/durability). |
 | `storage.layerStateStore` | `LayerStateStore` | in-memory store | Backing store for context layer state. |
 | `storage.stepLedgerRetention` | `StepLedgerRetention` | `{ maxEntryBytes: 131072, maxEntries: 1000 }` | Bounds on the step-completion ledger that backs step-level resume. Only meaningful when durability is on. A non-positive cap throws `NoeticConfigError` (`STEP_LEDGER_RETENTION_INVALID`) at construction. See [Durability](/docs/framework/durability#step-level-resume). |
-| `fs` | `FsAdapter` | in-memory | Filesystem adapter exposed as `harness.fs`. Context layers, tools, and skill discovery all route through this adapter. Pass `createLocalFsAdapter()` from `@noetic-tools/platform-node` for real disk access. |
-| `shell` | `ShellAdapter` | in-memory | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. `createLocalShellAdapter()` runs raw `sh -c`; pass `createLocalShellAdapter({ useRtk: true })` to wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. The `@noetic-tools/cli` package enables this by default (controlled by `shell.useRtk` in `noetic.config.ts`). |
-| `subprocess` | `SubprocessAdapter` | in-memory | Adapter used to dispatch every `runCode`, `spawn`, and `detachedSpawn`. Set to `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. See [Durability](/docs/framework/durability). |
+| `fs` | `FsAdapter`, or [several by name](#named-adapters) | in-memory | Filesystem adapter exposed as `harness.fs`. Context layers, tools, and skill discovery all route through this adapter. Pass `createLocalFsAdapter()` from `@noetic-tools/platform-node` for real disk access. |
+| `shell` | `ShellAdapter`, or [several by name](#named-adapters) | in-memory | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. `createLocalShellAdapter()` runs raw `sh -c`; pass `createLocalShellAdapter({ useRtk: true })` to wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. The `@noetic-tools/cli` package enables this by default (controlled by `shell.useRtk` in `noetic.config.ts`). |
+| `subprocess` | `SubprocessAdapter`, or [several by name](#named-adapters) | in-memory | Where the harness's processes run: every `runCode`, `spawn`, and `detachedSpawn`, and every [ACP agent](/docs/framework/acp-agents#where-the-agent-runs). The in-memory default runs steps in this process and cannot hold a process's stdio, so a harness that runs an ACP agent sets `createLocalSubprocessAdapter()` from `@noetic-tools/platform-node`. `createLocalSubprocessAdapter({storage})` runs children out-of-process with durable handle manifests. See [Durability](/docs/framework/durability). |
 | `secrets` | `SecretResolver` | `undefined` | Resolves `secret('name')` values immediately before a connection call is sent. See [Connections](/docs/framework/connections#values). |
 | `artifacts` | `ArtifactStore` | in-memory | Where binary content — screenshots, recordings, verification runs — is stored. Pass `createFileArtifactStore({ dir })` from [`@noetic-tools/platform-node`](/docs/framework/platform-packages#file-artifact-store) for disk. |
+
+### Named adapters
+
+`fs`, `shell` and `subprocess` each take one adapter, or several by name: a laptop and a build host, a checkout and a scratch directory. Each named adapter may carry a `displayName` and a `description`. With several, mark exactly one `default: true`.
+
+```ts
+import { AgentHarness, createInMemoryFsAdapter } from '@noetic-tools/core';
+import {
+  createLocalFsAdapter,
+  createLocalShellAdapter,
+  createLocalSubprocessAdapter,
+  createWebSocketSubprocessAdapter,
+} from '@noetic-tools/platform-node';
+
+const harness = new AgentHarness({
+  name: 'my-agent',
+  params: {},
+  environment: {
+    // One unnamed adapter.
+    shell: createLocalShellAdapter(),
+    // Several, by name.
+    subprocess: {
+      laptop: { adapter: createLocalSubprocessAdapter(), default: true },
+      builder: {
+        adapter: createWebSocketSubprocessAdapter({ url: 'wss://build-host:7000', token: process.env.RUNNER_TOKEN ?? '' }),
+        displayName: 'Build host',
+        description: 'Linux, 64 cores',
+      },
+    },
+    fs: {
+      laptop: { adapter: createLocalFsAdapter(), default: true },
+      scratch: { adapter: createInMemoryFsAdapter() },
+    },
+  },
+});
+
+const ctx = harness.createContext();
+
+ctx.fs;                          // the default: laptop
+ctx.adapters.fs.get('scratch');  // a named one
+ctx.adapters.fs.get();           // the default
+ctx.adapters.fs.defaultName;     // 'laptop'
+ctx.adapters.fs.list();          // [{ name: 'laptop', default: true }, { name: 'scratch', default: false }]
+ctx.adapters.shell.get('default'); // one unnamed adapter goes by 'default'
+```
+
+- **The default is what you already use.** `harness.fs`, `harness.shell`, `harness.subprocess`, the same three on a `Context`, and `fs` and `shell` in a tool's or a layer's context are each kind's default. Code that names no adapter works as before.
+- **`adapters` has all of them.** `harness.adapters`, `ctx.adapters`, a tool's `toolCtx.adapters` and a layer hook's `ctx.adapters` each expose `fs`, `shell` and `subprocess` sets with `get(name?)`, `defaultName` and `list()`.
+- **One unnamed adapter is called `'default'`.** `get('default')` returns it and `list()` returns one entry. A kind you leave out is the in-memory adapter under that name.
+- **A set of one needs no mark.** Its only entry is always the default, so `default: false` on it is refused (`ADAPTER_DEFAULT_MISSING`).
+- **`default` names the default.** In a named set, only the default entry may be called `default`, so `get('default')` and `get()` never give different adapters. Any other entry of that name is refused (`ADAPTER_INVALID`).
+- **`list()` is frozen.** It returns the same frozen array of frozen entries on every call. Writing to it throws a `TypeError`, and nothing a caller does changes the default.
+- **`environment.fs`, `environment.shell` and `environment.subprocess` are a union**: an adapter, or a named set. Code that read `environment.fs.readFile` reads `harness.fs`, or `harness.adapters.fs.get(name)`, instead.
+- **Names stay in this process.** A step the local adapter runs out of process gets a child harness with in-memory adapters only. See [Out-of-process children](/docs/framework/operators/spawn#out-of-process-children).
+
+A tool picks an adapter by asking for it:
+
+```ts
+import { tool } from '@noetic-tools/core';
+import { z } from 'zod';
+
+const readOn = tool({
+  name: 'read_on',
+  description: 'Read a file on a named filesystem',
+  input: z.object({ on: z.string(), path: z.string() }),
+  output: z.object({ text: z.string() }),
+  execute: async ({ on, path }, toolCtx) => ({
+    text: await toolCtx.adapters.fs.get(on).readFileText(path),
+  }),
+});
+```
+
+An [ACP step](/docs/framework/acp-agents#where-the-agent-runs) names the adapters its agent uses (`subprocess`, `fs`, `shell`), `acpAgentTool()` takes the same three names, and an agent preset names a subprocess adapter — a name, never an adapter object. A JSON [`runCode` node](/docs/framework/json-runtime#runcode) names a subprocess adapter; in a document you did not write, only one your `runCode` grant lists. A `callModel` step runs on the defaults; its tools and layers reach a named adapter through `adapters`. `spawn`, `runCode` and `detachedSpawn` steps still take an adapter object.
+
+The harness checks the three when it is built, and throws a `NoeticConfigError`. A value is an adapter when it has the method every adapter of its kind has (`readFile`, `exec`, `spawn`), so a partial test double without that method is refused, as an empty object is:
+
+| Code | When |
+|---|---|
+| [`ADAPTER_INVALID`](/docs/framework/errors#adapter_invalid) | The value is neither an adapter nor a set of `{ adapter }` entries, or is both at once; or an entry named `default` is not the default. |
+| [`ADAPTER_SET_EMPTY`](/docs/framework/errors#adapter_set_empty) | A named set has no entries. |
+| [`ADAPTER_DEFAULT_MISSING`](/docs/framework/errors#adapter_default_missing) | Several entries, none marked `default: true`; or one entry marked `default: false`. |
+| [`ADAPTER_DEFAULT_AMBIGUOUS`](/docs/framework/errors#adapter_default_ambiguous) | More than one entry marked `default: true`. |
+
+`get(name)` throws [`ADAPTER_UNKNOWN`](/docs/framework/errors#adapter_unknown) for a name the set lacks; the message lists the names it has. `storage`, `secrets` and `artifacts` take one value each.
 
 ## execute()
 
@@ -490,7 +574,7 @@ The report is `{ executionId, reason, durationMs, finished, cutOff }`, the same 
 
 `{name}:drain_started` lists the calls in flight when the drain begins.
 
-The `subprocess` adapter is the companion surface: it persists handle manifests for every long-lived child so a restarted host can call `harness.subprocess.listLive()` + `harness.restore(executionId)` per live child to rejoin the execution. Full durable-execution model, storage layout, and IPC protocol live on the [Durability](/docs/framework/durability) page.
+The `subprocess` adapter is the companion surface: it persists handle manifests for every long-lived child so a restarted host can call `harness.subprocess.listLive()` + `harness.restore(executionId)` per live child to rejoin the execution. Its optional `open` runs a process whose stdio the harness holds, such as an [ACP agent](/docs/framework/acp-agents#where-the-agent-runs). Full durable-execution model, storage layout, and IPC protocol live on the [Durability](/docs/framework/durability) page.
 
 ## Tracing
 
@@ -585,7 +669,9 @@ const harness = new AgentHarness({
 });
 ```
 
-Per-step and per-call overrides let you mix execution backends. A step with `subprocess: createInMemorySubprocessAdapter()` stays in-process even when the harness default is the local adapter; a `detachedSpawn(step, input, ctx, { subprocess: otherAdapter })` overrides both. Resolution order is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
+A subprocess adapter has three jobs, and does each where it can: it runs a step in a child (`spawn`, `detachedSpawn`), which needs the Noetic runtime and your code where the child runs; it runs a command to completion (`runCode`); and, through its optional `open`, it starts a process and hands you its stdio — how an [ACP agent](/docs/framework/acp-agents#where-the-agent-runs) and the MCP servers beside it run. `createLocalSubprocessAdapter()` does all three on this machine. An adapter that reaches a remote runner (`createWebSocketSubprocessAdapter()`, `createCommandSubprocessAdapter()`) holds processes there and runs commands that take no `stdin`; it refuses a step with `SUBPROCESS_RUNS_NO_STEPS`. The in-memory default runs steps in this process and has no `open`.
+
+The harness's `subprocess` here is its default; an environment may [name several](#named-adapters). Per-step and per-call overrides let you mix execution backends. A step with `subprocess: createInMemorySubprocessAdapter()` stays in-process even when the harness default is the local adapter; a `detachedSpawn(step, input, ctx, { subprocess: otherAdapter })` overrides both. Resolution order is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
 
 ## Related Pages
 

@@ -6,6 +6,7 @@ import { expect } from 'bun:test';
 import assert from 'node:assert';
 import * as fsp from 'node:fs/promises';
 import type {
+  AdapterSets,
   ContextData,
   FsAdapter,
   FsStats,
@@ -104,7 +105,7 @@ import type {
   Tool,
   ToolExecutionContext,
 } from '@noetic-tools/types';
-import { frameworkCast, SteeringAction } from '@noetic-tools/types';
+import { adapterSets, frameworkCast, SteeringAction } from '@noetic-tools/types';
 import { runToReturn } from '../src/interpreter/emit-items';
 import type { EmbedFn } from '../src/types/embed';
 
@@ -156,6 +157,15 @@ export function makeScopedStorage(): ScopedStorage {
 
 // ── ExecutionContext ──────────────────────────────────────────────────
 
+/** One unnamed adapter of each kind, as a harness with no named ones has. */
+export function makeAdapterSets(): AdapterSets {
+  return adapterSets({
+    fs: createNodeFsAdapter(),
+    shell: createNoopShellAdapter(),
+    subprocess: createInMemorySubprocessAdapter(),
+  });
+}
+
 export function makeCtx(overrides?: Partial<ExecutionContext>): ExecutionContext {
   return {
     executionId: 'exec-1',
@@ -170,6 +180,7 @@ export function makeCtx(overrides?: Partial<ExecutionContext>): ExecutionContext
     cost: 0,
     fs: createNodeFsAdapter(),
     shell: createNoopShellAdapter(),
+    adapters: makeAdapterSets(),
     tokenize: (text: string) => Math.ceil(text.length / 4),
     trace: {
       setAttribute() {},
@@ -309,6 +320,7 @@ export function makeMockContext(overrides?: Partial<Context>): Context {
     fs: harness.fs,
     shell: harness.shell,
     subprocess: harness.subprocess,
+    adapters: harness.adapters,
     cwdState: {
       cwd: process.cwd(),
     },
@@ -432,6 +444,7 @@ export function makeMockToolContext(ctx?: Context): ToolExecutionContext {
     harness,
     fs: harness.fs,
     shell: harness.shell,
+    adapters: harness.adapters,
     context: toolContext,
     assembledView: resolvedCtx.itemLog.items,
     lastStepMeta: null,
@@ -444,14 +457,16 @@ export const noRun: ExecuteStepFn = async () => {
 };
 
 export function makeMockHarness(): AgentHarnessContract {
+  const adapters = makeAdapterSets();
   const harness: AgentHarnessContract = {
     config: {
       name: 'test-harness',
       params: {},
     },
-    fs: createNodeFsAdapter(),
-    shell: createNoopShellAdapter(),
-    subprocess: createInMemorySubprocessAdapter(),
+    fs: adapters.fs.get(),
+    shell: adapters.shell.get(),
+    subprocess: adapters.subprocess.get(),
+    adapters,
     contextCache: createContextCacheStore(),
     callModel: async () => {
       throw new Error('not impl');
@@ -1183,7 +1198,7 @@ export function toolCallingAgent(
           refusesTools: {
             code: 'ACP_TRANSPORT_CANNOT_REACH',
             reason: 'its transport has no `reach()`.',
-            hint: 'Give it a machine.',
+            hint: 'Give it a command.',
           },
         }),
     async connect(connect): Promise<AcpAgentConnection> {

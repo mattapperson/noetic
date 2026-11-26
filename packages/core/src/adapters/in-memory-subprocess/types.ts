@@ -4,6 +4,7 @@ import type {
   StepSubprocessRequest,
   SubprocessHandle,
   SubprocessHandleMetadata,
+  SubprocessOpen,
   SubprocessRequest,
 } from '@noetic-tools/types';
 import type { LiveHandles } from '../live-handles';
@@ -53,6 +54,12 @@ export interface CreateInMemorySubprocessAdapterOptions {
    * semantic because there is no long-lived process to bind back to.
    */
   storage?: StorageAdapter;
+  /**
+   * The adapter's `open`: how it starts a process and holds its stdio. A test
+   * gives a stand-in here (`loopbackLink(toAgent)` from `@noetic-tools/acp`
+   * runs an ACP agent in this process). Absent, the adapter has no `open`.
+   */
+  open?: SubprocessOpen;
 }
 
 //#endregion

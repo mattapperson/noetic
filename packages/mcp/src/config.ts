@@ -30,15 +30,15 @@ export interface McpStdioServer {
   /**
    * Added to the SDK's default environment (`HOME`, `LOGNAME`, `PATH`,
    * `SHELL`, `TERM`, `USER`), never to the rest of this process's. With
-   * `spawn` it is passed as is, and the machine adds it to that same list of
-   * its own (`localMachine()` and `noetic-acp serve` do).
+   * `spawn` it is passed as is, and added to that same list where the server
+   * starts (`createLocalSubprocessAdapter()` and `noetic-acp serve` do).
    */
   readonly env?: ReadonlyArray<McpNamedValue>;
   readonly cwd?: string;
   /**
-   * Starts the server somewhere other than this process — the machine an ACP
-   * agent runs on (`AcpAgent.spawn`, `spawnOn(machine)` from
-   * `@noetic-tools/acp`), a container — and returns its stdio. Without it the
+   * Starts the server somewhere other than this process — where an ACP agent
+   * runs (`AcpAgent.spawn`, `spawnOn(adapter)` from `@noetic-tools/acp`), a
+   * container — and returns its stdio. Without it the
    * server is a local subprocess.
    */
   readonly spawn?: Spawn;

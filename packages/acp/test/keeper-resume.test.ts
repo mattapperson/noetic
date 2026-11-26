@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AgentHarness, step } from '@noetic-tools/core';
+import { createLocalSubprocessAdapter } from '../../platform-node/src/local-subprocess-adapter';
 import { customAcpAgent } from '../src/agents';
 import { LineSplitter } from '../src/keeper/protocol';
 import { fileStorage } from './fixtures/file-storage';
@@ -74,6 +75,7 @@ describe.skipIf(!POSIX)('a durable run whose host dies mid-turn', () => {
           storage: {
             adapter: fileStorage(dir),
           },
+          subprocess: createLocalSubprocessAdapter(),
         },
       });
       const ctx = await harness.restore(executionId);

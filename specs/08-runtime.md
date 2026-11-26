@@ -1,7 +1,7 @@
 # AgentHarness Interface
 
 > **Depends On:** `01-step-type` (Step), `07-context-and-event-log` (Context, Item, LLMResponse), `06-channels` (Channel, ExternalChannel), `11-context-layer-system` (ContextLayer, StorageAdapter), `10-observability` (Span)
-> **Exports:** `AgentHarness`, `AgentConfig`, `FsAdapter`, `FsStats`, `createLocalFsAdapter`, `ShellAdapter`, `ShellExecOptions`, `ShellExecResult`, `createLocalShellAdapter`, `SubprocessAdapter`, `SubprocessSpec`, `SubprocessHandle`, `SubprocessExitInfo`, `SubprocessCapabilities`, `SubprocessIpcChannel`, `SubprocessServer`, `SubprocessKillSignal`, `createLocalSubprocessAdapter`
+> **Exports:** `AgentHarness`, `AgentConfig`, `FsAdapter`, `FsStats`, `createLocalFsAdapter`, `ShellAdapter`, `ShellExecOptions`, `ShellExecResult`, `createLocalShellAdapter`, `SubprocessAdapter`, `SubprocessSpec`, `SubprocessHandle`, `SubprocessExitInfo`, `SubprocessCapabilities`, `SubprocessIpcChannel`, `SubprocessServer`, `SubprocessKillSignal`, `createLocalSubprocessAdapter`, `AdapterConfig`, `NamedAdapter`, `NamedAdapters`, `AdapterSet`, `AdapterSets`, `AdapterInfo`, `SubprocessChoice`, `adapterSet`, `adapterSets`, `DEFAULT_ADAPTER_NAME`
 
 ---
 
@@ -67,7 +67,7 @@ interface ShellAdapter {
 
 `createInMemoryShellAdapter()` is the harness default. It executes nothing — every `exec` returns exit code `127` with an explanatory stderr — so a portable harness surfaces a missing shell instead of silently depending on a host process. Hosts that need real execution pass an adapter explicitly: `@noetic-tools/platform-node` provides `createLocalShellAdapter(opts?)`, which spawns OS shell processes via `Bun.spawn`. Any other backend — a Worker or container bridge, or an emulated shell wired to the same `FsAdapter` so emulated commands see the same files as the framework — is a host-supplied implementation of this one-method contract; core ships no emulated adapter.
 
-The adapter is threaded through the same path as `FsAdapter`: `AgentHarness.shell` → `Context.shell` → `ToolExecutionContext.shell` → `ExecutionContext.shell`.
+The adapter is threaded through the same path as `FsAdapter`: `AgentHarness.shell` → `Context.shell` → `ToolExecutionContext.shell` → `ExecutionContext.shell`. Each of these is the default shell adapter; the others a harness names are reached through `adapters` (§ Named Adapters).
 
 ### rtk Output Filtering
 
@@ -208,11 +208,33 @@ interface SubprocessAdapter {
    * recovery to rediscover running children on startup.
    */
   listLive(): Promise<ReadonlyArray<SubprocessHandle>>;
+  /**
+   * Open a link to where this adapter's processes run: through it a caller
+   * starts a process and holds its stdio. Any process may be started this
+   * way — an ACP agent, a stdio MCP server beside it, a command run to
+   * completion. Absent on an adapter that hands back no stdio. See
+   * 27-acp-agent-steps § The subprocess adapter.
+   */
+  open?: SubprocessOpen; // (options: SubprocessOpenOptions) => Promise<SubprocessLink>
 }
 ```
 
+An adapter does each of its three jobs where it can:
+
+| Adapter | Package | `step` request | `process` request | `open` |
+|---|---|---|---|---|
+| `createInMemorySubprocessAdapter({ open? })` | `@noetic-tools/core` | in this process | its `run` hook | the one it is given |
+| `createLocalSubprocessAdapter()` | `@noetic-tools/platform-node` | a child Noetic runtime, or in this process | an OS child | this machine |
+| `createLinkSubprocessAdapter(open)` | `@noetic-tools/core` | refused | over a link | the one it is given |
+| `createRunnerSubprocessAdapter(dial)` | `@noetic-tools/core` | refused | over a link, without `stdin` | a remote runner, over any `FrameLink` |
+| `createWebSocketSubprocessAdapter()`, `createCommandSubprocessAdapter()` | `@noetic-tools/platform-node` | refused | as the runner adapter | a runner dialled by WebSocket, or started by a command |
+| `createSocketSubprocessAdapter()`, `createFetchSubprocessAdapter()` | `@noetic-tools/platform-cloudflare-worker` | refused | as the runner adapter | a runner over a WebSocket a Durable Object accepted, or one a Worker dials |
+
+A `step` request needs the Noetic runtime and the program's code where it runs. An adapter that reaches only a remote runner (`noetic-acp serve`) has neither there and refuses the request with `NoeticConfigError` `SUBPROCESS_RUNS_NO_STEPS`.
+
 `createInMemorySubprocessAdapter(opts?)` is the default test double. It dispatches step requests through the in-process execute pipeline via a closure the interpreter attaches to the request, records the handle in memory, and settles synchronously on the microtask queue. Options:
 
+- `open?: SubprocessOpen` — the adapter's `open`. Without it the adapter has none, so an ACP agent cannot run through it (`27-acp-agent-steps` § The subprocess adapter). A test gives it `loopbackLink(toAgent)` from `@noetic-tools/acp`.
 - `storage?: StorageAdapter` — when supplied, the adapter persists handle manifests through the store so `listLive()` survives adapter re-creation within the process lifetime. `reattach()` is implemented as an idempotent replay of the persisted step request; "reattach" here is honestly a test-double semantic rather than a process resume, consistent with the adapter's role as the default in-process backend.
 - `metadataInjector?: (request: SubprocessRequest) => Partial<SubprocessHandleMetadata>` — test ergonomics hook. The returned fields are merged onto `handle.metadata` before the caller sees it, so unit tests can stamp `taskRole`, `taskId`, etc. without mutating the request surface.
 
@@ -220,14 +242,21 @@ interface SubprocessAdapter {
 
 - `storage?: StorageAdapter` — durable handle manifests. When set, every `spawn()` writes `{handleId, pid, pidStarttime, socketPath, cwd, stepId, serializedInput, executionId, metadata}` through the store; `reattach(handleId)` reads the manifest, verifies `pidStarttime` has not drifted (pid reuse), and returns a rehydrated handle; `listLive()` scans the manifest prefix and filters by liveness. Without storage, `listLive()` returns the empty set and `reattach()` returns null (no durability).
 - `signaller?: ProcessSignaller` — injection seam for testing signal delivery.
+- `keeper?`, `detachedTimeoutMs?`, `wrap?`, `onStderr?`, `onLaunch?`, `agentId?` — shape the processes its `open` holds (`27-acp-agent-steps` § The subprocess adapter, § A local agent outlives its host). Its links come from `openLocalLink` in `@noetic-tools/acp/stdio`, which is why `@noetic-tools/platform-node` depends on `@noetic-tools/acp`.
 
-The adapter is threaded through the harness: `AgentHarness.subprocess` → `Context.subprocess` → `ToolExecutionContext.subprocess` → `ExecutionContext.subprocess`.
+`createLinkSubprocessAdapter(open, { runtime? })` builds an adapter from `open` alone, for a place reached only through a link. `createRunnerSubprocessAdapter(dial)` is that adapter over a remote runner: `dial` opens one `FrameLink` per link, and the frames are the contract in `@noetic-tools/types` (`HostFrame`, `RunnerFrame`), so core never imports `@noetic-tools/acp`, which serves the runner's other end.
+
+The adapter is threaded through the harness: `AgentHarness.subprocess` → `Context.subprocess`. Each is the default subprocess adapter; the others a harness names are reached through `adapters` (§ Named Adapters).
 
 ### Request Dispatch
 
 `adapter.spawn(request)` is the single entry point. `request.kind === 'process'` launches an OS child; `request.kind === 'step'` dispatches a registered Noetic step.
 
-A process request that carries `stdin` is a **run-to-result** call, the shape a JSON workflow `runCode` node sends (`26-json-workflow-runtime`). The local adapter pipes the child's stdio, writes `stdin` and closes it, and settles on `close` (after stdout has drained, so output larger than a pipe buffer arrives whole). Exit code 0 completes the handle with stdout as `metadata.result`. Any other code fails it, with the end of stderr (up to 2,000 characters) in `metadata.error.message`. A child that exits without reading its input is not an error. A process request without `stdin` runs with its stdio ignored and settles on `exit`, for long-lived children whose output nobody collects. The pipes belong to the adapter's process, so a run-to-result child does not outlive its host: reattaching to one after a restart finds it gone. The in-memory adapter always runs step requests in-process; the local adapter spawns `bun run <step-bootstrap>` with `NOETIC_REGISTRY_ENTRY` pointing at the user's entry module, passes the serialised input over stdin, and captures the result from stdout. The bootstrap's contract lives at `packages/core/src/adapters/node/step-bootstrap.ts`.
+A process request that carries `stdin` is a **run-to-result** call, the shape a JSON workflow `runCode` node sends (`26-json-workflow-runtime`). The local adapter pipes the child's stdio, writes `stdin` and closes it, and settles on `close` (after stdout has drained, so output larger than a pipe buffer arrives whole). Exit code 0 completes the handle with stdout as `metadata.result`. Any other code fails it, with the end of stderr (up to 2,000 characters) in `metadata.error.message`. A child that exits without reading its input is not an error. A process request without `stdin` runs with its stdio ignored and settles on `exit`, for long-lived children whose output nobody collects. The pipes belong to the adapter's process, so a run-to-result child does not outlive its host: reattaching to one after a restart finds it gone.
+
+**A process request over a link.** An adapter built from `open` (`createLinkSubprocessAdapter`) runs a process request on a link of its own, opened with `whenHostExits: 'stop'`: it starts the command with the link's `spawn`, writes `stdin` and closes the input, reads stdout to the end, and settles the handle as the local adapter does — exit code 0 completes it, with stdout as `metadata.result` when the request carried `stdin`; any other code fails it with `Subprocess exited with code <n>`. The exit code comes from the stream's `exited` (`ByteStream.exited`); a link whose streams report none completes the handle when stdout ends. `metadata` carries `runtime`, `command`, `args`, `cwd` and `exitCode`, and no `pid`. Three things differ from the local adapter: a link carries no stderr, so a failure names the exit code alone; `detached` means nothing; and the command gets the environment a link's `spawn` gives — the MCP SDK's default list where it runs, plus the request's `env`. `stop` closes the stream and the link and settles the handle `stopped`; `pause` and `resume` are `unsupported`; `reattach` returns `null`, since a link's processes end with it. The handle settles first and the link is released just after.
+
+A remote runner's frames carry no end of input (`27-acp-agent-steps` § The remote runner), so a runner adapter cannot close a command's stdin. It refuses a process request that has `stdin` — the shape a `runCode` node sends — with `NoeticConfigError` `SUBPROCESS_CANNOT_END_INPUT`, where it would otherwise leave the command waiting forever; a command it runs without `stdin` finds its input open and empty. The in-memory adapter always runs step requests in-process; the local adapter spawns `bun run <step-bootstrap>` with `NOETIC_REGISTRY_ENTRY` pointing at the user's entry module, passes the serialised input over stdin, and captures the result from stdout. The bootstrap's contract lives at `packages/core/src/adapters/node/step-bootstrap.ts`.
 
 ### Handle Metadata Contract
 
@@ -246,6 +275,98 @@ Callers may attach arbitrary additional keys via `request.metadata`; the adapter
 `reattach(handleId)` and `listLive()` are adapter-level durability hooks. An adapter configured with a durable `StorageAdapter` persists handle manifests on `spawn()` and consults them on reattach/list; a zero-config adapter returns empty results. The host boot flow (`reattachLiveChildren(harness)` in `@noetic-tools/cli`) calls `harness.subprocess.listLive()` first and then `harness.restore(executionId)` per live handle. See `23-durable-execution` for the full model.
 
 ---
+
+## Named Adapters
+
+A harness runs against one filesystem, one shell and one place for processes, or against several of each: a laptop and a build host, a checkout and a scratch directory. `environment.fs`, `environment.shell` and `environment.subprocess` each take one adapter, or several by name. `storage`, `secrets` and `artifacts` take one.
+
+```typescript
+/** One adapter, or several by name. */
+type AdapterConfig<A> = A | NamedAdapters<A>;
+
+type NamedAdapters<A> = Readonly<Record<string, NamedAdapter<A>>>;
+
+interface NamedAdapter<A> {
+  adapter: A;
+  /** A name for people, where the key is an id. */
+  displayName?: string;
+  /** What sets this adapter apart: the host it reaches, what it is for. */
+  description?: string;
+  /** Marks the adapter used when none is named. */
+  default?: boolean;
+}
+
+/** A harness's adapters of one kind. */
+interface AdapterSet<A> {
+  /** The adapter called `name`, or the default without one. */
+  get(name?: string): A;
+  /** The name `get()` resolves to. */
+  readonly defaultName: string;
+  /** Every adapter, in the order the environment gave them. Frozen. */
+  list(): ReadonlyArray<AdapterInfo>;
+}
+
+interface AdapterInfo {
+  readonly name: string;
+  readonly displayName?: string;
+  readonly description?: string;
+  readonly default: boolean;
+}
+
+interface AdapterSets {
+  readonly fs: AdapterSet<FsAdapter>;
+  readonly shell: AdapterSet<ShellAdapter>;
+  readonly subprocess: AdapterSet<SubprocessAdapter>;
+}
+```
+
+```typescript
+const harness = new AgentHarness({
+  environment: {
+    shell: createLocalShellAdapter(),
+    subprocess: {
+      laptop: { adapter: createLocalSubprocessAdapter(), default: true },
+      builder: {
+        adapter: createWebSocketSubprocessAdapter({ url, token }),
+        displayName: 'Build host',
+        description: 'Linux, 64 cores',
+      },
+    },
+    fs: {
+      laptop: { adapter: createLocalFsAdapter(), default: true },
+      builder: { adapter: hostFs },
+    },
+  },
+});
+
+harness.fs;                          // the default: laptop
+ctx.adapters.fs.get('builder');      // a named one
+ctx.adapters.fs.get();               // the default
+ctx.adapters.fs.defaultName;         // 'laptop'
+ctx.adapters.fs.list();              // [{ name: 'laptop', default: true }, { name: 'builder', default: false }]
+ctx.adapters.shell.get('default');   // one unnamed adapter goes by 'default'
+```
+
+- **The default.** Whatever names no adapter uses the default: `harness.fs`, `harness.shell`, `harness.subprocess`, the same three on `Context`, `fs` and `shell` on `ToolExecutionContext` and `ExecutionContext`, and every step that runs a child. A set of several marks exactly one entry `default: true`. A set of one needs no mark: its entry is always the default, so `default: false` on it leaves the set with none and is refused (`ADAPTER_DEFAULT_MISSING`).
+- **One unnamed adapter** is a set of one called `'default'` (`DEFAULT_ADAPTER_NAME`): `get()` and `get('default')` return it, and `list()` returns one entry. A kind the environment leaves out is the in-memory adapter under that name.
+- **The name `default`** means the default adapter in every set, so `get('default')` and `get()` never differ where both answer. A named set may call an entry `default` only when that entry is its default; any other entry of that name is refused (`ADAPTER_INVALID`). A set with no entry of that name has no `'default'`: `get('default')` is `ADAPTER_UNKNOWN` there.
+- **The listing is frozen.** `list()` returns one frozen array of frozen entries, the same on every call: a caller that writes to it gets a `TypeError`, and nothing a caller does changes which adapter is the default. `defaultName` is the default's name, read from the set itself: the runtime never looks the default up in the listing.
+- **Access.** `AgentHarness.adapters`, `Context.adapters`, `ToolExecutionContext.adapters` and `ExecutionContext.adapters` are the same `AdapterSets` — all three kinds, the subprocess set included, on a layer's `ExecutionContext` too — so a tool or a context layer reaches a named adapter the way it reaches the default. A context preview (`getCurrentContext(true)`) hands its layers every one of them read-only, as it does the defaults.
+- **Who picks by name.** An ACP step names the adapters its agent uses, `acpAgentTool` passes the same three names to its step, and an agent preset names a subprocess adapter — a name, never an adapter object (`27-acp-agent-steps` § The subprocess adapter). A JSON `runCode` node names a subprocess adapter, which a document the host did not write may do only for the names the host's `runCode` grant lists (`26-json-workflow-runtime`). `spawn`, `runCode` and `detachedSpawn` steps take an adapter object, as before (`04-spawn`).
+- **Names stay in the process that built the harness.** A step the local subprocess adapter runs out of process (`registryEntry`) runs on a child harness with in-memory adapters only: the parent's adapters, named or default, do not reach it. A step that names an adapter there fails with `ADAPTER_NOT_IN_CHILD`; one that names none uses the child's in-memory `fs`, `shell` and `subprocess` (`04-spawn` § Out-of-process children).
+- **`environment.fs`, `.shell` and `.subprocess` are a union** (`AdapterConfig`): an adapter, or a named set. Code that read `environment.fs.readFile` reads `harness.fs` or `harness.adapters.fs.get(name)` instead.
+
+A value is an adapter when it has the method every adapter of its kind has — `readFile`, `exec`, `spawn` — and a named set when it is a plain object whose entries each hold an adapter under `adapter`. A set's own entry of that name is an object, never a function, so no set reads as an adapter and no adapter as a set. A plain object that is both — it has the method, and a member that is an `{ adapter }` entry — is refused rather than read as either. The harness checks the three when it is built, so a value that passed before the union and is neither is refused now: a partial test double without its kind's method, or an empty object.
+
+| `NoeticConfigError` code | When |
+|---|---|
+| `ADAPTER_INVALID` | The value is neither an adapter nor a plain object of entries (a test double lacking `readFile`, `exec` or `spawn` included), or both at once; an entry holds no adapter; or an entry named `default` is not the default. |
+| `ADAPTER_SET_EMPTY` | A named set has no entries. |
+| `ADAPTER_DEFAULT_MISSING` | Several entries, none marked `default: true`; or one entry marked `default: false`. |
+| `ADAPTER_DEFAULT_AMBIGUOUS` | More than one entry marked `default: true`. |
+| `ADAPTER_UNKNOWN` | `get(name)` for a name the set lacks. The message lists the names it has. |
+
+`adapterSets({ fs, shell, subprocess })` builds an `AdapterSets` from the same three values, for a hand-written harness or a test double; `adapterSet({ kind, config, method })` builds one set.
 
 ## Artifact Store
 
@@ -333,6 +454,12 @@ interface AgentHarness<TParams extends Record<string, unknown> = Record<string, 
    * or detachedSpawn override supplies one; see 04-spawn for precedence.
    */
   readonly subprocess: SubprocessAdapter;
+
+  /**
+   * Every filesystem, shell and subprocess adapter, by name. `fs`, `shell`
+   * and `subprocess` above are each kind's default. See § Named Adapters.
+   */
+  readonly adapters: AdapterSets;
 
   /**
    * Typed wrapper over the harness's StorageAdapter used by checkpoint()
@@ -1101,7 +1228,7 @@ type DeliveryMode = 'next-turn' | 'between-rounds' | 'next-item' | 'interrupt';
 - **`getContextStream(scope?)`** yields the latest window on subscribe, then layer recall, re-render, freshness, and request events for the thread. Each event carries a full snapshot with a sequence number and an assembly ID. A slow reader can receive a snapshot marked `gap` if its queue overflows. The stream is in memory and closes on thread removal or harness shutdown. The harness keeps a bounded set of recent windows for standalone threads with no readers. Layer snapshots show recalled contributions. Native request events show the prepared context handed to the provider client, with the surviving layer contributions indexed into that input. ACP request events show the prompt blocks handed to the ACP session.
 - **`beforeToolCall(layers, toolName, toolArgs, ctx)`** runs each layer's `beforeToolCall` hook sequentially in slot order before a tool is executed. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` short-circuits and blocks the tool call, `Guide` returns guidance text to the model. Short-circuits on the first `Deny`. When multiple layers return `Guide`, their guidance is concatenated.
 - **`afterModelCall(layers, response, ctx)`** runs each layer's `afterModelCall` hook sequentially in slot order immediately after the LLM responds. Returns a `SteeringDecision` — `Allow` proceeds normally, `Deny` throws `steering_denied`, `Guide` injects guidance as a developer message and retries the model call (up to 3 times). Short-circuits on the first `Deny`.
-- **`fs`** exposes the `FsAdapter` that the harness was constructed with via `environment.fs` (or the default in-memory adapter). All filesystem operations — CLI tools (read, write, edit, ls, grep, find), skill discovery, and context layers — use `ctx.harness.fs` rather than importing `fs/promises` directly. This enables sandboxed or virtualized filesystems (e.g., in-memory FS for testing, remote FS for cloud execution). `Context` exposes a `readonly fs: FsAdapter` getter that delegates to the harness. `ToolExecutionContext` and memory `ExecutionContext` also expose `readonly fs: FsAdapter`.
+- **`fs`** exposes the `FsAdapter` that the harness was constructed with via `environment.fs` (or the default in-memory adapter). All filesystem operations — CLI tools (read, write, edit, ls, grep, find), skill discovery, and context layers — use `ctx.harness.fs` rather than importing `fs/promises` directly. This enables sandboxed or virtualized filesystems (e.g., in-memory FS for testing, remote FS for cloud execution). `Context` exposes a `readonly fs: FsAdapter` getter that delegates to the harness. `ToolExecutionContext` and memory `ExecutionContext` also expose `readonly fs: FsAdapter`. When the environment names several filesystems, `fs` is the default one, and all four expose every adapter by name as `adapters` (§ Named Adapters).
 - **`config`** exposes the `AgentConfig<TParams>` that the harness was constructed with. Steps and tools access harness params via `ctx.harness.config.params`.
 - **`contextLayers` on `AgentHarnessOpts`** are default context layers applied to every context created via `createContext()`. When `createContext` is called with its own `contextLayers` option, the per-call layers take precedence (full override, not merge). When neither is specified, the context has no default layers. This provides a convenient way to set up context for the entire agent without passing layers to every call.
 - **`detachedSpawn`** launches a child step concurrently without blocking the caller. Creates a child `Context` with `parent: parentCtx`, starts execution, and returns a `DetachedHandle` immediately. The handle tracks status (`running` / `completed` / `failed`), exposes the result, and supports `await(timeout?)` for blocking on completion. Pairs with the loop inbox channel (see `05-loop-and-until`) for async sub-agent notification patterns. Optional `overrides.threadId` / `overrides.resourceId` decouple the child's session-scoped item log from the parent's — useful for background sub-agents whose accumulated items should NOT replay in the parent's next turn.
@@ -1501,14 +1628,16 @@ interface AgentEnvironmentConfig {
     /** Bounds on the step-completion ledger backing step-level resume. */
     stepLedgerRetention?: StepLedgerRetention;
   };
-  /** Filesystem adapter. Defaults to an in-memory adapter. */
-  fs?: FsAdapter;
-  /** Shell adapter. Defaults to an in-memory adapter. */
-  shell?: ShellAdapter;
-  /** Subprocess adapter. Defaults to an in-memory, same-process adapter. */
-  subprocess?: SubprocessAdapter;
+  /** One filesystem adapter, or several by name. Defaults to an in-memory adapter. */
+  fs?: AdapterConfig<FsAdapter>;
+  /** One shell adapter, or several by name. Defaults to an in-memory adapter. */
+  shell?: AdapterConfig<ShellAdapter>;
+  /** One subprocess adapter, or several by name. Defaults to an in-memory, same-process adapter. */
+  subprocess?: AdapterConfig<SubprocessAdapter>;
 }
 ```
+
+A malformed `fs`, `shell` or `subprocess` fails the constructor with a `NoeticConfigError` (§ Named Adapters).
 
 ---
 
@@ -1542,6 +1671,10 @@ On runner startup, the IPC server reads `<taskDir>/chat.jsonl` and calls `harnes
 
 ## Future Considerations
 
+- **Named adapters for `callModel` steps.** A `callModel` step's tools and
+  layers get the default `fs` and `shell`, and reach a named adapter only by
+  asking `adapters` for it. A step-level `fs` / `shell` name, as an ACP step
+  has, would move a whole model step to another filesystem or shell.
 - **Workflows as agents.** A `callModel` tool that starts a workflow, or a
   sub-workflow, run as an agent would show as a nested agent with a `scope` of
   its own, reporting its tool calls, plan and settings in the same vocabulary

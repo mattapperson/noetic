@@ -65,6 +65,12 @@ export interface AcpAgentToolOptions {
    * on the first.
    */
   session?: AcpSessionPolicy;
+  /** The harness subprocess adapter the agent runs through, by name — as `step.acpAgent` takes it. */
+  subprocess?: string;
+  /** The harness filesystem adapter that serves the agent's `fs/*` calls, by name. */
+  fs?: string;
+  /** The harness shell adapter that serves the agent's `terminal/*` calls, by name. */
+  shell?: string;
 }
 
 const AcpAgentToolInputSchema = z.object({
@@ -132,6 +138,9 @@ export function acpAgentTool(
     onPermissionRequest: opts.onPermissionRequest,
     clientCapabilities: opts.clientCapabilities,
     session: opts.session,
+    subprocess: opts.subprocess,
+    fs: opts.fs,
+    shell: opts.shell,
   });
 
   const delegate = tool({

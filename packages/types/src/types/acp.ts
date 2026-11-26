@@ -25,7 +25,13 @@ import type { Context } from './context';
 import type { FsAdapter } from './fs-adapter';
 import type { Item } from './items';
 import type { ShellAdapter } from './shell-adapter';
-import type { ByteStream, Spawn, SpawnCommand } from './spawn';
+import type {
+  AcpReattachHandle,
+  AcpTransport,
+  AcpWhenHostExits,
+  Spawn,
+  SubprocessChoice,
+} from './subprocess-adapter';
 import type { ToolIdentity } from './tool-activity';
 
 //#region Step-kind discriminator
@@ -41,46 +47,6 @@ export const ACP_AGENT_STEP_KIND = 'acp-agent';
 //#endregion
 
 //#region Transport
-
-/**
- * A bidirectional byte stream to an ACP agent — the substrate JSON-RPC frames
- * ride on.
- *
- * This is deliberately *not* built on {@link SubprocessAdapter}: that contract
- * returns a durable handle (`id`/`status`/`metadata`) with no attached stdio,
- * and {@link ShellAdapter} is one-shot. ACP needs a long-lived duplex pipe.
- * @public
- */
-export type AcpTransport = ByteStream & {
-  /**
-   * Set when the agent behind this stream outlives the host and can be
-   * reattached (a local agent run by its keeper). JSON, opaque outside the
-   * package that made it.
-   */
-  readonly reattach?: AcpReattachHandle;
-  /**
-   * Let go of the agent without stopping it, as a host that goes away does,
-   * so a later host can still reattach. Present only with {@link reattach}.
-   */
-  detach?(): Promise<void>;
-};
-
-/**
- * How to reach an agent that outlived its host: JSON a durable run stores with
- * the step and hands back to {@link AcpConnectOptions.reattach} on resume.
- * Opaque to everything but the package that made it.
- * @public
- */
-export type AcpReattachHandle = Readonly<Record<string, unknown>>;
-
-/**
- * What happens to an agent when its host goes away without closing it — a
- * crash, Ctrl-C, a killed process. `'keep'` (the default) keeps the agent
- * working and holds everything it sends until a host reattaches; `'stop'`
- * stops its whole process tree as soon as the host is gone.
- * @public
- */
-export type AcpWhenHostExits = 'keep' | 'stop';
 
 /** @public Options a transport factory receives when a step opens a connection. */
 export interface AcpTransportOptions {
@@ -101,60 +67,6 @@ export interface AcpTransportOptions {
  * @public
  */
 export type AcpTransportFactory = (opts: AcpTransportOptions) => Promise<AcpTransport>;
-
-/**
- * Where a tool bridge can be reached: an MCP streamable HTTP endpoint and the
- * headers every request must carry (always the bridge's bearer token).
- * @public
- */
-export interface ToolBridgeAddress {
-  readonly serverName: string;
-  readonly url: string;
-  readonly headers: ReadonlyArray<{
-    name: string;
-    value: string;
-  }>;
-}
-
-/**
- * The machine an ACP agent runs on, opened once per connection before the
- * agent starts. The tool bridge listens on the host's loopback interface, so
- * the machine first carries it to where the agent can reach it, then starts
- * the agent with launch settings that may name that address.
- * @public
- */
-export interface AcpMachine {
-  /**
-   * An address the agent can use to reach `bridge`. The same address on this
-   * machine; a channel to it from anywhere else. A non-loopback hop is TLS.
-   */
-  reach(bridge: ToolBridgeAddress): Promise<ToolBridgeAddress>;
-  /** Start the agent and return its ACP byte stream. */
-  launch(command: SpawnCommand): Promise<AcpTransport>;
-  /**
-   * Start a process beside the agent — a stdio MCP server that depends on
-   * this machine — and carry its stdio back, so noetic stays its client. It
-   * gets the MCP SDK's default environment on this machine plus `env`, as a
-   * local server does, not the agent's.
-   */
-  spawn: Spawn;
-  /**
-   * The stream to an agent this machine launched for an earlier host, which
-   * outlived it ({@link AcpTransport.reattach}). Rejects with
-   * {@link AcpConnectError} when that agent is gone. Absent on a machine whose
-   * agents never outlive their host.
-   */
-  attach?(handle: AcpReattachHandle): Promise<AcpTransport>;
-  /** Release the machine and everything started on it. */
-  close(): Promise<void>;
-}
-
-/** @public Opens an {@link AcpMachine} for one connection. */
-export type AcpMachineFactory = (opts: {
-  signal?: AbortSignal;
-  /** See {@link AcpWhenHostExits}. */
-  whenHostExits?: AcpWhenHostExits;
-}) => Promise<AcpMachine>;
 
 //#endregion
 
@@ -798,6 +710,12 @@ export interface AcpConnectOptions {
   reattach?: AcpReattachHandle;
   /** See {@link AcpWhenHostExits}. Default `'keep'`. */
   whenHostExits?: AcpWhenHostExits;
+  /**
+   * Where an agent started by a command may run: through the harness adapter
+   * the step names, else the one the agent names, else the default. The one
+   * it lands on must have `open`.
+   */
+  subprocess?: SubprocessChoice;
 }
 
 /**
@@ -814,6 +732,13 @@ export interface AcpAgent {
    * observability, and error messages.
    */
   readonly agentId: string;
+  /**
+   * The harness subprocess adapter this agent names
+   * (`claudeCode({ subprocess: 'builder' })`). A step's own `subprocess` comes
+   * before it. A name only: adapters are given once, on the harness, so the
+   * name a session record stores is the adapter the agent was started on.
+   */
+  readonly subprocess?: string;
   /** Open a transport, run `initialize`, and return the negotiated connection. */
   connect(opts: AcpConnectOptions): Promise<AcpAgentConnection>;
   /**
@@ -824,10 +749,9 @@ export interface AcpAgent {
    */
   readonly refusesTools?: AcpToolRefusal;
   /**
-   * Starts a process on the machine this agent runs on and carries its stdio
-   * back. A stdio `mcp()` server in the step's `tools` starts through it, so
+   * Starts a process where this agent runs and carries its stdio back. A stdio `mcp()` server in the step's `tools` starts through it, so
    * it runs where the agent runs while noetic stays its MCP client. Absent
-   * for an agent attached through a transport, which names no machine.
+   * for an agent attached through a transport, which names no such place.
    */
   readonly spawn?: Spawn;
   /**
@@ -959,6 +883,15 @@ export interface AcpAgentGrant {
   readonly modes?: ReadonlyArray<string>;
   /** The models a node may select. Default: any, since a model changes no permission. */
   readonly models?: ReadonlyArray<string>;
+  /**
+   * The harness subprocess adapters a node may name. A name moves the agent
+   * to another host, so the default is none: a node runs on the default.
+   */
+  readonly subprocess?: ReadonlyArray<string>;
+  /** The harness filesystem adapters a node may name. Default: none. */
+  readonly fs?: ReadonlyArray<string>;
+  /** The harness shell adapters a node may name. Default: none. */
+  readonly shell?: ReadonlyArray<string>;
 }
 
 /** @public The widest permission policy a node may set. */

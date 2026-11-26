@@ -15,7 +15,7 @@ import type { AgentScope, ContextData, HeldCall, HeldCallHandler } from '@noetic
 import { isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { claudeCode } from '../src/agents';
 import { defineAcpAgent } from '../src/define';
-import { loopbackMachine } from '../src/transport-loopback';
+import { scripted, scriptedSubprocess } from './_helpers';
 
 //#region Agent
 
@@ -114,7 +114,7 @@ function emptyLog(): AgentLog {
 
 function agent(log: AgentLog, script?: AgentScript, sessionMeta?: Record<string, unknown>) {
   return claudeCode({
-    machine: loopbackMachine(agentFor(log, script)),
+    command: scripted(agentFor(log, script)),
     ...(sessionMeta
       ? {
           sessionMeta,
@@ -139,6 +139,9 @@ async function run(
   const harness = new AgentHarness({
     name: 'host-features',
     params: {},
+    environment: {
+      subprocess: scriptedSubprocess,
+    },
     ...(onHeld
       ? {
           onHeld,
@@ -405,9 +408,8 @@ describe('an agent step, as a host sees it', () => {
         agent: defineAcpAgent({
           agentId: 'plain',
           command: {
-            command: 'plain',
+            command: scripted(agentFor(emptyLog())),
           },
-          machine: loopbackMachine(agentFor(emptyLog())),
         }),
         prompt: 'go',
         tools: [],

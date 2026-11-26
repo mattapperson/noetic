@@ -1,11 +1,13 @@
 import type {
+  AdapterConfig,
+  AdapterSets,
   ArtifactStore,
   ConnectionEntries,
   ConnectionTrigger,
   ScopedStorage,
   SecretResolver,
 } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import { adapterSets, frameworkCast } from '@noetic-tools/types';
 import type { Verifier } from '@noetic-tools/types/verify';
 import { toStep } from '../builders/sequence';
 import { createInMemoryArtifactStore } from '../runtime/in-memory-artifact-store';
@@ -183,12 +185,21 @@ export interface TurnCutConfig {
 export interface AgentEnvironmentConfig {
   /** Storage configuration: adapter, durability stores, ledger retention. */
   storage?: StorageEnvironmentConfig;
-  /** Filesystem adapter. Defaults to an in-memory adapter. */
-  fs?: FsAdapter;
-  /** Shell adapter. Defaults to an in-memory adapter. */
-  shell?: ShellAdapter;
-  /** Subprocess adapter. Defaults to an in-memory, same-process adapter. */
-  subprocess?: SubprocessAdapter;
+  /**
+   * One filesystem adapter, or several by name with one marked `default`.
+   * Defaults to an in-memory adapter.
+   */
+  fs?: AdapterConfig<FsAdapter>;
+  /**
+   * One shell adapter, or several by name with one marked `default`.
+   * Defaults to an in-memory adapter.
+   */
+  shell?: AdapterConfig<ShellAdapter>;
+  /**
+   * One subprocess adapter, or several by name with one marked `default`.
+   * Defaults to an in-memory, same-process adapter.
+   */
+  subprocess?: AdapterConfig<SubprocessAdapter>;
   /** Resolves `secret()` names immediately before a connection call is sent (spec 35 § Secrets). */
   secrets?: SecretResolver;
   /** Where binary content is stored (spec 08 § Artifact Store). Defaults to an in-memory store. */
@@ -342,9 +353,7 @@ export interface AgentHarnessOpts<
 
 /** The platform surfaces a harness runs against, defaults filled in. */
 export interface EnvironmentAdapters {
-  fs: FsAdapter;
-  shell: ShellAdapter;
-  subprocess: SubprocessAdapter;
+  adapters: AdapterSets;
   artifacts: ArtifactStore;
 }
 
@@ -353,16 +362,20 @@ export interface EnvironmentAdapters {
 //#region Resolution
 
 /**
- * The filesystem, shell, subprocess, and artifact store an environment configures,
- * each defaulting to an in-memory implementation.
+ * The filesystem, shell and subprocess adapters and the artifact store an
+ * environment configures, each defaulting to an in-memory implementation.
+ *
+ * @throws `NoeticConfigError` for a malformed adapter set (see `adapterSets`).
  */
 export function resolveEnvironmentAdapters(
   environment: AgentEnvironmentConfig | undefined,
 ): EnvironmentAdapters {
   return {
-    fs: environment?.fs ?? createInMemoryFsAdapter(),
-    shell: environment?.shell ?? createInMemoryShellAdapter(),
-    subprocess: environment?.subprocess ?? createInMemorySubprocessAdapter(),
+    adapters: adapterSets({
+      fs: environment?.fs ?? createInMemoryFsAdapter(),
+      shell: environment?.shell ?? createInMemoryShellAdapter(),
+      subprocess: environment?.subprocess ?? createInMemorySubprocessAdapter(),
+    }),
     artifacts: environment?.artifacts ?? createInMemoryArtifactStore(),
   };
 }

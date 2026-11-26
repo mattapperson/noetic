@@ -587,8 +587,8 @@ jobs:
     name: Release @noetic-tools/platform-node
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [chat-sdk, core]
-    if: ${{ !cancelled() && needs.core.result == 'success' }}
+    needs: [chat-sdk, acp, core]
+    if: ${{ !cancelled() && needs.acp.result == 'success' && needs.core.result == 'success' }}
     permissions:
       contents: write
       issues: write
@@ -627,6 +627,7 @@ jobs:
           bun run --cwd packages/types build
           bun run --cwd packages/context build
           bun run --cwd packages/core build
+          bun run --cwd packages/acp build
 
       - name: Build
         run: bun run --cwd packages/platform-node build

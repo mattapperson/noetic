@@ -13,6 +13,7 @@ import type {
   Context,
   ExecuteStepFn,
   McpAllowlist,
+  RunCodeGrant,
   SecretResolver,
   Span,
   Step,
@@ -28,12 +29,12 @@ import { harnessInternal } from '../util/harness-internals';
 import { rootOf } from '../util/root-context';
 import { outputText } from './output-text';
 import { callModel, runCode } from './step-builders';
-import { acpBounds, acpPrompt, checkAcpAgents } from './workflow-acp-grants';
-import { checkConnectionAllowlist, globMatches } from './workflow-connections';
+import { acpBounds } from './workflow-acp-grants';
+import { globMatches } from './workflow-connections';
+import type { Grants, PlannerConnection } from './workflow-grants';
+import { checkGrants, grantsPrompt } from './workflow-grants';
 import type { HydrationContext } from './workflow-hydrator';
 import { hydrateWorkflow } from './workflow-hydrator';
-import { checkMcpServers, mcpPrompt } from './workflow-mcp-servers';
-import { checkToolConnections } from './workflow-tool-entries';
 
 //#region Types
 
@@ -63,6 +64,13 @@ export interface DynamicWorkflowOpts {
    * validation with `CONNECTION_NOT_ALLOWED`. The planner is shown these limits.
    */
   acp?: AcpAllowlist;
+  /**
+   * The most a generated `runCode` node may ask: the harness subprocess
+   * adapters it may name (spec 26 § runCode). Without it a node may name
+   * none, and one that does fails validation with `CONNECTION_NOT_ALLOWED`.
+   * The planner is shown the granted names.
+   */
+  runCode?: RunCodeGrant;
   /**
    * The MCP servers a generated document may attach — `{ "mcp" }` entries in
    * `tools` or `connections` — with the secrets and policy each grant sets
@@ -103,7 +111,7 @@ A WorkflowNode is one of:
 - { "kind": "schedule", "id": "<unique>", "step": <WorkflowNode>, "interval": <ms>, "onError": "continue"|"fail" } (re-runs the step forever on an interval and never returns — only emit for an explicitly daemon-style task)
 - { "kind": "routeSwitch", "id": "<unique>", "decide": { "kind": "decide", "id": "<unique>", "questions": { "<question-id>": { "type": "choice", "instructions": "<question>", "choices": ["<option>", ...] } } }, "on": "<question-id>", "cases": { "<option>": <WorkflowNode>, ... }, "uncertain": <WorkflowNode>, "minConfidence": <optional 0-1> } (a model decides, then the input goes to the matching case; a "boolean" question has cases "true" and "false"; a "score" question has "levels": ["<low>", ..., "<high>"] and routes by level; every outcome needs a case)
 - { "kind": "subflow", "id": "<unique>", "document": { "version": 1, "root": <WorkflowNode> } } (an inline sub-workflow run as one step; only emit the inline form — named refs require a registry this planner does not provide)
-- { "kind": "acp-agent", "id": "<unique>", "agent": "<an agent id listed below>", "prompt": "<turn prompt>", "mode": "<optional session mode>", "model": "<optional>", "tools": [<optional; connection and MCP server entries only>], "cwd": "<optional absolute dir>", "permissions": { "default": "deny", "allow": [{ "kind": "<tool kind>", "title": "<substring>" }] }, "clientCapabilities": { "readTextFile": <bool>, "writeTextFile": <bool>, "terminal": <bool> }, "session": { "reuse": "<key>", "keepAlive": "step"|"run" } } (every field after "model" is optional and only within the agent's limits listed below)
+- { "kind": "acp-agent", "id": "<unique>", "agent": "<an agent id listed below>", "prompt": "<turn prompt>", "mode": "<optional session mode>", "model": "<optional>", "tools": [<optional; connection and MCP server entries only>], "cwd": "<optional absolute dir>", "permissions": { "default": "deny", "allow": [{ "kind": "<tool kind>", "title": "<substring>" }] }, "clientCapabilities": { "readTextFile": <bool>, "writeTextFile": <bool>, "terminal": <bool> }, "session": { "reuse": "<key>", "keepAlive": "step"|"run" }, "subprocess": "<adapter name>", "fs": "<adapter name>", "shell": "<adapter name>" } (every field after "model" is optional and only within the agent's limits listed below)
 
 Every entry of a node's "tools" is an OBJECT, never a bare string. Use { "type": "<tool-name>" } to let the model call one of the tools listed below. Two provider-executed tools are also available without being listed: { "type": "openrouter:web_search" } and { "type": "openrouter:web_fetch" }, each accepting an optional "parameters" object. { "connection": "<name>", "ops": ["<operation glob>", ...] } gives the model the tools of a connection listed below ("ops" optional), and { "mcp": { "name": "<name>", "type": "http", "url": "<url>" } } those of an MCP server listed below. The same { "mcp": … } entry under the document's "connections" (keyed by its name) attaches the server for the whole document.
 
@@ -160,14 +168,22 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
       // Read once: the planner is shown, the document checked against, and its
       // acp-agent nodes run in this cwd, even if the harness's moves meanwhile.
       const cwd = ctx.cwdState.cwd;
+      const grants: Grants = {
+        connections: opts.connections ?? {},
+        acp: opts.acp,
+        runCode: opts.runCode,
+        mcp: opts.mcp,
+        cwd,
+      };
       const toolList = opts.tools.map((t) => `- ${t.name}: ${t.description}`).join('\n');
       const basePrompt = [
         opts.instructions,
         PLANNER_INSTRUCTIONS,
         `\nAvailable tools:\n${toolList}`,
-        connectionsPrompt(opts.connections, plannerConnections(opts.connections, ctx)),
-        acpPrompt(opts.acpAgents, opts.acp, cwd),
-        mcpPrompt(opts.mcp),
+        grantsPrompt(grants, {
+          connections: plannerConnections(grants.connections, ctx),
+          acpAgents: opts.acpAgents,
+        }),
         `\nTask: ${input}`,
       ]
         .filter(Boolean)
@@ -194,11 +210,8 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
         const text = coerceToString(rawOutput);
 
         const parseResult = tryParseWorkflow(text, maxDepth, {
-          allowlist: opts.connections ?? {},
+          grants,
           ranges: profileVersions(ctx),
-          acp: opts.acp,
-          cwd,
-          mcp: opts.mcp,
           secrets: harnessInternal<SecretResolver>(harness, 'secrets'),
         });
         if (!parseResult.ok) {
@@ -221,8 +234,9 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
           executeStep,
           acpAgents: opts.acpAgents,
           acpBounds: acpBounds(opts.acp, cwd),
+          runCodeBounds: opts.runCode ?? {},
           expressionLimits: opts.expressionLimits,
-          allowlist: opts.connections ?? {},
+          allowlist: grants.connections,
           mcp: opts.mcp,
         };
 
@@ -287,6 +301,12 @@ export interface ParseAndRunWorkflowOpts {
    */
   acp?: AcpAllowlist;
   /**
+   * The most the document's `runCode` nodes may ask: the harness subprocess
+   * adapters they may name (spec 26 § runCode). Without it a node may name
+   * none, and one that does fails validation with `CONNECTION_NOT_ALLOWED`.
+   */
+  runCode?: RunCodeGrant;
+  /**
    * The MCP servers the document may attach — `{ "mcp" }` entries in `tools`
    * or `connections` — with the secrets and policy each grant sets and
    * the `provider` that builds them (spec 26 § MCP servers). Unlike
@@ -315,7 +335,7 @@ export interface ParseAndRunWorkflowOpts {
  * @throws `NoeticConfigError` with code `INVALID_EXPRESSION_LIMITS` if `expressionLimits` holds a value that is not a positive integer or `Infinity`.
  * @throws `NoeticConfigError` with code `EXPRESSION_LIMIT_EXCEEDED` if an expression exceeds its limits.
  * @throws `NoeticConfigError` with code `CONNECTION_UNKNOWN` if a node uses a connection the document does not declare, or the allowlist names one the harness does not have.
- * @throws `NoeticConfigError` with code `CONNECTION_NOT_ALLOWED` if the document asks for more than `connections` grants (none when absent), an `acp-agent` node asks for more than `acp` grants, or the document names an MCP server `mcp` does not grant.
+ * @throws `NoeticConfigError` with code `CONNECTION_NOT_ALLOWED` if the document asks for more than `connections` grants (none when absent), an `acp-agent` node asks for more than `acp` grants, a `runCode` node names a subprocess adapter `runCode` does not grant, or the document names an MCP server `mcp` does not grant.
  * @throws `NoeticConfigError` with code `CONNECTION_INVALID` if an MCP server uses a `$secret` and the harness has no `environment.secrets`.
  */
 export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promise<string> {
@@ -323,10 +343,13 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
   checkAllowlistNames(allowlist, opts.ctx);
   const cwd = opts.ctx.cwdState.cwd;
   const parseResult = tryParseWorkflow(opts.json, opts.maxDepth ?? DEFAULT_MAX_DEPTH, {
-    allowlist,
-    acp: opts.acp,
-    cwd,
-    mcp: opts.mcp,
+    grants: {
+      connections: allowlist,
+      acp: opts.acp,
+      runCode: opts.runCode,
+      mcp: opts.mcp,
+      cwd,
+    },
     secrets: harnessInternal<SecretResolver>(opts.harness, 'secrets'),
   });
   if (!parseResult.ok && parseResult.configError) {
@@ -348,6 +371,7 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
     workflows: opts.workflows,
     acpAgents: opts.acpAgents,
     acpBounds: acpBounds(opts.acp, cwd),
+    runCodeBounds: opts.runCode ?? {},
     maxRecursionDepth: opts.maxRecursionDepth,
     expressionLimits: opts.expressionLimits,
     allowlist,
@@ -419,39 +443,21 @@ interface ParseFail {
   configError?: NoeticConfigError;
 }
 
-/**
- * What the host lets a document use: `allowlist` the connections it grants,
- * and `acp` and `mcp`, undefined, their narrowest defaults.
- */
+/** What a document is checked against. */
 interface DocumentCheck {
-  allowlist: ConnectionAllowlist;
+  grants: Grants;
   /**
    * Harness connection → profile → installed version. When given, a manifest
    * entry naming a profile without a range gets `^<major>` of the version the
    * connection serves (dynamicWorkflow fills the ranges in itself).
    */
   ranges?: ProfileVersions;
-  /** The most `acp-agent` nodes may ask of each agent. */
-  acp?: AcpAllowlist;
-  /** The harness's working directory: an `acp-agent` node's `cwd` without an `acp` grant. */
-  cwd: string;
-  /** The MCP servers the document may name; undefined grants none. */
-  mcp?: McpAllowlist;
   /** The harness's secret resolver, which a `$secret` in an MCP server needs. */
   secrets?: SecretResolver;
 }
 
 /** Harness connection → profile → the version it serves. */
 type ProfileVersions = ReadonlyMap<string, Readonly<Record<string, string>>>;
-
-/** What the planner is shown of one allowed connection: the profiles it serves and its allowed operations. */
-interface PlannerConnection {
-  readonly profiles: Readonly<Record<string, string>>;
-  readonly operations: ReadonlyArray<{
-    readonly name: string;
-    readonly inputSchema: unknown;
-  }>;
-}
 
 /** The registry surface the planner reads. Structural: builders sit below the registry and must not import it. */
 interface PlannerRegistry {
@@ -551,16 +557,13 @@ function tryParseWorkflow(raw: unknown, maxDepth: number, check: DocumentCheck):
   };
 }
 
-/** The error a document has, checked against its manifest, the host connection allowlist, and what its `acp-agent` nodes may ask. */
+/** The error a document has, checked against the host's grants. */
 function connectionErrorOf(
   doc: WorkflowDocument,
   check: DocumentCheck,
 ): NoeticConfigError | undefined {
   try {
-    checkConnectionAllowlist(doc, check.allowlist);
-    checkToolConnections(doc, check.allowlist);
-    checkAcpAgents(doc, check.acp, check.cwd);
-    checkMcpServers(doc, check.mcp, check.secrets);
+    checkGrants(doc, check.grants, check.secrets);
     return undefined;
   } catch (error) {
     if (isNoeticConfigError(error)) {
@@ -703,60 +706,6 @@ function plannerConnections(
     });
   }
   return out;
-}
-
-function connectionLine(
-  name: string,
-  entry: ConnectionAllowlist[string],
-  known: PlannerConnection | undefined,
-): string {
-  const profiles = Object.keys(known?.profiles ?? {});
-  const parts = [
-    ...(profiles.length > 0
-      ? [
-          `profiles: ${profiles.join(', ')}`,
-        ]
-      : []),
-    `ops: ${(entry.ops ?? []).join(', ') || '(none)'}`,
-    `events: ${(entry.events ?? []).join(', ') || '(none)'}`,
-  ];
-  if (entry.setup) {
-    parts.push(`setup fields: ${Object.keys(entry.setup).join(', ')}`);
-  }
-  if (entry.secrets) {
-    parts.push(
-      `secrets: ${Object.entries(entry.secrets)
-        .map(([secret, field]) => `${secret} (only in ${field})`)
-        .join(', ')}`,
-    );
-  }
-  const schemas = (known?.operations ?? []).map(
-    (op) => `    - ${op.name} args: ${JSON.stringify(op.inputSchema)}`,
-  );
-  return [
-    `- ${name}: ${parts.join('; ')}`,
-    ...schemas,
-  ].join('\n');
-}
-
-/** The planner's view of the connections it may use: only the allowed ones, with their operations and argument schemas. */
-function connectionsPrompt(
-  allowlist: ConnectionAllowlist | undefined,
-  known: ReadonlyMap<string, PlannerConnection>,
-): string {
-  const entries = Object.entries(allowlist ?? {});
-  if (entries.length === 0) {
-    return '\nNo connections are available: do not emit call, wait or verify nodes or a "connections" map.';
-  }
-  const lines = entries.map(([name, entry]) => connectionLine(name, entry, known.get(name)));
-  return `\nConnections you may use (a document lists the ones it needs in a root "connections" map, e.g. "connections": { "app": { "profile": "<profile>", "from": "<connection>" } } — the version range is filled in for you — or { "events": [...] } for an event source):
-${lines.join('\n')}
-Connection nodes:
-- { "kind": "call", "id": "<unique>", "connection": "<name>", "op": "<operation>", "args": { ... } } (run one operation; values may be { "$expr": "<JSONata on the input; $steps.<id> reads an earlier node's output>" }, { "$literal": ... }, or { "$secret": "<name>" })
-- { "kind": "wait", "id": "<unique>", "connection": "<name>", "event": "<event>", "filter": "<JSONata test on { event, input }>", "around": [<steps>], "timeoutMs": <ms> } (listen, run around, then wait for the event)
-- { "kind": "verify", "id": "<unique>", "subject": "<name>", "expect": [{ "<sense>": "<pattern>" }, ...], "never": [<matchers>], "act": [<steps>], "witnesses": ["<name>"], "close": { "until": "quiet"|"event"|"done"|"exit" } } (run act on the subject and check what was expected happened; act names operations by name)
-Inside "around", "act" or a sequence's "steps", { "<operation>": { ...args } } is a call on the enclosing connection.
-A callModel or acp-agent node may instead give the model a connection's tools with the "tools" entry { "connection": "<name>", "ops": [<optional; globs within the ops above>] }; this needs no "connections" map.`;
 }
 
 function safeParse(text: string): unknown {

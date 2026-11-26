@@ -80,8 +80,9 @@ delivers events by webhook), `profiles`, `extensions`, `timeoutMs`,
 `requestTimeoutMs`, `pollIntervalMs` and `clientInfo`. A header or environment
 variable given twice is `CONNECTION_INVALID`. The options of an entry —
 `policy`, `expose`, `look`, `pool` — live on the entry, never on `mcp()`. A stdio server that must run
-somewhere else (the machine an ACP agent runs on, a container) takes
-`spawn`, a `Spawn` from `@noetic-tools/types` — `(command) => Promise<ByteStream>`:
+somewhere else (where an ACP agent runs, a container) takes
+`spawn`, a `Spawn` from `@noetic-tools/types` — `(command, options?) => Promise<ByteStream>`,
+where `options.subprocess` is a `SubprocessChoice`: the harness's subprocess adapters by name, and the name of the one the listing step names, if any (`27-acp-agent-steps` § The subprocess adapter):
 the caller starts the process there and hands back its stdio as a
 `{ readable, writable, close }` stream, and the bridge speaks MCP over it as it
 does over a local subprocess. An ACP agent's `AcpAgent.spawn` is one, so a
@@ -636,7 +637,7 @@ Setup and validation (`NoeticConfigError`):
 | `CONNECTION_UNSATISFIED` | A connection does not offer what is required. `missing` says which: a profile or extension version, an operation, an event, or a sense (spec 37). |
 | `CONNECTION_NOT_ALLOWED` | A document asks for more than its allowlist grants — a manifest, a `{ "connection" }` tool entry or its `ops`, or an MCP server the `mcp` allowlist does not grant — or sets a setup field reserved to the host. |
 | `CONNECTION_INVALID` | A manifest entry, handle, harness entry or `mcp()` configuration is malformed: an unnamed list entry, a header or environment variable given twice, `auth` with an `Authorization` header, a `connectionTools()` name that is not a connection name, a document `{ "mcp" }` entry whose key and name disagree, a record key that disagrees with `mcp({ name })`, a turn or step entry with `pool`, or a function-form `tools` returning a connection nothing attached, or a document naming an MCP server when the `mcp` allowlist has no `provider`. |
-| `CONNECTION_NAME_TAKEN` | An entry names a connection its scope or an outer one already attaches with a different provider or options. |
+| `CONNECTION_NAME_TAKEN` | An entry names a connection its scope or an outer one already attaches with a different provider or options, or one another `acpAgent` step of the turn attached under another `subprocess` name. |
 | `CONNECTION_TOOL_COLLISION` | Two operations would reach the model under one tool name. |
 
 Run time (`NoeticError` kinds):
@@ -709,7 +710,14 @@ interface ConnectionIdentity { surface: string; instance: string; epoch?: number
 
 `ConnectOptions` carries `redact(value)`: a provider calls it with every
 credential it holds (a bearer token, an OAuth token), and the harness scrubs
-that value as it scrubs resolved secrets.
+that value as it scrubs resolved secrets. It carries `subprocess` too, a
+`SubprocessChoice` holding the harness's subprocess adapters
+(`08-runtime` § Named Adapters), which `mcp()` hands to its `spawn`. For an
+entry an `acpAgent` step lists in its `tools`, the choice also names the
+adapter that step names (`subprocess: 'builder'`), so a stdio server started
+with `spawn: agent.spawn` runs beside the step's agent. One entry is one
+connection, started in one place: a second `acpAgent` step that lists it
+under another `subprocess` name fails the turn with `CONNECTION_NAME_TAKEN`.
 
 Each `ConnectionOperationInfo` in a manifest may carry `annotations` — the
 server's hints about the operation: `title`, `readOnlyHint`,

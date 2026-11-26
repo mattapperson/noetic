@@ -1,5 +1,6 @@
 import type { LLMResponse } from './common';
 import type { FsAdapter } from './fs-adapter';
+import type { AdapterSets } from './harness-platform';
 import type { Item } from './items';
 import type { ShellAdapter } from './shell-adapter';
 import type { SteeringDecision } from './steering';
@@ -39,10 +40,12 @@ export interface ExecutionContext {
     output: number;
   };
   cost: number;
-  /** Filesystem adapter for virtual or real filesystem access. */
+  /** The default filesystem adapter. */
   fs: FsAdapter;
-  /** Shell adapter for virtual or real shell command execution. */
+  /** The default shell adapter. */
   shell: ShellAdapter;
+  /** Every filesystem, shell and subprocess adapter, by name. */
+  adapters: AdapterSets;
   callModel?: (request: LayerCallModelRequest) => Promise<LLMResponse>;
   /**
    * Ask the harness's approval seam about an action (spec 08 § Held tool calls).

@@ -1,11 +1,14 @@
 import type {
+  AdapterSets,
   Context,
   ContextCacheStore,
   ContextWindow,
   FsAdapter,
   ItemSchemaRegistry,
   LayerWindow,
+  ShellAdapter,
   StorageAdapter,
+  SubprocessAdapter,
 } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { ItemLogImpl } from '../runtime/item-log-impl';
@@ -62,9 +65,8 @@ export async function previewContext({
     ...contextToExecCtx(ctx),
     approve: undefined,
     fs: readOnlyFs(ctx.harness.fs),
-    shell: {
-      exec: readOnly,
-    },
+    shell: readOnlyShell,
+    adapters: readOnlyAdapters(ctx.harness.adapters),
     trace: {
       setAttribute() {},
       addEvent() {},
@@ -219,7 +221,52 @@ function previewStorage(storage?: StorageAdapter): StorageAdapter {
 }
 
 function readOnly(): Promise<never> {
-  return Promise.reject(new Error('Context previews cannot write files or run shell commands.'));
+  return Promise.reject(
+    new Error('Context previews cannot write files, run shell commands or start processes.'),
+  );
+}
+
+const readOnlyShell: ShellAdapter = {
+  exec: readOnly,
+};
+
+/** Every named adapter behind the same guard as the defaults, so a preview has no way around it. */
+function readOnlyAdapters(adapters: AdapterSets): AdapterSets {
+  return {
+    fs: {
+      get: (name) => readOnlyFs(adapters.fs.get(name)),
+      defaultName: adapters.fs.defaultName,
+      list: () => adapters.fs.list(),
+    },
+    shell: {
+      get: (name) => {
+        adapters.shell.get(name);
+        return readOnlyShell;
+      },
+      defaultName: adapters.shell.defaultName,
+      list: () => adapters.shell.list(),
+    },
+    subprocess: {
+      get: (name) => readOnlySubprocess(adapters.subprocess.get(name)),
+      defaultName: adapters.subprocess.defaultName,
+      list: () => adapters.subprocess.list(),
+    },
+  };
+}
+
+/** Looks at what runs; starts, stops and reattaches nothing. */
+function readOnlySubprocess(subprocess: SubprocessAdapter): SubprocessAdapter {
+  return {
+    get: subprocess.get.bind(subprocess),
+    isAlive: subprocess.isAlive.bind(subprocess),
+    listLive: subprocess.listLive.bind(subprocess),
+    spawn: readOnly,
+    stop: readOnly,
+    pause: readOnly,
+    resume: readOnly,
+    // The in-memory adapter reattaches by running the step again.
+    reattach: readOnly,
+  };
 }
 
 function readOnlyFs(fs: FsAdapter): FsAdapter {

@@ -7,7 +7,7 @@ import { createInMemoryFsAdapter } from '../../src/adapters/in-memory-fs-adapter
 import { createInMemoryShellAdapter } from '../../src/adapters/in-memory-shell-adapter';
 import { layerData, layerFunction } from '../../src/builders/layer-provides-builders';
 import { ContextImpl } from '../../src/runtime/context-impl';
-import { makeMockContext, makeMockHarness } from '../_helpers';
+import { makeAdapterSets, makeMockContext, makeMockHarness } from '../_helpers';
 
 //#region Test Helpers
 
@@ -465,6 +465,7 @@ describe('scratchpad provides', () => {
         cost: 0,
         fs: createInMemoryFsAdapter(),
         shell: createInMemoryShellAdapter(),
+        adapters: makeAdapterSets(),
         tokenize: () => 0,
         trace: {
           setAttribute() {},

@@ -62,8 +62,8 @@ export function toolCollisionError(
 export function nameTakenError(name: string, where: string, holder: string): NoeticConfigError {
   return new NoeticConfigError({
     code: ConnectionConfigErrorCode.NameTaken,
-    message: `${where} names connection '${name}', which the ${holder} already attaches with a different provider or options.`,
-    hint: `Pass the same entry the ${holder} uses, or give this one another name.`,
+    message: `${where} names connection '${name}', which the ${holder} already attaches with a different provider, options or subprocess adapter.`,
+    hint: `Pass the same entry the ${holder} uses, on the same subprocess adapter, or give this one another name.`,
   });
 }
 

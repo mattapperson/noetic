@@ -416,7 +416,12 @@ function serverProvider(
   return provider;
 }
 
-/** The server in ACP's shape with each secret resolved through the harness and registered for scrubbing. */
+/**
+ * The server in ACP's shape with each secret resolved through the harness and
+ * registered for scrubbing. Its `spawn` is bound to the harness's subprocess
+ * adapters and the one the server's node names, so the server starts beside
+ * the node's agent whatever the host's provider forwards.
+ */
 async function granted(
   server: WorkflowMcpServer,
   spawn: Spawn | undefined,
@@ -437,10 +442,19 @@ async function granted(
     env: await resolveValues(server.env ?? [], opts),
     ...(spawn
       ? {
-          spawn,
+          spawn: beside(spawn, opts.subprocess),
         }
       : {}),
   };
+}
+
+function beside(spawn: Spawn, subprocess: ConnectOptions['subprocess']): Spawn {
+  return subprocess
+    ? (command) =>
+        spawn(command, {
+          subprocess,
+        })
+    : spawn;
 }
 
 /**

@@ -1,5 +1,5 @@
 /**
- * The remote runner: started on the agent's machine, it runs what a host asks
+ * The remote runner: started where the agent should run, it runs what a host asks
  * for over one channel — the agent with its launch settings, MCP servers
  * beside it — and serves the host's tool bridge to them on a loopback port.
  *
@@ -16,24 +16,23 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { createServer } from 'node:http';
 import * as https from 'node:https';
 import { Readable, Writable } from 'node:stream';
-import type { AcpTransport, AcpWhenHostExits } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import type { AcpTransport, AcpWhenHostExits, FrameLink, HostFrame } from '@noetic-tools/types';
+import {
+  chunksOf,
+  frameworkCast,
+  fromBase64,
+  HostFrameSchema,
+  isLoopbackHost,
+  lineFrameLink,
+  toBase64,
+  webSocketFrameLink,
+} from '@noetic-tools/types';
 import { WebSocketServer } from 'ws';
 import type { KeeperLink } from '../keeper/client';
 import { attachKeeper, isKeeperAddress, keeperHandleOf, startKeeper } from '../keeper/client';
 import { serverEnv } from '../server-env';
 import type { AcpRunnerGrant } from './grants';
 import { checkStart } from './grants';
-import type { FrameLink, HostFrame } from './protocol';
-import {
-  chunksOf,
-  fromBase64,
-  HostFrameSchema,
-  isLoopbackHost,
-  lineFrameLink,
-  toBase64,
-} from './protocol';
-import { webSocketFrameLink } from './ws-link';
 
 //#region Types
 

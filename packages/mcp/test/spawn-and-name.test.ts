@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { PassThrough, Readable, Writable } from 'node:stream';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import type { Spawn, SpawnCommand } from '@noetic-tools/types';
+import type { Spawn, SpawnCommand, SubprocessChoice } from '@noetic-tools/types';
 import { frameworkCast, isNoeticConfigError } from '@noetic-tools/types';
 import type { McpConfig } from '../src/config';
 import { mcp } from '../src/provider';
@@ -22,7 +22,7 @@ function echoServer(): TestServer {
 
 /**
  * A `spawn` that "starts" the server in this process: it serves MCP over stdio
- * on a pair of byte pipes, as a process on another machine would over its
+ * on a pair of byte pipes, as a process on another host would over its
  * stdin and stdout.
  */
 function inProcessSpawn(server: TestServer): {
@@ -137,6 +137,27 @@ describe('stdio over spawn', () => {
     expect(JSON.stringify(result)).toContain('echo hi');
     await connection.release();
     expect(fake.closed()).toBe(1);
+  });
+
+  it("hands the spawn the harness's subprocess adapters", async () => {
+    const given: Array<SubprocessChoice | undefined> = [];
+    const fake = inProcessSpawn(echoServer());
+    const subprocess = frameworkCast<SubprocessChoice>({});
+    const provider = mcp({
+      command: 'issues-mcp',
+      spawn: async (command, options) => {
+        given.push(options?.subprocess);
+        return await fake.spawn(command);
+      },
+    });
+    const [connection] = await provider.connect({
+      ...connectOptions('remote'),
+      subprocess,
+    });
+    await connection?.release();
+    expect(given).toEqual([
+      subprocess,
+    ]);
   });
 
   it('a spawn that is not a function is CONNECTION_INVALID', () => {

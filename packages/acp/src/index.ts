@@ -71,7 +71,7 @@ export { spawnOn } from './spawn';
 /** @public */
 export type { AcpLoopbackPair } from './transport-loopback';
 /** @public */
-export { createAcpLoopbackPair, loopbackMachine, loopbackTransport } from './transport-loopback';
+export { createAcpLoopbackPair, loopbackLink, loopbackTransport } from './transport-loopback';
 
 //#endregion
 

@@ -115,7 +115,7 @@ describe('piToolWiring', () => {
     expect(piToolWiring.declare).toBe('launch');
   });
 
-  it('takes a launcher named for another machine', () => {
+  it('takes a launcher named for another host', () => {
     const env = piToolWiring.launchEnv?.({
       bridge: BRIDGE,
       tools: [],

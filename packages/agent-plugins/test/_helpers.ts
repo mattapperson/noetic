@@ -20,8 +20,9 @@ import type {
   FsAdapter,
   ScopedStorage,
   ShellAdapter,
+  SubprocessAdapter,
 } from '@noetic-tools/types';
-import { estimateTokens } from '@noetic-tools/types';
+import { adapterSets, estimateTokens } from '@noetic-tools/types';
 import { z } from 'zod';
 import { PLUGIN_SCHEMA_ID } from '../src/manifest';
 import { MCP_SCHEMA_ID } from '../src/mcp-config';
@@ -238,6 +239,17 @@ const throwingShell: ShellAdapter = {
   exec: () => unusedAdapter('ShellAdapter.exec'),
 };
 
+const throwingSubprocess: SubprocessAdapter = {
+  spawn: () => unusedAdapter('SubprocessAdapter.spawn'),
+  get: () => unusedAdapter('SubprocessAdapter.get'),
+  stop: () => unusedAdapter('SubprocessAdapter.stop'),
+  pause: () => unusedAdapter('SubprocessAdapter.pause'),
+  resume: () => unusedAdapter('SubprocessAdapter.resume'),
+  isAlive: () => unusedAdapter('SubprocessAdapter.isAlive'),
+  reattach: () => unusedAdapter('SubprocessAdapter.reattach'),
+  listLive: () => unusedAdapter('SubprocessAdapter.listLive'),
+};
+
 /**
  * A real `ExecutionContext` — every field present, no casts — carrying a
  * recording trace so tests can assert that diagnostics are reported (§11.3).
@@ -259,6 +271,11 @@ export function fakeExecutionContext(): {
     cost: 0,
     fs: throwingFs,
     shell: throwingShell,
+    adapters: adapterSets({
+      fs: throwingFs,
+      shell: throwingShell,
+      subprocess: throwingSubprocess,
+    }),
     tokenize: estimateTokens,
     trace: {
       setAttribute: () => {},

@@ -1,6 +1,6 @@
 /**
  * Child-process fixture: answers MCP `tools/list` over newline-delimited
- * JSON-RPC on stdio, naming the machine's working directory in its one tool,
+ * JSON-RPC on stdio, naming its working directory in its one tool,
  * as a server that reads the agent's workspace would.
  */
 

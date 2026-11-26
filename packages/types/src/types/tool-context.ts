@@ -2,6 +2,7 @@ import type { TurnContext } from '@openrouter/agent';
 import type { StepMeta } from './common';
 import type { Context } from './context';
 import type { FsAdapter } from './fs-adapter';
+import type { AdapterSets } from './harness-platform';
 import type { Item } from './items';
 import type { AgentHarnessContract } from './runtime';
 import type { ShellAdapter } from './shell-adapter';
@@ -21,10 +22,12 @@ export interface ToolExecutionContext {
   readonly ctx: Context;
   /** The harness instance executing this tool. */
   readonly harness: AgentHarnessContract;
-  /** Filesystem adapter for virtual or real filesystem access. */
+  /** The default filesystem adapter. */
   readonly fs: FsAdapter;
-  /** Shell adapter for virtual or real shell command execution. */
+  /** The default shell adapter. */
   readonly shell: ShellAdapter;
+  /** Every filesystem, shell and subprocess adapter, by name. */
+  readonly adapters: AdapterSets;
   /** Per-layer state accessor for reading/writing tool-specific state. */
   readonly context: ToolContext;
   /** The fully assembled conversation view at the point of tool invocation. */

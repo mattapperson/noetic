@@ -50,6 +50,11 @@ export function collectStepEntries(step: Step): AttachedEntry[] {
         ...namedFromList(listed, where),
         scope: 'step',
         where,
+        ...(model.kind === 'acp-agent' && model.subprocess !== undefined
+          ? {
+              subprocess: model.subprocess,
+            }
+          : {}),
       });
     }
   });

@@ -1,17 +1,19 @@
 /**
- * A stdio MCP server started on the agent's machine, with Noetic still its
- * client: its stdio comes back over the machine's channel.
+ * A stdio MCP server started where the agent runs, with Noetic still its
+ * client: its stdio comes back over the link's channel.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AcpMachineFactory, AcpTransport } from '@noetic-tools/types';
+import { createLinkSubprocessAdapter } from '@noetic-tools/core';
+import type { AcpTransport, SubprocessAdapter, SubprocessOpen } from '@noetic-tools/types';
+import { createWebSocketSubprocessAdapter } from '../../platform-node/src/runner-subprocess-adapters';
 import type { AcpRunnerListener } from '../src/remote';
-import { listenAcpRunner, webSocketMachine } from '../src/remote';
+import { listenAcpRunner } from '../src/remote';
 import { spawnOn } from '../src/spawn';
-import { localMachine } from '../src/stdio';
+import { openLocalLink } from '../src/stdio';
 
 const SERVER = join(import.meta.dir, 'fixtures', 'stdio-mcp-server.ts');
 const TOKEN = 'spawn-test-token-0123456789';
@@ -41,22 +43,22 @@ async function listTools(server: AcpTransport): Promise<unknown> {
   return JSON.parse(text);
 }
 
-function counting(machine: AcpMachineFactory): {
-  machine: AcpMachineFactory;
+function counting(inner: { open: SubprocessOpen }): {
+  adapter: SubprocessAdapter;
   closed: () => number;
 } {
   let closed = 0;
   return {
-    machine: async (opts) => {
-      const opened = await machine(opts);
+    adapter: createLinkSubprocessAdapter(async (opts) => {
+      const link = await inner.open(opts);
       return {
-        ...opened,
+        ...link,
         close: async () => {
           closed += 1;
-          await opened.close();
+          await link.close();
         },
       };
-    },
+    }),
     closed: () => closed,
   };
 }
@@ -74,13 +76,13 @@ describe('spawnOn', () => {
 
   it('carries a stdio MCP server started through the runner', async () => {
     const workspace = realpathSync(mkdtempSync(join(tmpdir(), 'agent-workspace-')));
-    const { machine, closed } = counting(
-      webSocketMachine({
+    const { adapter, closed } = counting(
+      createWebSocketSubprocessAdapter({
         url: listener.url,
         token: TOKEN,
       }),
     );
-    const server = await spawnOn(machine)({
+    const server = await spawnOn(adapter)({
       command: process.execPath,
       args: [
         SERVER,
@@ -107,8 +109,8 @@ describe('spawnOn', () => {
     expect(closed()).toBe(1);
   });
 
-  it('runs on this machine', async () => {
-    const server = await spawnOn(localMachine())({
+  it('runs as a local process', async () => {
+    const server = await spawnOn(createLinkSubprocessAdapter((opts) => openLocalLink({}, opts)))({
       command: process.execPath,
       args: [
         SERVER,
@@ -118,14 +120,14 @@ describe('spawnOn', () => {
     await server.close();
   });
 
-  it('releases the machine when the process cannot start', async () => {
-    const { machine, closed } = counting(
-      webSocketMachine({
+  it('closes the link when the process cannot start', async () => {
+    const { adapter, closed } = counting(
+      createWebSocketSubprocessAdapter({
         url: listener.url,
         token: TOKEN,
       }),
     );
-    const failure = await spawnOn(machine)({
+    const failure = await spawnOn(adapter)({
       command: 'docs-mcp',
       cwd: '/no/such/dir/on/the/runner',
     }).catch((e: unknown) => e);

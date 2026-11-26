@@ -32,6 +32,7 @@ import type {
   McpAllowlist,
   Step,
   StepToolEntry,
+  SubprocessAdapter,
   WorkflowMcpServer,
   WorkflowToolEntry,
 } from '@noetic-tools/types';
@@ -39,12 +40,13 @@ import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
 import { defineAcpAgent } from '../../acp/src/define';
 import { claudeToolWiring } from '../../acp/src/tool-wiring';
-import { loopbackMachine } from '../../acp/src/transport-loopback';
+import { loopbackLink } from '../../acp/src/transport-loopback';
 import type { ContextData } from '../../core/src/index';
 import {
   AgentHarness,
   callModel,
   connectionTools,
+  createInMemorySubprocessAdapter,
   InMemoryExporter,
   parseAndRunWorkflow,
   runCode,
@@ -220,19 +222,23 @@ interface AgentLog {
   listed: string[];
 }
 
+const CLAUDE_SHAPED: AcpAgent = defineAcpAgent({
+  agentId: 'claude-shaped',
+  command: {
+    command: 'claude-shaped',
+  },
+  tools: claudeToolWiring,
+});
+
 /**
- * An ACP agent shaped like Claude Code: it reaches the bridge with an MCP
- * client, announces its call as an ACP `tool_call`, and calls
- * `linear_get_issue` with its own call id `call_1` in `_meta`.
+ * Runs {@link CLAUDE_SHAPED} in this process as an agent shaped like Claude
+ * Code: it reaches the bridge with an MCP client, announces its call as an
+ * ACP `tool_call`, and calls `linear_get_issue` with its own call id
+ * `call_1` in `_meta`.
  */
-function claudeShaped(log: AgentLog): AcpAgent {
-  return defineAcpAgent({
-    agentId: 'claude-shaped',
-    command: {
-      command: 'claude-shaped',
-    },
-    tools: claudeToolWiring,
-    machine: loopbackMachine((conn) => {
+function claudeShapedSubprocess(log: AgentLog): SubprocessAdapter {
+  return createInMemorySubprocessAdapter({
+    open: loopbackLink((conn) => {
       let servers: ReadonlyArray<AcpMcpServer> = [];
       return {
         async initialize() {
@@ -419,11 +425,10 @@ function graphFor(
     readonly consumer: Consumer;
     readonly entry: ReturnType<typeof linear>;
   },
-  log: AgentLog,
   harness: () => AgentHarness,
 ): Step<ContextData, string, string> {
   const { attachment, consumer, entry } = pairing;
-  const agent = claudeShaped(log);
+  const agent = CLAUDE_SHAPED;
   const tools: StepToolEntry[] = [
     attachment === 'pick by name' ? connectionTools('linear') : entry,
   ];
@@ -545,7 +550,6 @@ async function observe(attachment: Attachment, consumer: Consumer): Promise<Obse
         consumer,
         entry,
       },
-      log,
       () => {
         if (!built) {
           throw new Error('harness not built');
@@ -559,6 +563,7 @@ async function observe(attachment: Attachment, consumer: Consumer): Promise<Obse
           return `Bearer ${TOKEN}`;
         },
       },
+      subprocess: claudeShapedSubprocess(log),
     },
     callModelDefaults: {
       provider: 'openrouter',

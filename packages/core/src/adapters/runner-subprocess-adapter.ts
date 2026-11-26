@@ -1,23 +1,33 @@
 /**
- * The host's end of a remote runner: an {@link AcpMachine} whose processes run
- * on the runner's machine and whose tool bridge is reached through it.
+ * The host's end of a remote runner (`noetic-acp serve`): a subprocess
+ * adapter whose processes run where the runner runs and whose tool bridge is
+ * reached through it.
  *
- * Runtime-neutral: it needs only `fetch` and a {@link FrameLink}, so the
- * WebSocket and stdio links that open one live in the node entry.
+ * Platform-neutral: it needs only `fetch` and a {@link FrameLink}. The
+ * platform packages open that link over a WebSocket or a command's stdio.
  */
 
 import type {
-  AcpMachine,
-  AcpMachineFactory,
   AcpReattachHandle,
   AcpTransport,
   AcpWhenHostExits,
+  FrameLink,
+  RunnerFrame,
   SpawnCommand,
+  SubprocessAdapter,
+  SubprocessLink,
+  SubprocessOpen,
   ToolBridgeAddress,
 } from '@noetic-tools/types';
-import { AcpConnectError } from '@noetic-tools/types';
-import type { FrameLink, RunnerFrame } from './protocol';
-import { chunksOf, fromBase64, RunnerFrameSchema, toBase64 } from './protocol';
+import {
+  AcpConnectError,
+  chunksOf,
+  fromBase64,
+  NoeticConfigError,
+  RunnerFrameSchema,
+  toBase64,
+} from '@noetic-tools/types';
+import { createLinkSubprocessAdapter } from './link-subprocess-adapter';
 
 //#region Types
 
@@ -28,9 +38,14 @@ interface Waiter {
 
 interface Stream {
   controller: ReadableStreamDefaultController<Uint8Array>;
-  exited: Promise<void>;
-  exit(): void;
+  exited: Promise<number | null>;
+  exit(code: number | null): void;
 }
+
+/** A stream's host side, before the runner has answered for it. */
+type OpenedStream = Pick<Stream, 'exited'> & {
+  readable: ReadableStream<Uint8Array>;
+};
 
 /** How long a runner may take to answer a reattach. */
 const ATTACH_TIMEOUT_MS = 1e4;
@@ -51,18 +66,46 @@ const HOP_HEADERS = new Set([
 //#region Public API
 
 /**
- * A machine reached through a remote runner over `openLink`.
+ * A subprocess adapter whose processes run through a remote runner, reached
+ * over the frame link `dial` opens: one link per `open`. It holds a
+ * process's stdio (`open`) and runs `process` requests that carry no
+ * `stdin`. The runner's frames carry no end of input, so a request with
+ * `stdin` — a `runCode` node's — is refused rather than left waiting for
+ * one, and a command given none finds its input open and empty. A runner has
+ * no Noetic runtime, so a `step` request is refused too.
+ *
+ * @throws `NoeticConfigError` from `spawn`: `SUBPROCESS_RUNS_NO_STEPS` for a `step` request, `SUBPROCESS_CANNOT_END_INPUT` for a `process` request with `stdin`.
  * @public
  */
-export function runnerMachine(
-  openLink: (signal?: AbortSignal) => Promise<FrameLink>,
-): AcpMachineFactory {
-  return async ({ signal, whenHostExits = 'keep' }) => {
-    const peer = new RunnerPeer(await openLink(signal), signal);
-    // Agents this channel launches run through a keeper on the runner's
-    // machine, so they outlive the channel and a later one can reattach.
-    peer.keep(whenHostExits);
-    return peer.machine();
+export function createRunnerSubprocessAdapter(
+  dial: (signal?: AbortSignal) => Promise<FrameLink>,
+): SubprocessAdapter & {
+  open: SubprocessOpen;
+} {
+  const adapter = createLinkSubprocessAdapter(
+    async ({ signal, whenHostExits = 'keep' }) => {
+      const peer = new RunnerPeer(await dial(signal), signal);
+      // Processes this channel launches run through a keeper beside the
+      // runner, so they outlive the channel and a later one can reattach.
+      peer.keep(whenHostExits);
+      return peer.subprocessLink();
+    },
+    {
+      runtime: 'runner',
+    },
+  );
+  return {
+    ...adapter,
+    async spawn(request) {
+      if (request.kind !== 'step' && request.stdin !== undefined) {
+        throw new NoeticConfigError({
+          code: 'SUBPROCESS_CANNOT_END_INPUT',
+          message: `A remote runner cannot run '${request.command}' with \`stdin\`: its frames carry no end of input, so the command would wait for one and never finish.`,
+          hint: 'Run it through an adapter on this machine (`createLocalSubprocessAdapter()` from @noetic-tools/platform-node), or give the command its input as an argument or a file.',
+        });
+      }
+      return await adapter.spawn(request);
+    },
   };
 }
 
@@ -96,7 +139,7 @@ class RunnerPeer {
     );
   }
 
-  machine(): AcpMachine {
+  subprocessLink(): SubprocessLink {
     return {
       reach: (bridge) => this.reach(bridge),
       launch: (command) => this.start(command, 'launch'),
@@ -193,12 +236,9 @@ class RunnerPeer {
   }
 
   /** The readable for stream `id`, registered before the runner can answer. */
-  private openStream(id: string): {
-    readable: ReadableStream<Uint8Array>;
-    exited: Promise<void>;
-  } {
-    let exit = (): void => undefined;
-    const exited = new Promise<void>((resolve) => {
+  private openStream(id: string): OpenedStream {
+    let exit = (_code: number | null): void => undefined;
+    const exited = new Promise<number | null>((resolve) => {
       exit = resolve;
     });
     const readable = new ReadableStream<Uint8Array>({
@@ -219,10 +259,7 @@ class RunnerPeer {
   /** Stream `id` as a transport; closing it stops what it carries. */
   private transportFor(
     id: string,
-    stream: {
-      readable: ReadableStream<Uint8Array>;
-      exited: Promise<void>;
-    },
+    stream: OpenedStream,
     reattach: AcpReattachHandle | undefined,
   ): AcpTransport {
     const writable = new WritableStream<Uint8Array>({
@@ -239,11 +276,16 @@ class RunnerPeer {
       readable: stream.readable,
       writable,
       reattach,
+      exited: stream.exited,
       close: async () => {
         if (closed) {
           return;
         }
         closed = true;
+        // A process that has exited left nothing to stop.
+        if (!this.streams.has(id)) {
+          return;
+        }
         this.link.send({
           t: 'kill',
           id,
@@ -290,7 +332,7 @@ class RunnerPeer {
       return;
     }
     if (frame.t === 'exit') {
-      this.ended(frame.id);
+      this.ended(frame.id, frame.code);
       return;
     }
     if (frame.t === 'request') {
@@ -322,7 +364,7 @@ class RunnerPeer {
     waiter.resolve(frame);
   }
 
-  private ended(id: string): void {
+  private ended(id: string, code: number | null): void {
     const stream = this.streams.get(id);
     if (!stream) {
       return;
@@ -333,7 +375,7 @@ class RunnerPeer {
     } catch {
       // Already errored or closed.
     }
-    stream.exit();
+    stream.exit(code);
   }
 
   /** Answer a request the agent sent to a reached port from the host's bridge. */
@@ -417,7 +459,7 @@ class RunnerPeer {
     for (const id of [
       ...this.streams.keys(),
     ]) {
-      this.ended(id);
+      this.ended(id, null);
     }
     for (const request of this.requests.values()) {
       request.abort();

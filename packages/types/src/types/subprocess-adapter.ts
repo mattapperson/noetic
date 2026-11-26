@@ -1,3 +1,5 @@
+import type { AdapterSet } from './adapter-set';
+
 //#region Status
 
 /** @public Lifecycle states for a subprocess handle. */
@@ -47,12 +49,10 @@ interface SubprocessRequestBase {
 
 /**
  * @public
- * Launches an OS-level child process. This is the classic variant used by the
- * tasks runner to spawn planner / implementer children.
- *
- * When `kind` is omitted the request is treated as a process request — this
- * preserves backward compatibility with callers that predate the
- * `StepSubprocessRequest` variant.
+ * Runs a command to completion. With `stdin` the adapter writes it, closes
+ * the input and stores the command's stdout as the handle's `result` when it
+ * exits 0; any other exit fails the handle. A request with no `kind` is a
+ * process request.
  */
 export interface ProcessSubprocessRequest extends SubprocessRequestBase {
   kind?: 'process';
@@ -79,7 +79,10 @@ export interface StepSubprocessOverrides {
  * Dispatches a step through the adapter. `stepId` resolves against the shared
  * step registry — the in-memory adapter invokes the in-process execute pipeline,
  * while out-of-process adapters spawn a child runtime that re-imports the same
- * registry via a configured entry point.
+ * registry via a configured entry point. The far side therefore needs the
+ * Noetic runtime and the program's code; an adapter that reaches only a
+ * remote runner refuses the request with `NoeticConfigError`
+ * `SUBPROCESS_RUNS_NO_STEPS`.
  */
 export interface StepSubprocessRequest extends SubprocessRequestBase {
   kind: 'step';
@@ -222,6 +225,203 @@ export interface SubprocessAdapter {
    * persisted manifest.
    */
   listLive(): Promise<ReadonlyArray<SubprocessHandle>>;
+  /**
+   * Opens a link to where this adapter's processes run: through it a caller
+   * starts a process and holds its stdio. A process that outlived its host is
+   * reached again through the link's `attach`. Absent on an adapter that
+   * hands back no stdio.
+   */
+  open?: SubprocessOpen;
+}
+
+//#endregion
+
+//#region Document grants
+
+/**
+ * @public
+ * The most a document's `runCode` nodes may ask
+ * (`dynamicWorkflow({ runCode })`, `parseAndRunWorkflow({ runCode })`). A
+ * node asking for more fails validation with `CONNECTION_NOT_ALLOWED`.
+ */
+export interface RunCodeGrant {
+  /**
+   * The harness subprocess adapters a node may name. A name moves the code
+   * to another host, so the default is none: a node runs on the default.
+   */
+  readonly subprocess?: ReadonlyArray<string>;
+}
+
+//#endregion
+
+//#region Processes whose stdio the caller holds
+
+/**
+ * A duplex byte stream: a process's stdio, or a socket.
+ * @public
+ */
+export interface ByteStream {
+  /** Bytes arriving from the far end (a process's stdout). */
+  readonly readable: ReadableStream<Uint8Array>;
+  /** Bytes sent to the far end (a process's stdin). */
+  readonly writable: WritableStream<Uint8Array>;
+  /** Tear the stream down and release what holds it (process, socket, …). */
+  close(): Promise<void>;
+  /**
+   * For a process's stdio: settles with its exit code once it has exited,
+   * `null` when a signal ended it. Absent where the far end reports no exit.
+   */
+  readonly exited?: Promise<number | null>;
+}
+
+/** @public A process to start. */
+export interface SpawnCommand {
+  readonly command: string;
+  readonly args?: ReadonlyArray<string>;
+  /**
+   * Added to the environment where the process runs: for an agent
+   * (`SubprocessLink.launch`) all of it; for an MCP server
+   * (`SubprocessLink.spawn`, a `Spawn`) only the MCP SDK's default list
+   * (`HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `USER`), as the SDK starts a
+   * local server.
+   */
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  /** Working directory where the process runs. */
+  readonly cwd?: string;
+}
+
+/**
+ * @public
+ * Where a process may run: the harness's subprocess adapters, and the one a
+ * step names among them.
+ */
+export interface SubprocessChoice {
+  /** The harness's `environment.subprocess`. */
+  readonly adapters: AdapterSet<SubprocessAdapter>;
+  /** The adapter a step names. It comes before the one the process's owner names. */
+  readonly name?: string;
+}
+
+/** @public What the caller of a {@link Spawn} knows about where processes run. */
+export interface SpawnOptions {
+  /**
+   * A `Spawn` bound to no adapter of its own starts the process through the
+   * named adapter, else the default. The one it lands on must have `open`.
+   */
+  readonly subprocess?: SubprocessChoice;
+}
+
+/**
+ * Starts a process and returns its stdio as a byte stream: how a stdio MCP
+ * server that must run where an ACP agent runs is started, with noetic still
+ * its MCP client. `@noetic-tools/acp` implements it (`spawnOn(adapter)`,
+ * `AcpAgent.spawn`); `@noetic-tools/mcp` takes it (`mcp({ command, spawn })`).
+ * @public
+ */
+export type Spawn = (command: SpawnCommand, options?: SpawnOptions) => Promise<ByteStream>;
+
+/**
+ * The stdio of a process a {@link SubprocessLink} launched, which may outlive
+ * its host: the byte stream an ACP agent's JSON-RPC frames ride on.
+ * @public
+ */
+export type AcpTransport = ByteStream & {
+  /**
+   * Set when the agent behind this stream outlives the host and can be
+   * reattached (a local agent run by its keeper). JSON, opaque outside the
+   * package that made it.
+   */
+  readonly reattach?: AcpReattachHandle;
+  /**
+   * Let go of the agent without stopping it, as a host that goes away does,
+   * so a later host can still reattach. Present only with {@link reattach}.
+   * Closing the stream or its link afterwards leaves the agent running.
+   */
+  detach?(): Promise<void>;
+};
+
+/**
+ * How to reach an agent that outlived its host: JSON a durable run stores with
+ * the step and hands back to `AcpConnectOptions.reattach` on resume. Opaque to
+ * everything but the package that made it.
+ * @public
+ */
+export type AcpReattachHandle = Readonly<Record<string, unknown>>;
+
+/**
+ * What happens to an agent when its host goes away without closing it — a
+ * crash, Ctrl-C, a killed process. `'keep'` (the default) keeps the agent
+ * working and holds everything it sends until a host reattaches; `'stop'`
+ * stops its whole process tree as soon as the host is gone.
+ * @public
+ */
+export type AcpWhenHostExits = 'keep' | 'stop';
+
+/**
+ * Where a tool bridge can be reached: an MCP streamable HTTP endpoint and the
+ * headers every request must carry (always the bridge's bearer token).
+ * @public
+ */
+export interface ToolBridgeAddress {
+  readonly serverName: string;
+  readonly url: string;
+  readonly headers: ReadonlyArray<{
+    name: string;
+    value: string;
+  }>;
+}
+
+/** @public What {@link SubprocessAdapter.open} is given. */
+export interface SubprocessOpenOptions {
+  /** Aborting this signal closes the link. */
+  signal?: AbortSignal;
+  /** See {@link AcpWhenHostExits}. */
+  whenHostExits?: AcpWhenHostExits;
+}
+
+/** @public {@link SubprocessAdapter.open}: opens one {@link SubprocessLink}. */
+export type SubprocessOpen = (options: SubprocessOpenOptions) => Promise<SubprocessLink>;
+
+/**
+ * One link to where an adapter's processes run. Everything started through
+ * it stops when it closes. An ACP connection opens one before its agent
+ * starts: the tool bridge listens on the host's loopback interface, so the
+ * link first carries it to where the agent can reach it (`reach`), then
+ * starts the agent with launch settings that may name that address
+ * (`launch`).
+ * @public
+ */
+export interface SubprocessLink {
+  /**
+   * An address the agent can use to reach `bridge`. The same address when the
+   * agent runs beside the host; a channel to it from anywhere else. A
+   * non-loopback hop is TLS.
+   */
+  reach(bridge: ToolBridgeAddress): Promise<ToolBridgeAddress>;
+  /**
+   * Start a process that may outlive this host — an ACP agent — and return
+   * its stdio. It gets the whole environment where it runs, plus `env`.
+   */
+  launch(command: SpawnCommand): Promise<AcpTransport>;
+  /**
+   * Start a process that lives no longer than the link — a stdio MCP server
+   * beside an agent, a command run to completion — and carry its stdio back.
+   * It gets the MCP SDK's default environment there plus `env`, as a local
+   * MCP server does.
+   */
+  spawn: Spawn;
+  /**
+   * The stream to an agent an earlier host launched through this adapter,
+   * which outlived it ({@link AcpTransport.reattach}). Rejects with
+   * `AcpConnectError` when that agent is gone. Absent where agents never
+   * outlive their host.
+   */
+  attach?(handle: AcpReattachHandle): Promise<AcpTransport>;
+  /**
+   * Release the link and everything started through it that it still holds:
+   * not an agent whose stream was let go of ({@link AcpTransport.detach}).
+   */
+  close(): Promise<void>;
 }
 
 //#endregion

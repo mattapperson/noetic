@@ -241,9 +241,9 @@ Run a serialised code body. Unlike the programmatic `runCode` (which carries a c
 | `id` | `string` | required | Unique step identifier. |
 | `execute` | `string` | required | Source code dispatched to the subprocess. Receives the step input on stdin; its stdout becomes the step output. |
 | `retry` | `object` | `undefined` | Retry policy: `{ maxAttempts, backoff: 'fixed' \| 'linear' \| 'exponential', initialDelay, maxDelay? }`. |
-| `subprocess` | `string` | `undefined` | Named subprocess adapter ref, resolved via `HydrationContext.resolveSubprocess`. When omitted, the harness default (`ctx.subprocess`) is used. |
+| `subprocess` | `string` | `undefined` | A subprocess adapter by name: the one `HydrationContext.resolveSubprocess` returns for it, else the harness's [adapter of that name](/docs/framework/runtime#named-adapters). When omitted, the harness default (`ctx.subprocess`) is used. A name neither knows fails the step with `UNKNOWN_SUBPROCESS_REFERENCE`. In a document run by `parseAndRunWorkflow` or `dynamicWorkflow`, a harness adapter name must be one the `runCode` grant lists ([Where a document's code may run](#where-a-documents-code-may-run)). |
 
-> **Execution requires a subprocess adapter.** The `runCode` node does not execute code in the worker process. The host must supply a subprocess adapter capable of running the code body and capturing its stdout. On Node, `createLocalSubprocessAdapter()` from `@noetic-tools/platform-node` does: it runs the body with `node -e`, writes the step input to stdin, and returns stdout. A non-zero exit (or failed handle) surfaces as a thrown error carrying the end of the process's stderr.
+> **Execution requires a subprocess adapter.** The `runCode` node does not execute code in the worker process. The host must supply a subprocess adapter capable of running the code body and capturing its stdout. On Node, `createLocalSubprocessAdapter()` from `@noetic-tools/platform-node` does: it runs the body with `node -e`, writes the step input to stdin, and returns stdout. A non-zero exit (or failed handle) surfaces as a thrown error carrying the end of the process's stderr. An adapter that reaches a remote runner (`createWebSocketSubprocessAdapter()` and the like) cannot run the node: the runner's frames carry no end of input, so it refuses a command given stdin with `SUBPROCESS_CANNOT_END_INPUT`.
 
 ### invokeTool
 
@@ -895,10 +895,11 @@ const response = await harness.getAgentResponse();
 | `maxRevisions` | `number` | `3` | Retries with error feedback on validation failure. |
 | `connections` | `ConnectionAllowlist` | `undefined` | What a generated document may use of the harness's connections. Without it the document is granted none; the planner is shown only these. See [What a document may use](/docs/framework/connections#what-a-document-may-use). |
 | `acpAgents` | `ReadonlyMap<string, AcpAgent>` | `undefined` | ACP agents a generated `acp-agent` node may run, keyed by agent id. The planner is shown these ids. See [ACP agents](/docs/framework/acp-agents#json-workflows). |
-| `acp` | `AcpAllowlist` | `undefined` | Per agent id, the most a generated `acp-agent` node may ask in `permissions`, `mode`, `model`, `cwd`, `clientCapabilities` and `session`. An agent without an entry gets the narrowest defaults; the planner is shown each agent's limits. See [What a document may ask of an agent](#what-a-document-may-ask-of-an-agent). |
+| `acp` | `AcpAllowlist` | `undefined` | Per agent id, the most a generated `acp-agent` node may ask in `permissions`, `mode`, `model`, `subprocess`, `fs`, `shell`, `cwd`, `clientCapabilities` and `session`. An agent without an entry gets the narrowest defaults; the planner is shown each agent's limits. See [What a document may ask of an agent](#what-a-document-may-ask-of-an-agent). |
+| `runCode` | `RunCodeGrant` | `undefined` | The harness subprocess adapters a generated `runCode` node may name in `subprocess`. Without it a node may name none; the planner is shown the granted names. See [Where a document's code may run](#where-a-documents-code-may-run). |
 | `mcp` | `McpAllowlist` | `undefined` | The MCP servers a generated document may attach, with their secrets, policy and `provider`. Without it, every server is refused; the planner is shown only the granted servers. See [MCP servers](#mcp-servers). |
 
-Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the planner cannot produce a valid workflow within the revision limit, `CONNECTION_UNKNOWN` if the allowlist names a connection the harness does not have, and `CONNECTION_NOT_ALLOWED` if the last revision still asks for more than `connections`, `acp` or `mcp` grants.
+Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the planner cannot produce a valid workflow within the revision limit, `CONNECTION_UNKNOWN` if the allowlist names a connection the harness does not have, and `CONNECTION_NOT_ALLOWED` if the last revision still asks for more than `connections`, `acp`, `runCode` or `mcp` grants.
 
 ## parseAndRunWorkflow()
 
@@ -938,18 +939,19 @@ const result = await parseAndRunWorkflow({
 | `expressionLimits` | `ExpressionLimits` | `DEFAULT_EXPRESSION_LIMITS` | Bounds on each expression evaluation (`steps`, `depth`, `length`, `timeout`). See [Expressions](/docs/framework/expressions#limits). |
 | `connections` | `ConnectionAllowlist` | `undefined` | What the document may use of the harness's connections: operation and event globs, `setup` value patterns, and secrets bound to one `op.field` each. A manifest asking for more fails with `CONNECTION_NOT_ALLOWED`. Without it the document is granted none, as with `acp` and `mcp`; pass the grants a document you trust should have. See [What a document may use](/docs/framework/connections#what-a-document-may-use). |
 | `acpAgents` | `ReadonlyMap<string, AcpAgent>` | `undefined` | ACP agents the document's `acp-agent` nodes may run, keyed by agent id. |
-| `acp` | `AcpAllowlist` | `undefined` | Per agent id, the most the document's `acp-agent` nodes may ask in `permissions`, `mode`, `model`, `cwd`, `clientCapabilities` and `session`. An agent without an entry gets the narrowest defaults. See [What a document may ask of an agent](#what-a-document-may-ask-of-an-agent). |
+| `acp` | `AcpAllowlist` | `undefined` | Per agent id, the most the document's `acp-agent` nodes may ask in `permissions`, `mode`, `model`, `subprocess`, `fs`, `shell`, `cwd`, `clientCapabilities` and `session`. An agent without an entry gets the narrowest defaults. See [What a document may ask of an agent](#what-a-document-may-ask-of-an-agent). |
+| `runCode` | `RunCodeGrant` | `undefined` | The harness subprocess adapters the document's `runCode` nodes may name in `subprocess`. Without it a node may name none. See [Where a document's code may run](#where-a-documents-code-may-run). |
 | `mcp` | `McpAllowlist` | `undefined` | The MCP servers the document may attach, with their secrets, policy and `provider`. Absence refuses every server. See [MCP servers](#mcp-servers). |
 
 Returns `Promise<string>` -- the string output of the executed workflow.
 
-Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON does not match `WorkflowDocumentSchema`. Throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool name cannot be resolved. Throws `CONNECTION_UNKNOWN` if a node uses a connection the document does not declare (or the allowlist names one the harness does not have), `CONNECTION_NOT_ALLOWED` if the document asks for more than `connections`, `acp` or `mcp` grants, and `CONNECTION_INVALID` if an MCP server uses a `$secret` on a harness without `environment.secrets`.
+Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON does not match `WorkflowDocumentSchema`. Throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool name cannot be resolved. Throws `CONNECTION_UNKNOWN` if a node uses a connection the document does not declare (or the allowlist names one the harness does not have), `CONNECTION_NOT_ALLOWED` if the document asks for more than `connections`, `acp`, `runCode` or `mcp` grants, and `CONNECTION_INVALID` if an MCP server uses a `$secret` on a harness without `environment.secrets`.
 
 ### What a document may ask of an agent
 
 `parseAndRunWorkflow` and `dynamicWorkflow` run documents you did not write, so an `acp-agent` node gets only what you grant. Two allowlists cover it, and both are checked before anything runs, inline subflows included:
 
-- `acp` — per agent id, the most a node may ask in `permissions`, `mode`, `model`, `cwd`, `clientCapabilities` and `session`.
+- `acp` — per agent id, the most a node may ask in `permissions`, `mode`, `model`, `subprocess`, `fs`, `shell`, `cwd`, `clientCapabilities` and `session`.
 - `mcp` — the MCP servers a node may attach as `{ "mcp" }` tools entries (or the document as `connections` entries), and the secrets their headers and environment may carry ([MCP servers](#mcp-servers)).
 
 `acpAgents` is the set of agents a node may name. Nothing else on a node is limited: `prompt` passes as written. Named subflow refs come from your own `workflows` registry and are neither checked nor held to the grants, so every workflow you register is one any document may invoke, with the settings you gave it.
@@ -957,10 +959,16 @@ Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON do
 ```ts
 import { parseAndRunWorkflow, AgentHarness } from '@noetic-tools/core';
 import { claudeCode, createAcpAgentRegistry } from '@noetic-tools/acp';
+import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 declare const workflowDocument: unknown;
 
-const harness = new AgentHarness({ name: 'runner', params: {} });
+// An agent is a process, so the harness names where processes run.
+const harness = new AgentHarness({
+  name: 'runner',
+  params: {},
+  environment: { subprocess: createLocalSubprocessAdapter() },
+});
 
 await parseAndRunWorkflow({
   json: workflowDocument,
@@ -990,12 +998,49 @@ await parseAndRunWorkflow({
 | `permissions.persist` | set `persist` | no |
 | `modes` | set `mode` to one of these. A mode such as `bypassPermissions` or `acceptEdits` lifts the agent's own prompts, so none is allowed by default. | no `mode` |
 | `models` | set `model` to one of these | any model |
+| `subprocess`, `fs`, `shell` | name one of these [harness adapters](/docs/framework/runtime#named-adapters) in its field of the same name. A name moves the agent, or the files and commands it reaches, to another host. | no name: the harness's defaults |
 | `cwd` | name a plain absolute directory that is this one or under it. A node without `cwd` runs here. | the harness's working directory when the document was checked |
 | `clientCapabilities` | turn on only these. A capability the node leaves out takes the grant's value, not the agent client's default of on. | `{ readTextFile: true }` |
 | `session.keepAlive` | keep a session no longer than this: `'step'` or `'run'`. A document's sessions live in a namespace that ends with its run, so a `'harness'` session would only leak its agent process. | `'run'` |
 | `session.load` | resume an agent session by id | no |
 
 A document's sessions never join yours. Each run of a document moves its `session.reuse` keys into a namespace of its own, so two nodes of one document still share a session, but a node cannot take over a session your code or another document opened — along with the servers, cwd and capabilities it was opened with.
+
+### Where a document's code may run
+
+A `runCode` node's `subprocess` picks the host its code runs on. `parseAndRunWorkflow` and `dynamicWorkflow` run documents you did not write, so a node may name one of the harness's subprocess adapters only when your `runCode` grant lists it. Nothing is granted by default: a node runs on the harness's default.
+
+```ts
+import { parseAndRunWorkflow, AgentHarness } from '@noetic-tools/core';
+import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
+
+declare const workflowDocument: unknown;
+declare const sandbox: ReturnType<typeof createLocalSubprocessAdapter>;
+
+const harness = new AgentHarness({
+  name: 'runner',
+  params: {},
+  environment: {
+    subprocess: {
+      host: { adapter: createLocalSubprocessAdapter(), default: true },
+      sandbox: { adapter: sandbox },
+    },
+  },
+});
+
+await parseAndRunWorkflow({
+  json: workflowDocument,
+  harness,
+  ctx: harness.createContext(),
+  tools: [],
+  // A node may write "subprocess": "sandbox", and no other name.
+  runCode: { subprocess: ['sandbox'] },
+});
+```
+
+A node that names an adapter the grant does not list fails with `CONNECTION_NOT_ALLOWED` before anything runs. The refusal names what the node asked for and what the grant lists, never the harness's other adapters. `dynamicWorkflow` shows its planner the granted names. A name your own `HydrationContext.resolveSubprocess` resolves needs no grant, and a document you wrote and run with `workflow()` or `hydrateWorkflow` is not held to one.
+
+A stdio `{ "mcp" }` server on an `acp-agent` node starts beside the node's agent, on the subprocess adapter the node names. The `spawn` your `mcp.provider` receives is already bound to that adapter, so a provider that calls `spawn(command)` and forwards nothing still starts the server there.
 
 ### MCP servers
 
@@ -1118,7 +1163,7 @@ const result = await harness.run(rootStep, 'input text', ctx);
 | `layers` | `ReadonlyMap<string, ContextLayer>` | Optional. Named context layers that `withContext`/`spawn` nodes reference; an unknown name raises `UNKNOWN_LAYER_REFERENCE`. Without a registry, those nodes run with the harness-default layers. |
 | `acpAgents` | `ReadonlyMap<string, AcpAgent>` | Optional. ACP agent adapters keyed by `agentId`, resolving an `acp-agent` node's `agent` field. |
 | `uiLibraries` | `ReadonlyMap<string, OutputCodec>` | Optional. Output codecs for `callModel` nodes' `output` codec references. |
-| `resolveSubprocess` | `(ref: string) => SubprocessAdapter \| undefined` | Optional. Resolves a `runCode` node's named `subprocess` ref to an adapter. When a `runCode` node omits the ref, the harness default (`ctx.subprocess`) is used at execution time. |
+| `resolveSubprocess` | `(ref: string) => SubprocessAdapter \| undefined` | Optional. Resolves the name a `runCode` node's `subprocess` gives. A name it does not know is looked up among the harness's subprocess adapters, which a document held to a `runCode` grant may name only when the grant lists it. When a `runCode` node omits the name, the harness default (`ctx.subprocess`) is used at execution time. |
 | `workflows` | `ReadonlyMap<string, WorkflowDocument>` | Optional. Named sub-workflow documents that `subflow` nodes resolve via `ref` — lazily, so a live map may gain entries after hydration. |
 | `maxRecursionDepth` | `number` | Optional. Deepest chain of named-ref resolutions on one path; default `100`, `Infinity` for none. |
 | `expressionLimits` | `ExpressionLimits` | Optional. Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. |

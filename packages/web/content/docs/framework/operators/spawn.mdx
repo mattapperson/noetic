@@ -380,6 +380,15 @@ Other step kinds (`callModel`, `invokeTool`, `conditional`, `inParallel`, `withC
 
 When an adapter crosses a process boundary, the child runtime must locate the step body by id. Every step builder auto-registers its result in a shared registry (`@noetic-tools/core/runtime/step-registry`). `lookupStep(stepId)` is the cross-process contract — the child process imports the same entry module as the parent and resolves the step by id before executing it.
 
+### Out-of-process children
+
+`createLocalSubprocessAdapter({ registryEntry })` runs a step in a child process. The child builds a harness of its own with in-memory `fs`, `shell` and `subprocess` adapters. Your harness's adapters are objects in your process, and they do not reach the child:
+
+- **A step that names an adapter fails.** `step.acpAgent({ subprocess: 'builder' })`, or `ctx.adapters.fs.get('builder')`, in such a child fails with [`ADAPTER_NOT_IN_CHILD`](/docs/framework/errors#adapter_not_in_child).
+- **A step that names none uses the child's in-memory adapters**, not your harness's defaults. A file it writes through `ctx.fs` is gone when the child exits, and an ACP agent it starts fails with `SUBPROCESS_CANNOT_OPEN`.
+
+Run a step that needs your harness's adapters in-process: leave `registryEntry` off, or give the step an in-process adapter as its own `subprocess`.
+
 ### Durable Handle Manifests
 
 Adapters configured with a durable `StorageAdapter` persist a manifest per handle: `handleId`, `stepId`, `serializedInput`, `executionId` (the child context), `parentExecutionId` (the context that spawned it — pass it to `harness.restore()`), the request's `metadata` tags, and transport-specific identity (pid + `pidStarttime` for OS children; `socketPath` for IPC). Rehydrated handles carry the tags and both ids on `handle.metadata`. On parent restart, `adapter.listLive()` rediscovers the still-running children and `adapter.reattach(handleId)` rebinds each handle. See the [Durability](/docs/framework/durability) page for the full restart flow.

@@ -3,7 +3,7 @@
  * prints `{ handle, sessionId }` once the agent first speaks, and then waits
  * to be killed — a host that dies mid-turn.
  *
- * argv: whenHostExits ('keep' | 'stop'), prompt text, machine ('local' |
+ * argv: whenHostExits ('keep' | 'stop'), prompt text, subprocess ('local' |
  * 'ws' | 'stdio'). A 'ws' runner's URL and token come from
  * NOETIC_TEST_RUNNER_URL and NOETIC_TEST_RUNNER_TOKEN.
  */
@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import type { AcpClientHost, AcpWhenHostExits } from '@noetic-tools/types';
 import { customAcpAgent } from '../../src/agents';
 import { MemoryFs, RecordingShell } from '../_helpers';
-import { machineFor } from './keeper-machines';
+import { subprocessFor } from './keeper-subprocess';
 
 const whenHostExits: AcpWhenHostExits = process.argv[2] === 'stop' ? 'stop' : 'keep';
 const promptText = process.argv[3] ?? 'ask';
@@ -24,7 +24,6 @@ const agent = customAcpAgent({
   args: [
     agentScript,
   ],
-  machine: machineFor(process.argv[4] ?? 'local'),
 });
 let announced = false;
 let announce: () => void = () => undefined;
@@ -46,6 +45,7 @@ const host: AcpClientHost = {
 const connection = await agent.connect({
   host,
   whenHostExits,
+  subprocess: subprocessFor(process.argv[4] ?? 'local'),
 });
 const session = await connection.newSession({
   cwd: process.cwd(),

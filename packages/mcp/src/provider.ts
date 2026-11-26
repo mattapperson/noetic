@@ -163,16 +163,18 @@ export class McpProvider implements ConnectionProvider {
   private async open(opts: ConnectOptions): Promise<OpenedSession> {
     let session: McpSession;
     try {
-      session = await McpSession.open(
-        this.config.target,
-        this.config.options,
-        opts.signal,
-        opts.redact === undefined
+      session = await McpSession.open(this.config.target, this.config.options, opts.signal, {
+        ...(opts.redact === undefined
           ? {}
           : {
               redact: opts.redact,
-            },
-      );
+            }),
+        ...(opts.subprocess === undefined
+          ? {}
+          : {
+              subprocess: opts.subprocess,
+            }),
+      });
     } catch (error) {
       opts.signal.throwIfAborted();
       throw unavailable(

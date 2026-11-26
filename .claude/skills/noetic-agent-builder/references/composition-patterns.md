@@ -1256,7 +1256,7 @@ Key points:
 - The document is validated against `WorkflowDocumentSchema`, hydrated into a native `Step` tree via `hydrateWorkflow`, then executed with the same interpreter as hand-written compositions.
 - `maxRevisions` controls retry attempts when the LLM produces invalid JSON. Each retry includes the previous validation error as feedback.
 - `maxDepth` caps workflow tree depth to prevent runaway nesting.
-- Inline closures don't serialise — a `runCode` node carries its body as a code string dispatched through a subprocess adapter. On Node, `createLocalSubprocessAdapter()` (from `@noetic-tools/platform-node`, passed as `environment.subprocess`) runs it: the input goes in on stdin, stdout comes back as the output, and a failure's error carries the end of stderr. JSON workflows compose from `callModel`, `invokeTool`, `runCode`, and structural node kinds (`sequence`, `inParallel`, `loop`, `conditional`, `spawn`, `withContext`, `schedule`, `subflow`).
+- Inline closures don't serialise — a `runCode` node carries its body as a code string dispatched through a subprocess adapter. Its optional `subprocess` names the adapter: `HydrationContext.resolveSubprocess(name)` first, else the harness's subprocess adapter of that name (`environment.subprocess: { sandbox: { adapter }, … }`) — which a document run by `parseAndRunWorkflow` / `dynamicWorkflow` may name only when the host's `runCode: { subprocess: ['sandbox'] }` grant lists it. On Node, `createLocalSubprocessAdapter()` (from `@noetic-tools/platform-node`, passed as `environment.subprocess`) runs it: the input goes in on stdin, stdout comes back as the output, and a failure's error carries the end of stderr. JSON workflows compose from `callModel`, `invokeTool`, `runCode`, and structural node kinds (`sequence`, `inParallel`, `loop`, `conditional`, `spawn`, `withContext`, `schedule`, `subflow`).
 - Tools are referenced by name in JSON and resolved from the `HydrationContext.tools` registry at hydration time.
 - A published JSON Schema (draft 2020-12) is generated from `WorkflowDocumentSchema` and shipped at the `@noetic-tools/core/schema` export subpath (`$id`: `https://noetic.tools/schema/noetic-workflow.schema.json`). Reference it via a `$schema` key in hand-written or LLM-generated documents for editor autocompletion and validation. **The `*.schema.json` files are generated — never hand-edit them. Whenever you change `WorkflowDocumentSchema` (or any node/predicate variant) in `packages/core/src/schemas/workflow.ts`, you MUST run `bun run gen:schema` in the same commit** to regenerate both the package artifact and the hosted web copy (`packages/web/public/schema/...`); a drift-gate test fails CI otherwise. See `.claude/rules/sync-spec-code-docs.md` Requirement 6.
 
@@ -1305,6 +1305,7 @@ const result = await parseAndRunWorkflow({
 ```typescript
 import { AgentHarness, callModel, runCode, step } from '@noetic-tools/core';
 import { claudeCode } from '@noetic-tools/acp';
+import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 const plan = callModel({
   id: 'plan',
@@ -1327,7 +1328,13 @@ const pipeline = runCode({
   },
 });
 
-const harness = new AgentHarness({ name: 'builder', agentGraph: pipeline, params: {} });
+// The coding agent is a process: the harness says where processes run.
+const harness = new AgentHarness({
+  name: 'builder',
+  agentGraph: pipeline,
+  params: {},
+  environment: { subprocess: createLocalSubprocessAdapter() },
+});
 await harness.execute('Add input validation to the signup endpoint.');
 ```
 
@@ -1402,8 +1409,13 @@ Hydrate it with a registry built from the agent presets:
 ```typescript
 import { hydrateWorkflow, AgentHarness, type HydrationContext } from '@noetic-tools/core';
 import { claudeCode, codex, createAcpAgentRegistry } from '@noetic-tools/acp';
+import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
-const harness = new AgentHarness({ name: 'json-builder', params: {} });
+const harness = new AgentHarness({
+  name: 'json-builder',
+  params: {},
+  environment: { subprocess: createLocalSubprocessAdapter() },
+});
 const ctx = harness.createContext();
 
 const hydrationCtx: HydrationContext = {

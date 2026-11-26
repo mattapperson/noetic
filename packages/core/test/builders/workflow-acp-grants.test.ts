@@ -408,6 +408,53 @@ describe('checkAcpAgents — mode and model', () => {
   });
 });
 
+describe('checkAcpAgents — adapter names', () => {
+  it.each([
+    'subprocess',
+    'fs',
+    'shell',
+  ] as const)('refuses any %s name by default, since a name moves the agent', (field) => {
+    expect(
+      expectRefused({
+        [field]: 'builder',
+      }),
+    ).toContain(`${field} "builder"`);
+  });
+
+  it('accepts only the granted names of each kind', () => {
+    const grants: AcpAllowlist = {
+      fake: {
+        subprocess: [
+          'builder',
+        ],
+        fs: [
+          'builder',
+          'scratch',
+        ],
+      },
+    };
+    expectAccepted(
+      {
+        subprocess: 'builder',
+        fs: 'scratch',
+      },
+      grants,
+    );
+    expectRefused(
+      {
+        subprocess: 'laptop',
+      },
+      grants,
+    );
+    expectRefused(
+      {
+        shell: 'builder',
+      },
+      grants,
+    );
+  });
+});
+
 describe('checkAcpAgents — cwd', () => {
   it('accepts the harness cwd and directories under it by default', () => {
     expectAccepted({});

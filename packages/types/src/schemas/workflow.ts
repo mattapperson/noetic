@@ -471,8 +471,8 @@ export interface InvokeToolWorkflowNode extends WorkflowNodeBase {
  * `step.runCode` (which carries a closure), the JSON form carries `execute` as
  * a code STRING.
  * The code is never eval'd in-process (Cloudflare Workers forbid eval); it is
- * dispatched through a subprocess adapter (`ctx.subprocess`, or a named adapter
- * resolved by ref). Execution therefore requires a subprocess adapter capable
+ * dispatched through a subprocess adapter (`ctx.subprocess`, or one the node
+ * names). Execution therefore requires a subprocess adapter capable
  * of running the code and returning its stdout.
  */
 export interface RunCodeWorkflowNode extends WorkflowNodeBase {
@@ -481,7 +481,10 @@ export interface RunCodeWorkflowNode extends WorkflowNodeBase {
   execute: string;
   /** Optional retry policy applied to the step. */
   retry?: z.infer<typeof RetryPolicySchema>;
-  /** Named subprocess adapter ref; defaults to `ctx.subprocess` when omitted. */
+  /**
+   * A subprocess adapter by name: one the host's `resolveSubprocess` knows,
+   * else one of the harness's. Default: `ctx.subprocess`.
+   */
   subprocess?: string;
 }
 
@@ -634,6 +637,12 @@ export interface AcpAgentWorkflowNode extends WorkflowNodeBase {
   permissions?: z.infer<typeof AcpPermissionPolicySchema>;
   clientCapabilities?: z.infer<typeof AcpClientCapabilityConfigSchema>;
   session?: z.infer<typeof AcpSessionPolicySchema>;
+  /** The harness subprocess adapter the agent runs through, by name. Default: the agent's, else the harness's default. */
+  subprocess?: string;
+  /** The harness filesystem adapter that serves the agent's `fs/*` calls, by name. Default: the harness's default. */
+  fs?: string;
+  /** The harness shell adapter that serves the agent's `terminal/*` calls, by name. Default: the harness's default. */
+  shell?: string;
 }
 
 /**
@@ -1207,6 +1216,9 @@ const AcpAgentNodeSchema = z.object({
   permissions: AcpPermissionPolicySchema.optional(),
   clientCapabilities: AcpClientCapabilityConfigSchema.optional(),
   session: AcpSessionPolicySchema.optional(),
+  subprocess: z.string().min(1).optional(),
+  fs: z.string().min(1).optional(),
+  shell: z.string().min(1).optional(),
 });
 
 //#region Connection Value and Node Schemas

@@ -110,7 +110,7 @@ A record key that disagrees with `mcp({ name })`, or a list entry with no name, 
 | Stdio | `{ name, command, args?, env?: [{ name, value }] }` (`type: 'stdio'` may be given; ACP leaves it out) |
 | In process | `{ transport }`, a caller-built MCP transport |
 
-Options sit beside those fields: `auth`, `fetch` (remote), `cwd` and `spawn` (stdio), `webhooks` when the server delivers events by webhook, `profiles` / `extensions` — the definitions the bridge checks a declaring server against — and `timeoutMs`, `requestTimeoutMs`, `pollIntervalMs`, `clientInfo`. A header or environment variable given twice is `CONNECTION_INVALID`. A stdio server that must run elsewhere — the machine an ACP agent runs on, a container — takes `spawn`, which starts the process there and returns its stdio as a `{ readable, writable, close }` stream (`Spawn` from `@noetic-tools/types`; an ACP agent's `agent.spawn` is one); the bridge speaks MCP over it. `policy`, `expose`, `look` and `pool` belong to the entry, not to `mcp()`.
+Options sit beside those fields: `auth`, `fetch` (remote), `cwd` and `spawn` (stdio), `webhooks` when the server delivers events by webhook, `profiles` / `extensions` — the definitions the bridge checks a declaring server against — and `timeoutMs`, `requestTimeoutMs`, `pollIntervalMs`, `clientInfo`. A header or environment variable given twice is `CONNECTION_INVALID`. A stdio server that must run elsewhere — where an ACP agent runs, a container — takes `spawn`, which starts the process there and returns its stdio as a `{ readable, writable, close }` stream (`Spawn` from `@noetic-tools/types`; an ACP agent's `agent.spawn` is one); the bridge speaks MCP over it. `policy`, `expose`, `look` and `pool` belong to the entry, not to `mcp()`.
 
 ### Signing in to a remote server
 
@@ -519,7 +519,7 @@ Setup and validation raise a [`NoeticConfigError`](/docs/framework/errors#noetic
 | [`CONNECTION_UNSATISFIED`](/docs/framework/errors#connection_unsatisfied) | A connection does not offer what is required. `missing` says which: a profile or extension version, an operation, an event, or a sense. |
 | [`CONNECTION_NOT_ALLOWED`](/docs/framework/errors#connection_not_allowed) | A document asks for more than its allowlist grants, or sets a setup field reserved to the host. |
 | [`CONNECTION_INVALID`](/docs/framework/errors#connection_invalid) | A manifest entry, handle or harness entry is malformed: an unnamed list entry, a record key that disagrees with `mcp({ name })`, a turn or step entry with `pool`, a function-form `tools` returning a connection nothing attached, an `mcp()` config that is not ACP's `McpServer` shape, names a header or environment variable twice, or gives both `auth` and an `Authorization` header, or a document `{ "mcp" }` connection whose key disagrees with its name. |
-| [`CONNECTION_NAME_TAKEN`](/docs/framework/errors#connection_name_taken) | An entry names a connection its scope or an outer one already attaches with a different provider or options. |
+| [`CONNECTION_NAME_TAKEN`](/docs/framework/errors#connection_name_taken) | An entry names a connection its scope or an outer one already attaches with a different provider or options, or one another `acpAgent` step of the turn attached under another `subprocess` name. |
 | [`CONNECTION_TOOL_COLLISION`](/docs/framework/errors#connection_tool_collision) | Two operations would reach the model under one tool name. |
 
 At run time, a failed call raises a [`NoeticError`](/docs/framework/errors#noeticerror-type) of one of these kinds:

@@ -34,6 +34,9 @@ type PermissionRule = NonNullable<AcpPermissionGrant['allow']>[number];
 
 type Capability = keyof AcpCapabilityGrant;
 
+/** A node field whose value must be one the grant lists. */
+type ChoiceField = 'mode' | 'model' | 'subprocess' | 'fs' | 'shell';
+
 type AcpBounds = NonNullable<HydrationContext['acpBounds']>;
 
 //#endregion
@@ -45,7 +48,7 @@ type AcpBounds = NonNullable<HydrationContext['acpBounds']>;
  * subflows count; named refs resolve from the host's own registry and are not
  * checked.
  *
- * @throws `NoeticConfigError` `CONNECTION_NOT_ALLOWED` for a permission, mode, model, `cwd`, client capability or session setting the grant does not allow.
+ * @throws `NoeticConfigError` `CONNECTION_NOT_ALLOWED` for a permission, mode, model, adapter name, `cwd`, client capability or session setting the grant does not allow.
  */
 export function checkAcpAgents(
   doc: WorkflowDocument,
@@ -60,6 +63,9 @@ export function checkAcpAgents(
     checkPermissions(node, grant.permissions);
     checkChoice(node, 'mode', grant.modes ?? []);
     checkChoice(node, 'model', grant.models);
+    checkChoice(node, 'subprocess', grant.subprocess ?? []);
+    checkChoice(node, 'fs', grant.fs ?? []);
+    checkChoice(node, 'shell', grant.shell ?? []);
     checkCwd(node, grant.cwd ?? harnessCwd);
     checkCapabilities(node, capabilityCeiling(grant));
     checkSession(node, grant);
@@ -209,7 +215,7 @@ function covers(ceiling: PermissionRule, rule: PermissionRule): boolean {
 /** Refuses a node's `field` not in `granted`. Undefined `granted` allows any value; an empty one, none. */
 function checkChoice(
   node: AcpAgentNode,
-  field: 'mode' | 'model',
+  field: ChoiceField,
   granted: ReadonlyArray<string> | undefined,
 ): void {
   const value = node[field];
@@ -310,13 +316,14 @@ function agentLine(id: string, grant: AcpAgentGrant, harnessCwd: string): string
     `${permissions?.persist ? '' : 'no '}"persist";`,
     `${choiceLine('mode', grant.modes ?? [])};`,
     `${choiceLine('model', grant.models)};`,
+    `${choiceLine('subprocess', grant.subprocess ?? [])}, ${choiceLine('fs', grant.fs ?? [])}, ${choiceLine('shell', grant.shell ?? [])};`,
     `cwd ${JSON.stringify(grant.cwd ?? harnessCwd)} or a directory under it;`,
     `clientCapabilities ${on.length > 0 ? on.join(', ') : 'none'} (any other off);`,
     `session keepAlive up to ${JSON.stringify(longestKeepAlive(grant))}, ${grant.session?.load ? '"load" allowed' : 'no "load"'}`,
   ].join(' ');
 }
 
-function choiceLine(field: 'mode' | 'model', granted: ReadonlyArray<string> | undefined): string {
+function choiceLine(field: ChoiceField, granted: ReadonlyArray<string> | undefined): string {
   if (granted === undefined) {
     return `any ${field}`;
   }

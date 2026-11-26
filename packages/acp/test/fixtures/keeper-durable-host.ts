@@ -8,6 +8,7 @@
 
 import { fileURLToPath } from 'node:url';
 import { AgentHarness, step } from '@noetic-tools/core';
+import { createLocalSubprocessAdapter } from '../../../platform-node/src/local-subprocess-adapter';
 import { customAcpAgent } from '../../src/agents';
 import { fileStorage } from './file-storage';
 
@@ -22,6 +23,7 @@ const harness = new AgentHarness({
     storage: {
       adapter: fileStorage(dir),
     },
+    subprocess: createLocalSubprocessAdapter(),
   },
 });
 const ctx = harness.createContext();

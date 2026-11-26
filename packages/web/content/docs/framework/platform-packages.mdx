@@ -3,14 +3,14 @@ title: Platform Packages
 description: The runtime-specific adapters — local filesystem, shell, subprocess, durable storage, artifact store, webhook receiver — that keep core runtime-agnostic.
 ---
 
-`@noetic-tools/core` is runtime-agnostic. It defines the adapter contracts (`FsAdapter`, `ShellAdapter`, `SubprocessAdapter`, `StorageAdapter`, `ArtifactStore`) and ships **in-memory implementations only**. Every backend that needs a specific runtime lives in a platform package:
+`@noetic-tools/core` is runtime-agnostic. It defines the adapter contracts (`FsAdapter`, `ShellAdapter`, `SubprocessAdapter`, `StorageAdapter`, `ArtifactStore`) and ships only implementations that need no platform: the in-memory ones, and `createRunnerSubprocessAdapter()`, the host's end of a remote runner over any frame link. Every backend that needs a specific runtime lives in a platform package:
 
 | Package | Runtime | Provides |
 |---|---|---|
-| `@noetic-tools/platform-node` | Node.js ≥ 20 (and Bun) | Local filesystem, shell, and subprocess adapters; file-backed storage; the durable outbound queue; agent IPC; the file artifact store; the webhook receiver. |
+| `@noetic-tools/platform-node` | Node.js ≥ 20 (and Bun) | Local filesystem, shell, and subprocess adapters; subprocess adapters that reach a remote runner; file-backed storage; the durable outbound queue; agent IPC; the file artifact store; the webhook receiver. |
 | `@noetic/platform-browser` | Browsers, Cloudflare Workers, Vercel Edge | Core's runtime-neutral in-memory adapters, with no `node:*` imports. |
 
-Neither package depends on the other, and core depends on neither, so a bundle carries only what its runtime needs. Importing `@noetic-tools/core` or `@noetic/platform-browser` into a browser bundle produces no `node:*` references.
+No platform package depends on another, and core depends on none, so a bundle carries only what its runtime needs. `@noetic-tools/platform-node` also depends on `@noetic-tools/acp`, for the keeper its local subprocess adapter runs ACP agents through. Importing `@noetic-tools/core` or `@noetic/platform-browser` into a browser bundle produces no `node:*` references.
 
 ## `@noetic-tools/platform-node`
 
@@ -41,7 +41,9 @@ const harness = new AgentHarness({
 |---|---|
 | `createLocalFsAdapter()` | An `FsAdapter` over `node:fs/promises`. |
 | `createLocalShellAdapter()` | A `ShellAdapter` over the local shell. |
-| `createLocalSubprocessAdapter()` | A `SubprocessAdapter` with OS child-process lifecycle, POSIX signals, and unix-socket IPC. |
+| `createLocalSubprocessAdapter(options?)` | A `SubprocessAdapter` for this machine. It runs steps in a child runtime, runs commands to completion, and — through `open` — starts a process and holds its stdio, which is how an [ACP agent](/docs/framework/acp-agents) runs. See [Local subprocess adapter](#local-subprocess-adapter). |
+| `createWebSocketSubprocessAdapter({ url, token, ca? })` | A `SubprocessAdapter` whose processes run through a [remote runner](/docs/framework/acp-agents#where-the-agent-runs) (`noetic-acp serve`) dialled over WebSocket. Every upgrade carries the bearer token; `ws://` is allowed only to a loopback host. |
+| `createCommandSubprocessAdapter({ command, args, env? })` | The same, for a runner started by a local command and spoken to over its stdio: `ssh host npx -y @noetic-tools/acp serve --stdio`, `docker exec -i ctr noetic-acp serve --stdio`. |
 | `createFileStorage()` | A file-backed `StorageAdapter`, for [durable execution](/docs/framework/durability). |
 | `createSqliteStorage({ database, table? })` | A `StorageAdapter` over one SQLite table. Pass an open `bun:sqlite`, `node:sqlite` or `better-sqlite3` database; the package imports no driver. |
 | `createDurableOutboundQueue()` | The durable outbound frame queue for out-of-process runs. |
@@ -49,9 +51,37 @@ const harness = new AgentHarness({
 | `createFileArtifactStore({ dir, retention? })` | The file-backed [artifact store](#file-artifact-store). |
 | `createWebhookReceiver(options?)` | An HTTP [webhook receiver](#webhook-receiver) for `mcp({ webhooks })`. |
 
-Runtime imports are Node built-ins only; there are no third-party runtime dependencies.
+Runtime imports are Node built-ins, `ws` (for the WebSocket runner adapter) and `@noetic-tools/acp` (for the keeper).
 
 Both storage adapters implement `swap`, so sessions on them run under a [turn lease](/docs/framework/durability#one-writer-per-turn).
+
+### Local subprocess adapter
+
+`createLocalSubprocessAdapter()` is the adapter a Node harness names to run processes on its own machine, ACP agents included:
+
+```ts
+import { AgentHarness } from '@noetic-tools/core';
+import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
+
+const harness = new AgentHarness({
+  name: 'coder',
+  params: {},
+  environment: { subprocess: createLocalSubprocessAdapter() },
+});
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `storage` | none | A `StorageAdapter` for durable handle manifests, so `reattach()` and `listLive()` survive a restart. |
+| `registryEntry` | none | The module a step child imports to find your steps. Without it a step runs in this process. |
+| `keeper` | `true` | Run each agent `open` launches through a keeper, so it outlives this host and a later host can reattach. `false` makes it a child process that ends with the host. |
+| `detachedTimeoutMs` | `0` (no limit) | How long a kept agent may run with no host attached. |
+| `wrap` | none | Rewrite an agent's command just before it starts: wrap it in a sandbox, swap in a binary you ship. |
+| `onStderr` | this process's stderr | Receives an agent's stderr. |
+| `onLaunch` | none | Told of each agent started as this process's own child (`keeper: false`): `{ pid, exited }`. |
+| `agentId` | `'local'` | Names the adapter's processes in errors. |
+
+The remote adapters run commands and hold processes on the runner, and no step children: a runner has no Noetic runtime. They also refuse a command given `stdin`, such as a `runCode` node, because the runner's frames carry no end of input.
 
 ### File Artifact Store
 
@@ -103,7 +133,7 @@ It re-exports core's runtime-neutral in-memory adapters for ergonomic imports, a
 
 ## `@noetic-tools/platform-cloudflare-worker`
 
-Storage, an event endpoint, wake presets and Cron Trigger handlers for a harness on Cloudflare Workers. It imports no Cloudflare package: each helper takes the part of a binding it uses, so `env.DB`, `ctx.storage` and a Workflow's `step` fit as they are.
+Storage, an event endpoint, wake presets, Cron Trigger handlers and subprocess adapters for a harness on Cloudflare Workers. It imports no Cloudflare package: each helper takes the part of a binding it uses, so `env.DB`, `ctx.storage` and a Workflow's `step` fit as they are.
 
 ### Storage
 
@@ -356,6 +386,30 @@ export default {
 ```
 
 A scan that succeeds covers every earlier tick. A duplicate tick, or one that arrives while another Worker scans, starts nothing. A scan that throws is tried again by the next tick, and a Worker that died gives up its lease after 16 minutes. `run` may see the same work twice, so give its effects stable keys.
+
+### Processes on another machine
+
+A Worker cannot start a process. Its subprocess adapters run processes through a [remote runner](/docs/framework/acp-agents#where-the-agent-runs) (`noetic-acp serve`) over a WebSocket, so an [ACP agent](/docs/framework/acp-agents) can run for a harness on Workers.
+
+```ts validate=none
+import {
+  createFetchSubprocessAdapter,
+  createSocketSubprocessAdapter,
+} from '@noetic-tools/platform-cloudflare-worker';
+
+// The Worker dials the runner: a fetch upgrade that carries the bearer token.
+const dialled = createFetchSubprocessAdapter({ url: 'wss://build-host:7000', token: env.RUNNER_TOKEN });
+
+// The runner's host dialled in, and this Durable Object accepted its socket.
+const dialledIn = createSocketSubprocessAdapter(() => this.takeRunnerSocket());
+```
+
+| Export | What it is |
+|---|---|
+| `createFetchSubprocessAdapter({ url, token, fetch? })` | Each link is one WebSocket, opened by a `fetch` upgrade to the runner's `wss://` URL. `ws://` is allowed only to a loopback host. |
+| `createSocketSubprocessAdapter(accepted)` | Each link takes one socket from `accepted()`: a socket the Durable Object accepted (`socket.accept()`), which no other link uses. Closing the link closes the socket. |
+
+Both hold processes on the runner and run commands that take no `stdin`; neither runs step children. A socket accepted for hibernation (`state.acceptWebSocket`) delivers its messages to the object's handlers and not to listeners, so build a `FrameLink` from those and pass it to `createRunnerSubprocessAdapter()` from `@noetic-tools/core`.
 
 ## Related Pages
 

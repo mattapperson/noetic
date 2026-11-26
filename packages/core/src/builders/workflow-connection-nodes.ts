@@ -27,6 +27,7 @@ import { boundedAcpSettings } from './workflow-acp-grants';
 import { compileArgs, documentHandle, documentSecretsOf } from './workflow-connections';
 import type { HydrationContext } from './workflow-hydrator';
 import { bindingsFor, hydrateStepList } from './workflow-hydrator';
+import { checkRunCodeNode } from './workflow-run-code-grant';
 import { nodeTools, withCeiling } from './workflow-tool-entries';
 
 //#region Connection Node Hydrators
@@ -269,6 +270,9 @@ export function hydrateAcpAgentNode(
     permissions: node.permissions,
     clientCapabilities: bounded.clientCapabilities,
     session: bounded.session,
+    subprocess: node.subprocess,
+    fs: node.fs,
+    shell: node.shell,
   });
   return withCeiling(built, node, ctx);
 }
@@ -309,9 +313,14 @@ export function hydrateRunCodeNode(
 //#region Run Node Helpers
 
 /**
- * Resolves the subprocess adapter for a `runCode` node. When the node names an
- * adapter ref, the host must supply a `resolveSubprocess` resolver; otherwise
- * the step falls back to the harness adapter on the execution context.
+ * The subprocess adapter a `runCode` node runs through: the harness's default
+ * when it names none, else the one the host's `resolveSubprocess` gives for
+ * the name, else the harness's adapter of that name. `resolveSubprocess` is
+ * the host's own code and needs no grant; a harness name does, under
+ * `runCodeBounds`.
+ *
+ * @throws `NoeticConfigError` `CONNECTION_NOT_ALLOWED` for a harness name the bounds do not grant,
+ * `UNKNOWN_SUBPROCESS_REFERENCE` when neither knows the name.
  */
 function resolveSubprocessAdapter(opts: {
   ref: string | undefined;
@@ -324,14 +333,32 @@ function resolveSubprocessAdapter(opts: {
     return execCtx.subprocess;
   }
   const resolved = hydrationCtx.resolveSubprocess?.(ref);
-  if (!resolved) {
-    throw new NoeticConfigError({
-      code: 'UNKNOWN_SUBPROCESS_REFERENCE',
-      message: `Subprocess adapter '${ref}' referenced in run node '${nodeId}' could not be resolved.`,
-      hint: 'Pass a `resolveSubprocess(ref)` mapping in the HydrationContext, or omit `subprocess` to use the harness default (ctx.subprocess).',
-    });
+  if (resolved) {
+    return resolved;
   }
-  return resolved;
+  const bounds = hydrationCtx.runCodeBounds;
+  if (bounds) {
+    checkRunCodeNode(
+      {
+        id: nodeId,
+        subprocess: ref,
+      },
+      bounds,
+    );
+  }
+  const names = execCtx.adapters.subprocess.list().map((adapter) => adapter.name);
+  if (names.includes(ref)) {
+    return execCtx.adapters.subprocess.get(ref);
+  }
+  // Only a document the host wrote is told the harness's names.
+  const known = bounds ? '' : ` The harness has ${names.map((name) => `'${name}'`).join(', ')}.`;
+  throw new NoeticConfigError({
+    code: 'UNKNOWN_SUBPROCESS_REFERENCE',
+    message: `Subprocess adapter '${ref}' referenced in run node '${nodeId}' could not be resolved.${known}`,
+    hint: bounds
+      ? 'Omit `subprocess` to run on the default adapter.'
+      : 'Name one of the harness adapters, map the name in `HydrationContext.resolveSubprocess`, or omit `subprocess` to use the harness default (ctx.subprocess).',
+  });
 }
 
 /**

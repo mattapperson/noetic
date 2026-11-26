@@ -7,6 +7,7 @@ import type {
   EventStreamMessage,
   NoeticError,
   SteeringDecision,
+  SubprocessChoice,
 } from '@noetic-tools/types';
 import {
   defineProfile,
@@ -31,7 +32,7 @@ import type {
 import { createConnectionRuntime } from '../../src/connections/registry';
 import type { ConnectionScope, GatedCallOptions } from '../../src/connections/registry-types';
 import { createInMemoryArtifactStore } from '../../src/runtime/in-memory-artifact-store';
-import { makeMockContext, makeStorage, sleep } from '../_helpers';
+import { makeAdapterSets, makeMockContext, makeStorage, sleep } from '../_helpers';
 
 //#region Fixtures
 
@@ -365,6 +366,34 @@ describe('resolve', () => {
       }),
     );
     expect(isNoeticConfigError(e) && e.code).toBe('CONNECTION_UNKNOWN');
+  });
+
+  test("hands a provider the harness's subprocess adapters", async () => {
+    const subprocess: SubprocessChoice = {
+      adapters: makeAdapterSets().subprocess,
+    };
+    const inner = createInMemoryConnection(appOptions());
+    let given: SubprocessChoice | undefined;
+    const runtime = createConnectionRuntime({
+      connections: {
+        app: {
+          name: 'app',
+          async connect(opts) {
+            given = opts.subprocess;
+            return await inner.connect(opts);
+          },
+        },
+      },
+      storage: makeStorage(),
+      artifacts: createInMemoryArtifactStore(),
+      subprocess,
+    });
+    opened.push(runtime);
+    await runtime.resolve({
+      name: 'app',
+      scope: scope(),
+    });
+    expect(given).toBe(subprocess);
   });
 
   test('connects lazily, reports status and emits connection_changed', async () => {

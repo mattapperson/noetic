@@ -3,7 +3,7 @@
 An [Agent Client Protocol](https://agentclientprotocol.com/) client for [Noetic](https://noetic.tools). Run any ACP-speaking coding agent — Claude Code, Codex, Gemini CLI — as a step in a Noetic agent.
 
 ```bash
-bun add @noetic-tools/acp
+bun add @noetic-tools/acp @noetic-tools/platform-node
 ```
 
 ## Usage
@@ -11,6 +11,7 @@ bun add @noetic-tools/acp
 ```ts
 import { AgentHarness, step } from '@noetic-tools/core';
 import { claudeCode } from '@noetic-tools/acp';
+import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 const review = step.acpAgent({
   id: 'review',
@@ -19,7 +20,12 @@ const review = step.acpAgent({
   permissions: { default: 'deny', allow: [{ kind: 'read' }] },
 });
 
-const harness = new AgentHarness({ name: 'reviewer', params: {} });
+// The agent is a process, so the harness says where processes run.
+const harness = new AgentHarness({
+  name: 'reviewer',
+  params: {},
+  environment: { subprocess: createLocalSubprocessAdapter() },
+});
 const summary = await harness.run(review, 'go', harness.createContext());
 console.log(summary);
 ```
@@ -43,14 +49,16 @@ Because every ACP agent is a uniform JSON-RPC peer, there is no vendor SDK per a
 import { claudeCode, codex, gemini, opencode, pi, customAcpAgent } from '@noetic-tools/acp';
 ```
 
-Each preset is only a launch recipe (which binary, which flags) and accepts `command` / `args` / `env` overrides plus a `transport` for agents that are not local child processes. opencode speaks ACP natively; pi is reached through the community `pi-acp` adapter. `customAcpAgent({ agentId, command, args })` covers anything else that speaks the protocol.
+Each preset is only a launch recipe (which binary, which flags) and accepts `command` / `args` / `env` overrides plus a `transport` for an agent someone else started. Its command starts through one of the harness's subprocess adapters: the one its step names, else the one the preset names (`subprocess: 'builder'` — a name, never an adapter), else the default. That adapter must have `open`; the harness's in-memory default has none, so give the harness `environment.subprocess: createLocalSubprocessAdapter()` from `@noetic-tools/platform-node`. This package exports no subprocess adapter: they live in `@noetic-tools/core` and the platform packages. opencode speaks ACP natively; pi is reached through the community `pi-acp` adapter. `customAcpAgent({ agentId, command, args })` covers anything else that speaks the protocol.
 
 ## Entry points
 
 | Import | Contents |
 |---|---|
-| `@noetic-tools/acp` | Protocol client, permission resolver, terminal registry, agent presets, loopback transport. No static `node:*` import; `child_process` loads only when a stdio connection opens. |
-| `@noetic-tools/acp/stdio` | The Node stdio transport (`node:child_process`). Presets reach it through a lazy `import()`. |
+| `@noetic-tools/acp` | Protocol client, permission resolver, terminal registry, agent presets, loopback transport, and `loopbackLink` (an in-process agent as an adapter's `open`, for tests). No `node:*` import. |
+| `@noetic-tools/acp/stdio` | The Node stdio transport and `openLocalLink`, which opens a link to this machine through the keeper (`node:child_process`). `createLocalSubprocessAdapter()` in `@noetic-tools/platform-node` is built on it. |
+| `@noetic-tools/acp/remote` | The remote runner's server (`listenAcpRunner`, `serveAcpRunner`), as the `noetic-acp serve` bin uses it. Hosts reach a runner with the adapters in `@noetic-tools/platform-node` and `@noetic-tools/platform-cloudflare-worker`. |
+| `@noetic-tools/acp/server` | Serving a harness as an ACP agent over stdio (`serveAcp`). |
 
 ## Testing
 

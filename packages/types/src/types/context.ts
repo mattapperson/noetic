@@ -6,6 +6,7 @@ import type { ContextData, ContextLayer } from './context-layer';
 import type { ItemLog } from './context-parts/item-log';
 import type { LastLayerUsage } from './context-parts/layer-usage';
 import type { FsAdapter } from './fs-adapter';
+import type { AdapterSets } from './harness-platform';
 import type { Span } from './observability';
 import type { ShellAdapter } from './shell-adapter';
 import type { SubprocessAdapter } from './subprocess-adapter';
@@ -94,12 +95,14 @@ export interface Context<TContext = ContextData, TState = unknown> {
   /** Per-layer breakdown of the context window as of the most recent callModel. Undefined until the first LLM call completes. */
   readonly lastLayerUsage?: LastLayerUsage;
   readonly harness: ContextHarness;
-  /** Filesystem adapter for virtual or real filesystem access. */
+  /** The default filesystem adapter. */
   readonly fs: FsAdapter;
-  /** Shell adapter for virtual or real shell command execution. */
+  /** The default shell adapter. */
   readonly shell: ShellAdapter;
-  /** Subprocess adapter for virtual, same-process, or host process execution. */
+  /** The default subprocess adapter. */
   readonly subprocess: SubprocessAdapter;
+  /** Every filesystem, shell and subprocess adapter, by name. */
+  readonly adapters: AdapterSets;
   /**
    * Mutable cwd state shared with the tools bound to this context. Tools
    * resolve relative paths from `cwdState.cwd` at execution time so that an

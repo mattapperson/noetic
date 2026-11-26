@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import type { SubprocessLink, SubprocessOpenOptions } from '@noetic-tools/types';
 import { createInMemorySubprocessAdapter } from '../src/adapters/in-memory-subprocess-adapter';
 import { AgentHarness } from '../src/harness/agent-harness';
 
@@ -67,6 +68,39 @@ describe('createInMemorySubprocessAdapter', () => {
     expect(handle.metadata?.pidStarttime).toBe('Mon Jan  1 00:00:00 2026');
     expect(handle.metadata?.taskRole).toBe('planner');
     expect(handle.status).toBe('running');
+  });
+});
+
+describe('createInMemorySubprocessAdapter open', () => {
+  it('has no open unless given one', () => {
+    expect(createInMemorySubprocessAdapter().open).toBeUndefined();
+  });
+
+  it('opens links with the open it is given', async () => {
+    const link: SubprocessLink = {
+      reach: async (bridge) => bridge,
+      launch: async () => {
+        throw new Error('unused');
+      },
+      spawn: async () => {
+        throw new Error('unused');
+      },
+      close: async () => undefined,
+    };
+    const seen: SubprocessOpenOptions[] = [];
+    const adapter = createInMemorySubprocessAdapter({
+      open: async (options) => {
+        seen.push(options);
+        return link;
+      },
+    });
+    const options = {
+      whenHostExits: 'stop' as const,
+    };
+    expect(await adapter.open?.(options)).toBe(link);
+    expect(seen).toEqual([
+      options,
+    ]);
   });
 });
 

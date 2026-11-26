@@ -23,7 +23,7 @@ import type {
   SenseDescriptor,
   SenseId,
 } from './profile';
-import type { Spawn } from './spawn';
+import type { Spawn, SubprocessChoice } from './subprocess-adapter';
 
 export * from './connection-values';
 
@@ -409,6 +409,11 @@ export interface ConnectOptions {
   readonly redact?: (value: string) => void;
   /** The harness's `environment.secrets`, for a provider that reads its credentials by name. */
   readonly secrets?: SecretResolver;
+  /**
+   * The harness's subprocess adapters, for a provider that starts a process
+   * through a {@link Spawn}.
+   */
+  readonly subprocess?: SubprocessChoice;
 }
 
 /** @public A live connection, as a provider implements it. Steps and tools never hold one directly. */
