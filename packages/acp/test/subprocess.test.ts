@@ -7,16 +7,22 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type * as acp from '@agentclientprotocol/sdk';
-import { AgentHarness, execute, step, tool } from '@noetic-tools/core';
+import {
+  AgentHarness,
+  createInMemorySubprocessAdapter,
+  createLinkSubprocessAdapter,
+  execute,
+  step,
+  tool,
+} from '@noetic-tools/core';
 import type { AcpAgent, SpawnCommand, SubprocessAdapter } from '@noetic-tools/types';
 import { isNoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
-import { agentSubprocess } from '../src/agent-subprocess';
 import { gemini } from '../src/agents';
 import { defineAcpAgent } from '../src/define';
-import { localSubprocess } from '../src/stdio';
+import { openLocalLink } from '../src/stdio';
 import { claudeToolWiring, codexToolWiring } from '../src/tool-wiring';
-import { loopbackSubprocess } from '../src/transport-loopback';
+import { loopbackLink } from '../src/transport-loopback';
 
 const echo = tool({
   name: 'echo',
@@ -79,9 +85,9 @@ function quietAgent(
 
 /** A loopback adapter whose `reach` marks the address, as a remote one rewrites it. */
 function marking(log: Seen, fail = false): SubprocessAdapter {
-  const inner = loopbackSubprocess(quietAgent(log));
-  return agentSubprocess('marking', async (opts) => {
-    const link = await inner.open(opts);
+  const open = loopbackLink(quietAgent(log));
+  return createLinkSubprocessAdapter(async (opts) => {
+    const link = await open(opts);
     return {
       ...link,
       async reach(bridge) {
@@ -199,8 +205,8 @@ describe('an agent subprocess adapter', () => {
     expect(log.closed).toBe(1);
   });
 
-  it('loopbackSubprocess() runs no processes', async () => {
-    const link = await loopbackSubprocess(quietAgent(seen())).open({});
+  it('loopbackLink() runs no processes', async () => {
+    const link = await loopbackLink(quietAgent(seen()))({});
     const failure = await link
       .spawn({
         command: 'docs-mcp',
@@ -209,42 +215,19 @@ describe('an agent subprocess adapter', () => {
     expect(String(failure)).toContain('docs-mcp');
   });
 
-  it('refuses a step subprocess and holds no handles', async () => {
-    const adapter = localSubprocess();
-    const refusal = await adapter
-      .spawn({
-        command: 'true',
-      })
-      .catch((e: unknown) => e);
-    assert(isNoeticConfigError(refusal));
-    expect(refusal.code).toBe('ACP_SUBPROCESS_RUNS_NO_STEPS');
-    expect(refusal.message).toContain('runs no step subprocesses');
-    expect(await adapter.get('h-1')).toBeNull();
-    expect(await adapter.reattach('h-1')).toBeNull();
-    expect(await adapter.listLive()).toEqual([]);
-    expect(await adapter.stop('h-1')).toEqual({
-      kind: 'not_found',
-      handleId: 'h-1',
-    });
-    expect(await adapter.pause('h-1')).toEqual({
-      kind: 'not_found',
-      handleId: 'h-1',
-    });
-  });
-
   it('refuses an agent whose adapter has no open', async () => {
-    const { open: _open, ...closed } = localSubprocess();
-    const refusal = await runWithTools(closed).catch((e: unknown) => e);
+    const refusal = await runWithTools(createInMemorySubprocessAdapter()).catch((e: unknown) => e);
     assert(isNoeticConfigError(refusal));
-    expect(refusal.code).toBe('ACP_SUBPROCESS_CANNOT_OPEN');
+    expect(refusal.code).toBe('SUBPROCESS_CANNOT_OPEN');
+    expect(refusal.hint).toContain('createLocalSubprocessAdapter()');
   });
 });
 
-describe('localSubprocess', () => {
+describe('openLocalLink', () => {
   it('without a keeper, reaches the bridge where it listens', async () => {
-    const link = await localSubprocess('local', {
+    const link = await openLocalLink({
       keeper: false,
-    }).open({});
+    });
     const bridge = {
       serverName: 'noetic',
       url: 'http://127.0.0.1:9/mcp/x',
@@ -255,7 +238,7 @@ describe('localSubprocess', () => {
   });
 
   it("with its keeper, reaches the bridge on the keeper's own port, same path and headers", async () => {
-    const link = await localSubprocess().open({});
+    const link = await openLocalLink();
     const bridge = {
       serverName: 'noetic',
       url: 'http://127.0.0.1:9/mcp/x',
@@ -276,7 +259,7 @@ describe('localSubprocess', () => {
   });
 
   it('spawns a process beside the agent and carries its stdio', async () => {
-    const link = await localSubprocess().open({});
+    const link = await openLocalLink();
     const process = await link.spawn({
       command: 'cat',
     });
@@ -299,8 +282,8 @@ describe('AcpAgent.spawn', () => {
       command: {
         command: 'agent',
       },
-      subprocess: agentSubprocess('recording', async (opts) => {
-        const link = await localSubprocess().open(opts);
+      subprocess: createLinkSubprocessAdapter(async (opts) => {
+        const link = await openLocalLink({}, opts);
         return {
           ...link,
           spawn: async (command) => {

@@ -13,14 +13,20 @@ import type * as acp from '@agentclientprotocol/sdk';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { ContextData } from '@noetic-tools/context';
 import { plan } from '@noetic-tools/context';
-import { AgentHarness, execute, step, toolWithGenerator } from '@noetic-tools/core';
+import {
+  AgentHarness,
+  createInMemorySubprocessAdapter,
+  execute,
+  step,
+  toolWithGenerator,
+} from '@noetic-tools/core';
 import type { AgentScope, LLMResponse, Step } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
 import { defineAcpAgent } from '../src/define';
 import { claudeToolId } from '../src/tool-ids';
 import { claudeToolWiring } from '../src/tool-wiring';
-import { loopbackSubprocess } from '../src/transport-loopback';
+import { loopbackLink } from '../src/transport-loopback';
 
 //#region Helpers
 
@@ -123,7 +129,9 @@ function agentStep(
       command: {
         command: 'scripted',
       },
-      subprocess: loopbackSubprocess(agent),
+      subprocess: createInMemorySubprocessAdapter({
+        open: loopbackLink(agent),
+      }),
       tools: claudeToolWiring,
       toolIdOf: claudeToolId,
     }),
@@ -663,7 +671,9 @@ describe("a plan layer's plan in an agent step, over the wire", () => {
             command: {
               command: 'scripted',
             },
-            subprocess: loopbackSubprocess(agent),
+            subprocess: createInMemorySubprocessAdapter({
+              open: loopbackLink(agent),
+            }),
             tools: claudeToolWiring,
             toolIdOf: claudeToolId,
           }),

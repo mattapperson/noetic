@@ -10,10 +10,9 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { FrameLink } from '@noetic-tools/types';
 import { checkStart } from '../src/runner/grants';
-import { bridgeTarget } from '../src/runner/host';
 import { runnerOptions, trustWarning } from '../src/runner/options';
-import type { FrameLink } from '../src/runner/protocol';
 import { serveAcpRunner } from '../src/runner/serve';
 
 const BIN = join(import.meta.dir, '..', 'src', 'bin.ts');
@@ -545,36 +544,5 @@ describe('runnerOptions', () => {
     child.kill();
     expect(stderr).toContain("whoever holds this runner's token");
     expect(stderr).toContain('Give it only to hosts you trust.');
-  });
-});
-
-describe('bridgeTarget', () => {
-  const bridges = new Map([
-    [
-      '/mcp/abc',
-      'http://127.0.0.1:4321',
-    ],
-  ]);
-
-  it('forwards the checked path to the bridge origin', () => {
-    expect(bridgeTarget(bridges, '/mcp/abc?x=1')?.href).toBe('http://127.0.0.1:4321/mcp/abc?x=1');
-  });
-
-  it('never leaves the bridge origin for a path that only parses to it', () => {
-    for (const path of [
-      '0/../mcp/abc',
-      '1/../mcp/abc?x',
-      'a:/mcp/abc',
-      '//evil.example/mcp/abc',
-    ]) {
-      const target = bridgeTarget(bridges, path);
-      assert(target);
-      expect(target.origin).toBe('http://127.0.0.1:4321');
-      expect(target.pathname).toBe('/mcp/abc');
-    }
-  });
-
-  it('forwards nothing for a path no bridge serves', () => {
-    expect(bridgeTarget(bridges, '/other')).toBeUndefined();
   });
 });

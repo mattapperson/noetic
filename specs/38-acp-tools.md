@@ -256,7 +256,7 @@ the nested run returns.
 
 - The server listens on `127.0.0.1` at a random port and path. The agent's
   subprocess adapter carries it to the agent (`SubprocessLink.reach`, spec 27):
-  `localSubprocess()` hands back its keeper's port, or the same address
+  the local adapter hands back its keeper's port, or the same address
   without a keeper; the remote runner hands back a port on its own
   loopback interface that forwards over the runner's channel, so the address
   the agent and its launch settings name is always one it can reach. Every request

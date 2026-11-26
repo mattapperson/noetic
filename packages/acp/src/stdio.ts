@@ -3,9 +3,7 @@
  *
  * Lives behind the `@noetic-tools/acp/stdio` subpath so the package's main
  * entry stays runtime-neutral: nothing in `.` imports `node:*`, and a browser
- * bundle never pulls in `child_process`. The agent presets reach this through a
- * lazy dynamic import, so `claudeCode()` works with no extra wiring while
- * keeping the dependency off the main graph.
+ * bundle never pulls in `child_process`.
  */
 
 import { spawn } from 'node:child_process';
@@ -20,8 +18,6 @@ import type {
   ToolBridgeAddress,
 } from '@noetic-tools/types';
 import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
-import type { AgentSubprocessAdapter } from './agent-subprocess';
-import { agentSubprocess } from './agent-subprocess';
 import type { KeeperLink } from './keeper/client';
 import { attachKeeper, keeperHandleOf, startKeeper } from './keeper/client';
 import { serverEnv } from './server-env';
@@ -71,8 +67,10 @@ export function stdioAcpTransport(spec: StdioAgentSpec): AcpTransportFactory {
     );
 }
 
-/** @public Options for {@link localSubprocess}. */
-export interface LocalSubprocessOptions {
+/** @public Options for {@link openLocalLink}. */
+export interface LocalLinkOptions {
+  /** Names the link's processes in errors. Default `'local'`. */
+  agentId?: string;
   /**
    * Run the agent through a keeper, so it can outlive this host and a later
    * host can reattach to it (`AcpTransport.reattach`). Default `true`. Without
@@ -99,7 +97,7 @@ export interface LocalSubprocessOptions {
   /** The agent's stderr. Default: this process's stderr. */
   onStderr?: (chunk: string) => void;
   /**
-   * Told of each agent this adapter starts as its own child, once it runs: a
+   * Told of each agent this link starts as its own child, once it runs: a
    * host that tracks its processes (to list them, or to stop what is left
    * when it shuts down) learns them here. Only with `keeper: false`: a kept
    * agent is its keeper's child, not this process's, and is not reported;
@@ -109,7 +107,7 @@ export interface LocalSubprocessOptions {
   onLaunch?: (agent: LocalAgentProcess) => void | Promise<void>;
 }
 
-/** @public An agent process {@link LocalSubprocessOptions.onLaunch} reports. */
+/** @public An agent process {@link LocalLinkOptions.onLaunch} reports. */
 export interface LocalAgentProcess {
   /**
    * The command's own process, which leads the agent's process group (POSIX):
@@ -121,12 +119,12 @@ export interface LocalAgentProcess {
   readonly exited: Promise<void>;
 }
 
-/** @public The command {@link LocalSubprocessOptions.wrap} receives: `env` is complete. */
+/** @public The command {@link LocalLinkOptions.wrap} receives: `env` is complete. */
 export interface LocalAgentCommand extends SpawnCommand {
   readonly env: Readonly<Record<string, string>>;
 }
 
-/** @public What {@link LocalSubprocessOptions.wrap} is told besides the command. */
+/** @public What {@link LocalLinkOptions.wrap} is told besides the command. */
 export interface LocalWrapInfo {
   /** Every tool bridge address `reach` handed out on this link, in order. */
   readonly bridges: ReadonlyArray<ToolBridgeAddress>;
@@ -151,25 +149,20 @@ function definedEnv(env: Record<string, string | undefined>): Record<string, str
 }
 
 /**
- * Runs agents as local processes: the agent runs through a keeper (see
- * {@link LocalSubprocessOptions.keeper}), which also serves the tool bridge to it
- * on a port that outlives the host; an MCP server beside it is a child
- * process. The agent gets this process's environment; an MCP server, as the
- * MCP SDK starts one, only `serverEnv`'s short list.
+ * Open a link to this machine. A launched process (an agent) runs through a
+ * keeper (see {@link LocalLinkOptions.keeper}), which also serves the tool
+ * bridge to it on a port that outlives the host; a spawned one is a child
+ * process. A launched process gets this process's environment; a spawned
+ * one, as the MCP SDK starts a server, only `serverEnv`'s short list.
+ * `createLocalSubprocessAdapter()` from `@noetic-tools/platform-node` opens
+ * its links with this.
  * @public
  */
-export function localSubprocess(
-  agentId = 'local',
-  options: LocalSubprocessOptions = {},
-): AgentSubprocessAdapter {
-  return agentSubprocess('localSubprocess()', (opts) => openLocal(agentId, options, opts));
-}
-
-async function openLocal(
-  agentId: string,
-  options: LocalSubprocessOptions,
-  { signal, whenHostExits = 'keep' }: SubprocessOpenOptions,
+export async function openLocalLink(
+  options: LocalLinkOptions = {},
+  { signal, whenHostExits = 'keep' }: SubprocessOpenOptions = {},
 ): Promise<SubprocessLink> {
+  const agentId = options.agentId ?? 'local';
   const started = new Set<AcpTransport>();
   const bridges: ToolBridgeAddress[] = [];
   const useKeeper = options.keeper !== false;
@@ -354,8 +347,8 @@ async function spawnStdio(
     },
   );
   // Listened for at once: a child that dies at start still settles it.
-  const exited = new Promise<void>((resolve) => {
-    child.once('exit', () => resolve());
+  const exited = new Promise<number | null>((resolve) => {
+    child.once('exit', (code) => resolve(code));
   });
 
   const forgetOnExit = whenHostExits === 'stop' ? stopWithHost(child) : () => undefined;
@@ -411,7 +404,7 @@ async function spawnStdio(
     try {
       await onLaunch({
         pid: child.pid,
-        exited,
+        exited: exited.then(() => undefined),
       });
     } catch (error) {
       // No one holds the agent yet: stop it rather than leave it running.
@@ -427,5 +420,6 @@ async function spawnStdio(
     readable: frameworkCast<ReadableStream<Uint8Array>>(Readable.toWeb(stdout)),
     writable: frameworkCast<WritableStream<Uint8Array>>(Writable.toWeb(stdin)),
     close,
+    exited,
   };
 }

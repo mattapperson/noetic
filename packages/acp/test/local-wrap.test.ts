@@ -1,5 +1,5 @@
 /**
- * `localSubprocess({ wrap, onStderr })`: a host starts the agent from its own
+ * `openLocalLink({ wrap, onStderr })`: a host starts the agent from its own
  * argv (a sandbox wrapper) with exactly its own environment, and reads the
  * agent's stderr — through a keeper or without one (spec 27 § A wrapped
  * launch). Real processes, no mocks.
@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SpawnCommand, ToolBridgeAddress } from '@noetic-tools/types';
 import type { LocalAgentCommand, LocalWrapInfo } from '../src/stdio';
-import { localSubprocess } from '../src/stdio';
+import { openLocalLink } from '../src/stdio';
 
 const FIXTURE = join(import.meta.dir, 'fixtures', 'wrapped-agent.ts');
 
@@ -78,7 +78,7 @@ describe.each([
     'through its keeper',
     true,
   ],
-])('localSubprocess wrap, %s', (_label, keeper) => {
+])('openLocalLink wrap, %s', (_label, keeper) => {
   it('runs the wrapped argv with exactly its env and cwd, and hands stderr to the host', async () => {
     let stderr = '';
     const seen: Array<{
@@ -86,7 +86,8 @@ describe.each([
       info: LocalWrapInfo;
     }> = [];
     const cwd = realpathSync(tmpdir());
-    const link = await localSubprocess('wrapped', {
+    const link = await openLocalLink({
+      agentId: 'wrapped',
       keeper,
       onStderr: (chunk) => {
         stderr += chunk;
@@ -111,7 +112,7 @@ describe.each([
           cwd,
         };
       },
-    }).open({});
+    });
     const bridge: ToolBridgeAddress = {
       serverName: 'noetic',
       url: 'http://127.0.0.1:9/mcp/x',
@@ -158,15 +159,16 @@ describe.each([
   });
 });
 
-describe('localSubprocess without wrap', () => {
+describe('openLocalLink without wrap', () => {
   it('runs the command as given, on the complete environment', async () => {
     let stderr = '';
-    const link = await localSubprocess('plain', {
+    const link = await openLocalLink({
+      agentId: 'plain',
       keeper: false,
       onStderr: (chunk) => {
         stderr += chunk;
       },
-    }).open({});
+    });
     const transport = await link.launch({
       command: process.execPath,
       args: [
@@ -185,19 +187,20 @@ describe('localSubprocess without wrap', () => {
   });
 });
 
-describe('localSubprocess onLaunch', () => {
+describe('openLocalLink onLaunch', () => {
   it('reports the agent it starts itself, and its exit once it is stopped', async () => {
     const spawned: Array<{
       pid: number;
       exited: Promise<void>;
     }> = [];
-    const link = await localSubprocess('tracked', {
+    const link = await openLocalLink({
+      agentId: 'tracked',
       keeper: false,
       onStderr: () => undefined,
       onLaunch: (agent) => {
         spawned.push(agent);
       },
-    }).open({});
+    });
     const transport = await link.launch({
       command: process.execPath,
       args: [
@@ -229,12 +232,13 @@ describe('localSubprocess onLaunch', () => {
 
   it("reports nothing for a kept agent, which is its keeper's child", async () => {
     const spawned: number[] = [];
-    const link = await localSubprocess('kept', {
+    const link = await openLocalLink({
+      agentId: 'kept',
       onStderr: () => undefined,
       onLaunch: (agent) => {
         spawned.push(agent.pid);
       },
-    }).open({});
+    });
     const transport = await link.launch({
       command: process.execPath,
       args: [
@@ -247,10 +251,11 @@ describe('localSubprocess onLaunch', () => {
   });
 });
 
-describe('localSubprocess onLaunch that throws', () => {
+describe('openLocalLink onLaunch that throws', () => {
   it('treats a rejected promise as a throw', async () => {
     let pid: number | undefined;
-    const link = await localSubprocess('rejects', {
+    const link = await openLocalLink({
+      agentId: 'rejects',
       keeper: false,
       onStderr: () => undefined,
       onLaunch: async (agent) => {
@@ -258,7 +263,7 @@ describe('localSubprocess onLaunch that throws', () => {
         await Promise.resolve();
         throw new Error('registry is down');
       },
-    }).open({});
+    });
     await expect(
       link.launch({
         command: process.execPath,
@@ -273,14 +278,15 @@ describe('localSubprocess onLaunch that throws', () => {
 
   it('stops the agent and fails the launch, leaving nothing running', async () => {
     let pid: number | undefined;
-    const link = await localSubprocess('throws', {
+    const link = await openLocalLink({
+      agentId: 'throws',
       keeper: false,
       onStderr: () => undefined,
       onLaunch: (agent) => {
         pid = agent.pid;
         throw new Error('registry is full');
       },
-    }).open({});
+    });
     const launching = link.launch({
       command: process.execPath,
       args: [

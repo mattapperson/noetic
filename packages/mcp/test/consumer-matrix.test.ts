@@ -39,12 +39,13 @@ import { frameworkCast } from '@noetic-tools/types';
 import { z } from 'zod';
 import { defineAcpAgent } from '../../acp/src/define';
 import { claudeToolWiring } from '../../acp/src/tool-wiring';
-import { loopbackSubprocess } from '../../acp/src/transport-loopback';
+import { loopbackLink } from '../../acp/src/transport-loopback';
 import type { ContextData } from '../../core/src/index';
 import {
   AgentHarness,
   callModel,
   connectionTools,
+  createInMemorySubprocessAdapter,
   InMemoryExporter,
   parseAndRunWorkflow,
   runCode,
@@ -232,93 +233,95 @@ function claudeShaped(log: AgentLog): AcpAgent {
       command: 'claude-shaped',
     },
     tools: claudeToolWiring,
-    subprocess: loopbackSubprocess((conn) => {
-      let servers: ReadonlyArray<AcpMcpServer> = [];
-      return {
-        async initialize() {
-          return {
-            protocolVersion: 1,
-            agentCapabilities: {
-              mcpCapabilities: {
-                http: true,
+    subprocess: createInMemorySubprocessAdapter({
+      open: loopbackLink((conn) => {
+        let servers: ReadonlyArray<AcpMcpServer> = [];
+        return {
+          async initialize() {
+            return {
+              protocolVersion: 1,
+              agentCapabilities: {
+                mcpCapabilities: {
+                  http: true,
+                },
               },
-            },
-          };
-        },
-        async newSession(params) {
-          servers = params.mcpServers;
-          return {
-            sessionId: 'claude-1',
-          };
-        },
-        async authenticate() {
-          return {};
-        },
-        async cancel() {},
-        async prompt(params) {
-          const bridge = servers.find((server) => server.name === 'noetic');
-          if (!bridge || !('url' in bridge)) {
-            throw new Error('no tool bridge in session/new');
-          }
-          const client = new Client({
-            name: 'claude-shaped',
-            version: '0.0.0',
-          });
-          await client.connect(
-            new StreamableHTTPClientTransport(new URL(bridge.url), {
-              requestInit: {
-                headers: Object.fromEntries(
-                  bridge.headers.map((header) => [
-                    header.name,
-                    header.value,
-                  ]),
-                ),
+            };
+          },
+          async newSession(params) {
+            servers = params.mcpServers;
+            return {
+              sessionId: 'claude-1',
+            };
+          },
+          async authenticate() {
+            return {};
+          },
+          async cancel() {},
+          async prompt(params) {
+            const bridge = servers.find((server) => server.name === 'noetic');
+            if (!bridge || !('url' in bridge)) {
+              throw new Error('no tool bridge in session/new');
+            }
+            const client = new Client({
+              name: 'claude-shaped',
+              version: '0.0.0',
+            });
+            await client.connect(
+              new StreamableHTTPClientTransport(new URL(bridge.url), {
+                requestInit: {
+                  headers: Object.fromEntries(
+                    bridge.headers.map((header) => [
+                      header.name,
+                      header.value,
+                    ]),
+                  ),
+                },
+              }),
+            );
+            log.listed = (await client.listTools()).tools.map((tool) => tool.name);
+            await conn.sessionUpdate({
+              sessionId: params.sessionId,
+              update: {
+                sessionUpdate: 'tool_call',
+                toolCallId: 'call_1',
+                title: 'mcp__noetic__linear_get_issue',
+                kind: 'other',
+                status: 'pending',
               },
-            }),
-          );
-          log.listed = (await client.listTools()).tools.map((tool) => tool.name);
-          await conn.sessionUpdate({
-            sessionId: params.sessionId,
-            update: {
-              sessionUpdate: 'tool_call',
-              toolCallId: 'call_1',
-              title: 'mcp__noetic__linear_get_issue',
-              kind: 'other',
-              status: 'pending',
-            },
-          });
-          const result = await client.callTool({
-            name: 'linear_get_issue',
-            arguments: {
-              id: 'ENG-1',
-            },
-            _meta: {
-              'claudecode/toolUseId': 'call_1',
-            },
-          });
-          const text = frameworkCast<
-            Array<{
-              text?: string;
-            }>
-          >(result.content)
-            .map((part) => part.text ?? '')
-            .join('');
-          await client.close();
-          await conn.sessionUpdate({
-            sessionId: params.sessionId,
-            update: {
-              sessionUpdate: 'agent_message_chunk',
-              content: {
-                type: 'text',
-                text: `read: ${text}`,
+            });
+            const result = await client.callTool({
+              name: 'linear_get_issue',
+              arguments: {
+                id: 'ENG-1',
               },
-            },
-          });
-          return {
-            stopReason: 'end_turn',
-          };
-        },
-      };
+              _meta: {
+                'claudecode/toolUseId': 'call_1',
+              },
+            });
+            const text = frameworkCast<
+              Array<{
+                text?: string;
+              }>
+            >(result.content)
+              .map((part) => part.text ?? '')
+              .join('');
+            await client.close();
+            await conn.sessionUpdate({
+              sessionId: params.sessionId,
+              update: {
+                sessionUpdate: 'agent_message_chunk',
+                content: {
+                  type: 'text',
+                  text: `read: ${text}`,
+                },
+              },
+            });
+            return {
+              stopReason: 'end_turn',
+            };
+          },
+        };
+      }),
     }),
   });
 }

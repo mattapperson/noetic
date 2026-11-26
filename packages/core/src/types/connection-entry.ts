@@ -25,6 +25,11 @@ export interface AttachedEntry extends NamedEntry {
   readonly where: string;
   /** A view layer renders its reads in the turn's context. */
   readonly viewed?: boolean;
+  /**
+   * The harness subprocess adapter the `acpAgent` step that lists it names: a
+   * process the entry starts runs there, beside the agent.
+   */
+  readonly subprocess?: string;
 }
 
 //#endregion

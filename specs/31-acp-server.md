@@ -74,8 +74,9 @@ step.acpAgent({
 //    no child process, both directions of the codebase exercising each other.
 
 // 3. A served harness on another host: run it as the agent behind a remote
-//    runner (`noetic-acp serve`) and reach it with `webSocketSubprocess()` or
-//    `commandSubprocess()` (spec 27).
+//    runner (`noetic-acp serve`) and reach it with
+//    `createWebSocketSubprocessAdapter()` or `createCommandSubprocessAdapter()`
+//    from `@noetic-tools/platform-node` (spec 27).
 ```
 
 The dependency picture does not change: the server lives in

@@ -4,6 +4,7 @@
  */
 
 import type { AcpAgent, AcpClientHost, AcpToolHost } from '@noetic-tools/types';
+import { createLocalSubprocessAdapter } from '../../../platform-node/src/local-subprocess-adapter';
 import { claudeCode, codex } from '../../src/agents';
 import { MemoryFs, RecordingShell } from '../_helpers';
 
@@ -19,7 +20,9 @@ export function isLiveAgentId(id: string): id is LiveAgentId {
 }
 
 export function liveAgent(id: LiveAgentId): AcpAgent {
-  return LIVE_AGENTS[id]();
+  return LIVE_AGENTS[id]({
+    subprocess: createLocalSubprocessAdapter(),
+  });
 }
 
 function textOf(args: unknown): string {

@@ -4,8 +4,8 @@
  * Consumers on Node.js ≥ 20 (or any runtime that provides
  * `node:fs/promises`, `node:child_process`, `node:net`, and
  * `Bun.spawn`) import from here to get the local filesystem, shell,
- * subprocess, durable-storage, artifact-store, webhook-receiver, and
- * per-task IPC implementations.
+ * subprocess (local, and through a remote runner), durable-storage,
+ * artifact-store, webhook-receiver, and per-task IPC implementations.
  *
  * `@noetic-tools/core` ships only contracts and in-memory adapters; the
  * Node-specific implementations live here so portable-runtime
@@ -65,9 +65,18 @@ export {
   type CreateLocalSubprocessAdapterOptions,
   createLocalSubprocessAdapter,
   defaultProcessSignaller,
+  type LocalAgentCommand,
+  type LocalAgentProcess,
+  type LocalWrapInfo,
   type ProcessSignaller,
   type SubprocessSignal,
 } from './local-subprocess-adapter';
+export {
+  type CreateCommandSubprocessAdapterOptions,
+  type CreateWebSocketSubprocessAdapterOptions,
+  createCommandSubprocessAdapter,
+  createWebSocketSubprocessAdapter,
+} from './runner-subprocess-adapters';
 export type {
   CreateSqliteStorageOptions,
   SqliteDatabase,

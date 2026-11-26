@@ -104,7 +104,7 @@ const harness = new AgentHarness({
 | `storage.stepLedgerRetention` | `StepLedgerRetention` | `{ maxEntryBytes: 131072, maxEntries: 1000 }` | Bounds on the step-completion ledger that backs step-level resume. Only meaningful when durability is on. A non-positive cap throws `NoeticConfigError` (`STEP_LEDGER_RETENTION_INVALID`) at construction. See [Durability](/docs/framework/durability#step-level-resume). |
 | `fs` | `FsAdapter`, or [several by name](#named-adapters) | in-memory | Filesystem adapter exposed as `harness.fs`. Context layers, tools, and skill discovery all route through this adapter. Pass `createLocalFsAdapter()` from `@noetic-tools/platform-node` for real disk access. |
 | `shell` | `ShellAdapter`, or [several by name](#named-adapters) | in-memory | Shell adapter exposed as `harness.shell`. Tools that execute commands route through this adapter. `createLocalShellAdapter()` runs raw `sh -c`; pass `createLocalShellAdapter({ useRtk: true })` to wrap each command through [`rtk rewrite`](https://github.com/rtk-ai/rtk) for token-efficient output. The `@noetic-tools/cli` package enables this by default (controlled by `shell.useRtk` in `noetic.config.ts`). |
-| `subprocess` | `SubprocessAdapter`, or [several by name](#named-adapters) | in-memory | Adapter used to dispatch every `runCode`, `spawn`, and `detachedSpawn`. Set to `createLocalSubprocessAdapter({storage})` to run children out-of-process with durable handle manifests. See [Durability](/docs/framework/durability). |
+| `subprocess` | `SubprocessAdapter`, or [several by name](#named-adapters) | in-memory | Where the harness's processes run: every `runCode`, `spawn`, and `detachedSpawn`, and every [ACP agent](/docs/framework/acp-agents#where-the-agent-runs). The in-memory default runs steps in this process and cannot hold a process's stdio, so a harness that runs an ACP agent sets `createLocalSubprocessAdapter()` from `@noetic-tools/platform-node`. `createLocalSubprocessAdapter({storage})` runs children out-of-process with durable handle manifests. See [Durability](/docs/framework/durability). |
 | `secrets` | `SecretResolver` | `undefined` | Resolves `secret('name')` values immediately before a connection call is sent. See [Connections](/docs/framework/connections#values). |
 | `artifacts` | `ArtifactStore` | in-memory | Where binary content — screenshots, recordings, verification runs — is stored. Pass `createFileArtifactStore({ dir })` from [`@noetic-tools/platform-node`](/docs/framework/platform-packages#file-artifact-store) for disk. |
 
@@ -118,8 +118,8 @@ import {
   createLocalFsAdapter,
   createLocalShellAdapter,
   createLocalSubprocessAdapter,
+  createWebSocketSubprocessAdapter,
 } from '@noetic-tools/platform-node';
-import { webSocketSubprocess } from '@noetic-tools/acp/remote';
 
 const harness = new AgentHarness({
   name: 'my-agent',
@@ -131,7 +131,7 @@ const harness = new AgentHarness({
     subprocess: {
       laptop: { adapter: createLocalSubprocessAdapter(), default: true },
       builder: {
-        adapter: webSocketSubprocess({ url: 'wss://build-host:7000', token: process.env.RUNNER_TOKEN ?? '' }),
+        adapter: createWebSocketSubprocessAdapter({ url: 'wss://build-host:7000', token: process.env.RUNNER_TOKEN ?? '' }),
         displayName: 'Build host',
         description: 'Linux, 64 cores',
       },
@@ -663,6 +663,8 @@ const harness = new AgentHarness({
   environment: { subprocess },                // real OS subprocess with durable manifests
 });
 ```
+
+A subprocess adapter has three jobs, and does each where it can: it runs a step in a child (`spawn`, `detachedSpawn`), which needs the Noetic runtime and your code where the child runs; it runs a command to completion (`runCode`); and, through its optional `open`, it starts a process and hands you its stdio — how an [ACP agent](/docs/framework/acp-agents#where-the-agent-runs) and the MCP servers beside it run. `createLocalSubprocessAdapter()` does all three on this machine. An adapter that reaches a remote runner (`createWebSocketSubprocessAdapter()`, `createCommandSubprocessAdapter()`) holds processes there and runs commands that take no `stdin`; it refuses a step with `SUBPROCESS_RUNS_NO_STEPS`. The in-memory default runs steps in this process and has no `open`.
 
 The harness's `subprocess` here is its default; an environment may [name several](#named-adapters). Per-step and per-call overrides let you mix execution backends. A step with `subprocess: createInMemorySubprocessAdapter()` stays in-process even when the harness default is the local adapter; a `detachedSpawn(step, input, ctx, { subprocess: otherAdapter })` overrides both. Resolution order is `detachedSpawn-overrides.subprocess ?? step.subprocess ?? harness.subprocess`.
 

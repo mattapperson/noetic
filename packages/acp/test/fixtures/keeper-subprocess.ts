@@ -5,21 +5,25 @@
 
 import { fileURLToPath } from 'node:url';
 import type { SubprocessAdapter } from '@noetic-tools/types';
-import { commandSubprocess, webSocketSubprocess } from '../../src/remote';
+import { createLocalSubprocessAdapter } from '../../../platform-node/src/local-subprocess-adapter';
+import {
+  createCommandSubprocessAdapter,
+  createWebSocketSubprocessAdapter,
+} from '../../../platform-node/src/runner-subprocess-adapters';
 
 const BIN = fileURLToPath(new URL('../../src/bin.ts', import.meta.url));
 
 export type SubprocessKind = 'local' | 'ws' | 'stdio';
 
-export function subprocessFor(kind: string): SubprocessAdapter | undefined {
+export function subprocessFor(kind: string): SubprocessAdapter {
   if (kind === 'ws') {
-    return webSocketSubprocess({
+    return createWebSocketSubprocessAdapter({
       url: process.env.NOETIC_TEST_RUNNER_URL ?? '',
       token: process.env.NOETIC_TEST_RUNNER_TOKEN ?? '',
     });
   }
   if (kind === 'stdio') {
-    return commandSubprocess({
+    return createCommandSubprocessAdapter({
       command: process.execPath,
       args: [
         BIN,
@@ -28,5 +32,5 @@ export function subprocessFor(kind: string): SubprocessAdapter | undefined {
       ],
     });
   }
-  return undefined;
+  return createLocalSubprocessAdapter();
 }

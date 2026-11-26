@@ -9,9 +9,10 @@ import { join } from 'node:path';
 import type { Spawn } from '@noetic-tools/types';
 import { z } from 'zod';
 import type { AcpRunnerListener } from '../../acp/src/remote';
-import { listenAcpRunner, webSocketSubprocess } from '../../acp/src/remote';
+import { listenAcpRunner } from '../../acp/src/remote';
 import { spawnOn } from '../../acp/src/spawn';
-import { localSubprocess } from '../../acp/src/stdio';
+import { createLocalSubprocessAdapter } from '../../platform-node/src/local-subprocess-adapter';
+import { createWebSocketSubprocessAdapter } from '../../platform-node/src/runner-subprocess-adapters';
 import { mcp } from '../src/provider';
 import { connectOptions } from './_helpers';
 
@@ -85,12 +86,12 @@ describe('the environment a stdio MCP server starts with', () => {
     await listener.close();
   });
 
-  it('is the same locally, through localSubprocess() and through a runner, and holds none of the host’s secrets', async () => {
+  it('is the same locally, through the local adapter and through a runner, and holds none of the host’s secrets', async () => {
     const local = await serverEnvThrough(undefined);
-    const beside = await serverEnvThrough(spawnOn(localSubprocess()));
+    const beside = await serverEnvThrough(spawnOn(createLocalSubprocessAdapter()));
     const runner = await serverEnvThrough(
       spawnOn(
-        webSocketSubprocess({
+        createWebSocketSubprocessAdapter({
           url: listener.url,
           token: TOKEN,
         }),

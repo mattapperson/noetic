@@ -22,7 +22,7 @@ They are mandatory, not optional.
 | `05-loop-and-until.md` | `until/`, `interpreter/execute-loop` | `operators/loop-and-until.mdx`, `api/until-types.mdx` |
 | `06-channels.md` | `runtime/channel-store` | `operators/channels.mdx`, `api/channel-types.mdx` |
 | `07-context-and-event-log.md` | `runtime/context-impl`, `runtime/item-log-impl` | `context.mdx`, `api/context-types.mdx` |
-| `08-runtime.md` (AgentHarness) | `runtime/` | `runtime.mdx`, `api/runtime-types.mdx` |
+| `08-runtime.md` (AgentHarness) | `runtime/`, `adapters/` (the in-memory, link and runner subprocess adapters), `packages/types/src/types/subprocess-adapter.ts` | `runtime.mdx`, `api/runtime-types.mdx` |
 | `09-error-model.md` | `errors/` | `errors.mdx` |
 | `10-observability.md` | `observability/` | `observability.mdx` |
 | `11-context-layer-system.md`, `12-builtin-context-layers.md` | `packages/context/src/` (`ContextLayer` contract in `packages/types/src/types/context-layer.ts`) | `context-layers/`, `api/context-layer-types.mdx` |
@@ -31,9 +31,9 @@ They are mandatory, not optional.
 | `16-semantic-conditions.md` | `conditions/`, `adapters/` | `operators/conditions.mdx`, `api/adapter-types.mdx` |
 | `17-eval-and-optimization.md` | `packages/eval/src/` | (eval docs TBD) |
 | `12a-cli-context-layers.md`, `21-tasks.md`, `22-cli-architecture.md` | (none — the CLI is implemented in the separate `noetic-internal` repo; these specs stay here as its contract, so there is no in-repo source to keep in sync) | `code-agent-cli/` |
-| `25-platform-packages.md` | `packages/platform-node/src/`, `packages/platform-browser/src/` | `framework/platform-packages.mdx` |
+| `25-platform-packages.md` | `packages/platform-node/src/`, `packages/platform-browser/src/`, `packages/platform-cloudflare-worker/src/` | `framework/platform-packages.mdx` |
 | `26-json-workflow-runtime.md` | `schemas/workflow.ts`, `builders/workflow-hydrator.ts`, `builders/dynamic-workflow.ts` | `framework/json-runtime.mdx` (+ run `bun run gen:schema`, see Requirement 6) |
-| `27-acp-agent-steps.md` | `packages/types/src/types/acp.ts`, `interpreter/execute-acp-agent`, `interpreter/acp-events`, `builders/step-builders` (`step.acpAgent`), `packages/acp/src/` | `framework/acp-agents.mdx` |
+| `27-acp-agent-steps.md` | `packages/types/src/types/acp.ts`, `interpreter/execute-acp-agent`, `interpreter/acp-events`, `builders/step-builders` (`step.acpAgent`), `packages/acp/src/`, `packages/types/src/schemas/runner-protocol.ts` (the runner's frames), `adapters/runner-subprocess-adapter.ts`, `packages/platform-node/src/local-subprocess-adapter.ts`, `packages/platform-node/src/runner-subprocess-adapters.ts`, `packages/platform-cloudflare-worker/src/runner-subprocess.ts` | `framework/acp-agents.mdx`, `framework/platform-packages.mdx` |
 | `28-generative-ui.md` | `packages/types/src/types/output-codec.ts`, `packages/types/src/types/tool.ts` (`UiFragment`, `ToolUiDeclaration`), `packages/openui/src/` | `framework/generative-ui.mdx` |
 | `29-chat-platform-integration.md` | `packages/chat-sdk/src/`, `packages/core/src/runtime/channel-store.ts` (`getChannelStream`) | `framework/chat-sdk.mdx` |
 | `30-agent-plugins.md` | `packages/agent-plugins/src/` | `framework/context-layers/agent-plugins.mdx` |

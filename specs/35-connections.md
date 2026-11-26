@@ -712,7 +712,10 @@ interface ConnectionIdentity { surface: string; instance: string; epoch?: number
 credential it holds (a bearer token, an OAuth token), and the harness scrubs
 that value as it scrubs resolved secrets. It carries `subprocess` too, a
 `SubprocessChoice` holding the harness's subprocess adapters
-(`08-runtime` § Named Adapters), which `mcp()` hands to its `spawn`.
+(`08-runtime` § Named Adapters), which `mcp()` hands to its `spawn`. For an
+entry an `acpAgent` step lists in its `tools`, the choice also names the
+adapter that step names (`subprocess: 'builder'`), so a stdio server started
+with `spawn: agent.spawn` runs beside the step's agent.
 
 Each `ConnectionOperationInfo` in a manifest may carry `annotations` — the
 server's hints about the operation: `title`, `readOnlyHint`,

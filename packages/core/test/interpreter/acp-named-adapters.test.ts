@@ -16,6 +16,7 @@ import type {
   AcpTurnResult,
   FsAdapter,
   ShellAdapter,
+  SubprocessChoice,
 } from '@noetic-tools/types';
 import { isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { createInMemoryFsAdapter } from '../../src/adapters/in-memory-fs-adapter';
@@ -23,6 +24,7 @@ import { createInMemoryShellAdapter } from '../../src/adapters/in-memory-shell-a
 import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
 import type { StepAcpAgentOpts } from '../../src/builders/step-builders';
 import { step } from '../../src/builders/step-builders';
+import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { execute } from '../../src/interpreter/execute';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
@@ -331,6 +333,53 @@ describe('the adapters an ACP step names', () => {
     assert(isNoeticConfigError(error));
     expect(error.code).toBe('ADAPTER_UNKNOWN');
     expect(connects).toHaveLength(0);
+  });
+});
+
+describe('a connection an ACP step lists in its tools', () => {
+  /** Runs a step that lists one connection and returns the choice its provider was handed. */
+  async function choiceGiven(names: Names, agent: AcpAgent): Promise<SubprocessChoice | undefined> {
+    const { harness } = twoHosts();
+    const inner = createInMemoryConnection();
+    let given: SubprocessChoice | undefined;
+    await harness.run(
+      step.acpAgent({
+        id: 'code',
+        agent,
+        prompt: 'Add the feature.',
+        tools: [
+          {
+            name: 'docs',
+            async connect(opts) {
+              given = opts.subprocess;
+              return await inner.connect(opts);
+            },
+          },
+        ],
+        ...names,
+      }),
+      undefined,
+      harness.createContext(),
+    );
+    return given;
+  }
+
+  it("is handed the subprocess adapter the step names, so its process starts beside the step's agent", async () => {
+    const given = await choiceGiven(
+      {
+        subprocess: 'builder',
+      },
+      recordingAgent([]),
+    );
+    expect(given?.name).toBe('builder');
+    assert(given);
+    expect(given.adapters.get(given.name)).toBe(given.adapters.get('builder'));
+  });
+
+  it('is handed no name when the step names none', async () => {
+    const given = await choiceGiven({}, recordingAgent([]));
+    assert(given);
+    expect(given.name).toBeUndefined();
   });
 });
 

@@ -50,6 +50,8 @@ step.acpAgent({
 });
 ```
 
+The agent is a process, and it starts through the harness's subprocess adapter. Give the harness one that can hold a process's stdio: `environment: { subprocess: createLocalSubprocessAdapter() }` from `@noetic-tools/platform-node`. See [Where the agent runs](/docs/framework/acp-agents#where-the-agent-runs).
+
 ### The mapping
 
 | Before | After |

@@ -1305,6 +1305,7 @@ const result = await parseAndRunWorkflow({
 ```typescript
 import { AgentHarness, callModel, runCode, step } from '@noetic-tools/core';
 import { claudeCode } from '@noetic-tools/acp';
+import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 const plan = callModel({
   id: 'plan',
@@ -1327,7 +1328,13 @@ const pipeline = runCode({
   },
 });
 
-const harness = new AgentHarness({ name: 'builder', agentGraph: pipeline, params: {} });
+// The coding agent is a process: the harness says where processes run.
+const harness = new AgentHarness({
+  name: 'builder',
+  agentGraph: pipeline,
+  params: {},
+  environment: { subprocess: createLocalSubprocessAdapter() },
+});
 await harness.execute('Add input validation to the signup endpoint.');
 ```
 
@@ -1402,8 +1409,13 @@ Hydrate it with a registry built from the agent presets:
 ```typescript
 import { hydrateWorkflow, AgentHarness, type HydrationContext } from '@noetic-tools/core';
 import { claudeCode, codex, createAcpAgentRegistry } from '@noetic-tools/acp';
+import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
-const harness = new AgentHarness({ name: 'json-builder', params: {} });
+const harness = new AgentHarness({
+  name: 'json-builder',
+  params: {},
+  environment: { subprocess: createLocalSubprocessAdapter() },
+});
 const ctx = harness.createContext();
 
 const hydrationCtx: HydrationContext = {

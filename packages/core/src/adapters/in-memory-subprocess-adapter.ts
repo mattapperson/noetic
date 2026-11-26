@@ -161,6 +161,11 @@ export function createInMemorySubprocessAdapter(
 
   // Steps run through the caller's local executor, in this process.
   return markInProcess({
+    ...(options.open
+      ? {
+          open: options.open,
+        }
+      : {}),
     async spawn(request) {
       if (isStepRequest(request)) {
         return spawnStepHandle(request);

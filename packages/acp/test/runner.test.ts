@@ -14,10 +14,14 @@ import { AgentHarness, execute, step, tool } from '@noetic-tools/core';
 import type { Item, SubprocessAdapter } from '@noetic-tools/types';
 import { isNoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
+import {
+  createCommandSubprocessAdapter,
+  createWebSocketSubprocessAdapter,
+} from '../../platform-node/src/runner-subprocess-adapters';
 import { codex, customAcpAgent } from '../src/agents';
 import { defineAcpAgent } from '../src/define';
 import type { AcpRunnerListener } from '../src/remote';
-import { commandSubprocess, listenAcpRunner, webSocketSubprocess } from '../src/remote';
+import { listenAcpRunner } from '../src/remote';
 import { claudeToolWiring } from '../src/tool-wiring';
 
 const FIXTURE = join(import.meta.dir, 'fixtures', 'tool-agent.ts');
@@ -105,7 +109,7 @@ describe('remote runner over WebSocket', () => {
 
   it('serves the bridge on the runner, and the call matches callModel', async () => {
     const { seen, items } = await runAgent(
-      webSocketSubprocess({
+      createWebSocketSubprocessAdapter({
         url: listener.url,
         token: TOKEN,
       }),
@@ -122,7 +126,7 @@ describe('remote runner over WebSocket', () => {
   });
 
   it('refuses a wrong token', async () => {
-    const failure = await webSocketSubprocess({
+    const failure = await createWebSocketSubprocessAdapter({
       url: listener.url,
       token: 'wrong-token-wrong-token',
     })
@@ -133,7 +137,7 @@ describe('remote runner over WebSocket', () => {
 
   it('refuses a plain ws:// URL off the loopback interface', () => {
     expect(() =>
-      webSocketSubprocess({
+      createWebSocketSubprocessAdapter({
         url: 'ws://build-host.example:7000',
         token: TOKEN,
       }),
@@ -164,7 +168,7 @@ describe('remote runner rules', () => {
       ],
     });
     try {
-      const link = await webSocketSubprocess({
+      const link = await createWebSocketSubprocessAdapter({
         url: listener.url,
         token: TOKEN,
       }).open({});
@@ -216,7 +220,7 @@ describe('remote runner rules', () => {
     try {
       expect(listener.url).toStartWith('wss://');
       const { seen } = await runAgent(
-        webSocketSubprocess({
+        createWebSocketSubprocessAdapter({
           url: listener.url,
           token: TOKEN,
           ca: readFileSync(cert, 'utf8'),
@@ -232,7 +236,7 @@ describe('remote runner rules', () => {
 describe('remote runner over stdio', () => {
   it('runs through a command that starts the runner, as ssh would', async () => {
     const { seen, items } = await runAgent(
-      commandSubprocess({
+      createCommandSubprocessAdapter({
         command: process.execPath,
         args: [
           BIN,
@@ -294,7 +298,7 @@ describe('attached transports', () => {
     expect(
       codeFor(
         codex({
-          subprocess: webSocketSubprocess({
+          subprocess: createWebSocketSubprocessAdapter({
             url: 'ws://127.0.0.1:1',
             token: TOKEN,
           }),

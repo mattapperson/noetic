@@ -320,6 +320,30 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Clear the snapshot with `CheckpointStore.clear()` and restart the execution.
 
+#### SUBPROCESS_CANNOT_OPEN
+
+**Cause:** Something needed to start a process and hold its stdio — an ACP agent, or a stdio MCP server started with `spawnOn()` or `agent.spawn` — and the subprocess adapter it landed on has no `open`. An agent lands on the adapter its step names, else the one its preset names, else the harness's default; nothing stands in for it. The default adapter of a harness given no `environment.subprocess` runs steps in memory and has no `open`, so `claudeCode()` on such a harness fails this way. So does an agent connected by hand with no adapter at all.
+
+**Fix:** Give the harness an adapter that has `open` — `environment: { subprocess: createLocalSubprocessAdapter() }` from `@noetic-tools/platform-node` runs processes on this machine — or name another one that does (`subprocess: 'builder'` on the step or the preset).
+
+#### SUBPROCESS_NAME_WITHOUT_HARNESS
+
+**Cause:** An agent that names a harness subprocess adapter (`claudeCode({ subprocess: 'builder' })`) was connected with no harness adapters to find the name among, usually by calling `agent.connect()` by hand.
+
+**Fix:** Run the agent as a step, so the harness passes its `environment.subprocess`, or give the agent the adapter itself.
+
+#### SUBPROCESS_RUNS_NO_STEPS
+
+**Cause:** A step was dispatched (`spawn`, `detachedSpawn`) to a subprocess adapter that only starts commands and holds their stdio: one built with `createLinkSubprocessAdapter()`, or one that reaches a remote runner (`createRunnerSubprocessAdapter()`, `createWebSocketSubprocessAdapter()`, `createCommandSubprocessAdapter()`, `createSocketSubprocessAdapter()`, `createFetchSubprocessAdapter()`). Running a step needs the Noetic runtime and your program's code where it runs, and a runner has neither.
+
+**Fix:** Run steps through an adapter that has both — `createLocalSubprocessAdapter()`, or the in-memory default — and name the other one where a command or an agent should run: `environment: { subprocess: { here: { adapter: createLocalSubprocessAdapter(), default: true }, builder: { adapter: runner } } }`, then `subprocess: 'builder'` on the step.
+
+#### SUBPROCESS_CANNOT_END_INPUT
+
+**Cause:** A command was given `stdin` and sent to a subprocess adapter that reaches a remote runner — most often a JSON workflow `runCode` node, which passes its input on stdin. The runner's frames carry no end of input, so the command would wait for one and never finish.
+
+**Fix:** Run it through an adapter on this machine (`createLocalSubprocessAdapter()`), or give the command its input as an argument or a file.
+
 ### Step Builders
 
 #### EMPTY_STEP_ID
@@ -696,31 +720,13 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Cause:** `step.acpAgent()` gives `tools` to an agent attached through a custom `transport`. Noetic did not start that agent, and the transport has no `reach()` to carry the tool bridge to wherever it runs. With `tools` left out, such an agent simply gets none.
 
-**Fix:** Give the agent a command and a `subprocess` adapter instead — `localSubprocess()` for a local process, or `webSocketSubprocess()` / `commandSubprocess()` from `@noetic-tools/acp/remote` for a remote runner (`noetic-acp serve`) — or leave `tools` off the step.
+**Fix:** Give the agent a command and a subprocess adapter instead — `createLocalSubprocessAdapter()` from `@noetic-tools/platform-node` for this machine, or `createWebSocketSubprocessAdapter()` / `createCommandSubprocessAdapter()` from the same package for a remote runner (`noetic-acp serve`) — or leave `tools` off the step.
 
 #### ACP_TRANSPORT_CANNOT_LAUNCH
 
 **Cause:** As `ACP_TRANSPORT_CANNOT_REACH`, for an agent whose wiring has launch settings (Claude Code, Codex, opencode, pi): attached to an agent someone else started, those settings cannot be applied, so its tools would not match `callModel`.
 
 **Fix:** Give the preset a `subprocess` adapter instead of a `transport`; its link's `launch()` starts the agent with those settings.
-
-#### ACP_SUBPROCESS_CANNOT_OPEN
-
-**Cause:** An ACP agent was given a `subprocess` adapter with no `open`, or `spawnOn()` was. Such an adapter hands back no stdio, so no agent can run there.
-
-**Fix:** Use an adapter with `open` — `localSubprocess()` from `@noetic-tools/acp/stdio`, or `webSocketSubprocess()` / `commandSubprocess()` from `@noetic-tools/acp/remote` — or add `open` to yours.
-
-#### ACP_SUBPROCESS_NAME_WITHOUT_HARNESS
-
-**Cause:** An agent that names a harness subprocess adapter (`claudeCode({ subprocess: 'builder' })`) was connected with no harness adapters to find the name among, usually by calling `agent.connect()` by hand.
-
-**Fix:** Run the agent as a step, so the harness passes its `environment.subprocess`, or give the agent the adapter itself.
-
-#### ACP_SUBPROCESS_RUNS_NO_STEPS
-
-**Cause:** A step subprocess was dispatched to an adapter `@noetic-tools/acp` built (`localSubprocess()`, `webSocketSubprocess()`, `commandSubprocess()`, `loopbackSubprocess()`), usually because it was set as `environment.subprocess` on its own. Those adapters run ACP agents and the processes beside them, and no step children.
-
-**Fix:** Give the adapter to the agent (`claudeCode({ subprocess })`), or keep an adapter that runs steps on the harness and add the agent adapter's `open` to it: `{ ...createInMemorySubprocessAdapter(), open: (options) => runner.open(options) }`.
 
 #### ACP_AGENT_CANNOT_TAKE_TOOLS
 

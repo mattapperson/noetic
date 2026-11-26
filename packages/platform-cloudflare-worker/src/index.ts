@@ -5,7 +5,9 @@
  * scope per tenant and a blob store for values too large for a row, an HTTP
  * endpoint that turns an accepted request into a stored event, two ways to wake
  * parked turns (a Durable Object alarm, or one Cloudflare Workflow instance per
- * turn), and Cron Trigger ticks as scans or as turns of a Durable Object's harness.
+ * turn), Cron Trigger ticks as scans or as turns of a Durable Object's harness,
+ * and subprocess adapters that run processes through a remote runner over a
+ * WebSocket.
  *
  * Nothing here imports `cloudflare:workers` or a Cloudflare types package: each
  * helper takes the small part of a binding it uses, so the same code runs under
@@ -46,6 +48,13 @@ export {
   durableObjectEnvironment,
 } from './durable-object-storage';
 export { type EventEndpointOptions, EventEndpointStatus, eventEndpoint } from './event-endpoint';
+export {
+  type CreateFetchSubprocessAdapterOptions,
+  createFetchSubprocessAdapter,
+  createSocketSubprocessAdapter,
+  type UpgradedSocketLike,
+  type UpgradeFetchLike,
+} from './runner-subprocess';
 export {
   type BlobStoreLike,
   DEFAULT_SPILL_BYTES,

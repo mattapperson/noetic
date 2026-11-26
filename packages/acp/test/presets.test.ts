@@ -9,9 +9,11 @@ import { describe, expect, it } from 'bun:test';
 import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createLinkSubprocessAdapter } from '@noetic-tools/core';
 import type { AcpClientHost } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import { claudeCode, codex, PRESET_COMMANDS } from '../src/agents';
+import { openLocalLink } from '../src/stdio';
 import { loopbackTransport } from '../src/transport-loopback';
 
 const PRESETS = [
@@ -78,6 +80,7 @@ describe('maintained bridge presets', () => {
               CODEX_PATH: '/chosen/codex',
               PRESET_FLAG: 'on',
             },
+            subprocess: createLinkSubprocessAdapter((options) => openLocalLink({}, options)),
           });
           expect(agent.agentId).toBe(id);
           const connection = await agent.connect({

@@ -243,7 +243,7 @@ Run a serialised code body. Unlike the programmatic `runCode` (which carries a c
 | `retry` | `object` | `undefined` | Retry policy: `{ maxAttempts, backoff: 'fixed' \| 'linear' \| 'exponential', initialDelay, maxDelay? }`. |
 | `subprocess` | `string` | `undefined` | A subprocess adapter by name: the one `HydrationContext.resolveSubprocess` returns for it, else the harness's [adapter of that name](/docs/framework/runtime#named-adapters). When omitted, the harness default (`ctx.subprocess`) is used. A name neither knows fails the step with `UNKNOWN_SUBPROCESS_REFERENCE`. |
 
-> **Execution requires a subprocess adapter.** The `runCode` node does not execute code in the worker process. The host must supply a subprocess adapter capable of running the code body and capturing its stdout. On Node, `createLocalSubprocessAdapter()` from `@noetic-tools/platform-node` does: it runs the body with `node -e`, writes the step input to stdin, and returns stdout. A non-zero exit (or failed handle) surfaces as a thrown error carrying the end of the process's stderr.
+> **Execution requires a subprocess adapter.** The `runCode` node does not execute code in the worker process. The host must supply a subprocess adapter capable of running the code body and capturing its stdout. On Node, `createLocalSubprocessAdapter()` from `@noetic-tools/platform-node` does: it runs the body with `node -e`, writes the step input to stdin, and returns stdout. A non-zero exit (or failed handle) surfaces as a thrown error carrying the end of the process's stderr. An adapter that reaches a remote runner (`createWebSocketSubprocessAdapter()` and the like) cannot run the node: the runner's frames carry no end of input, so it refuses a command given stdin with `SUBPROCESS_CANNOT_END_INPUT`.
 
 ### invokeTool
 
@@ -957,10 +957,16 @@ Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the JSON do
 ```ts
 import { parseAndRunWorkflow, AgentHarness } from '@noetic-tools/core';
 import { claudeCode, createAcpAgentRegistry } from '@noetic-tools/acp';
+import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 declare const workflowDocument: unknown;
 
-const harness = new AgentHarness({ name: 'runner', params: {} });
+// An agent is a process, so the harness names where processes run.
+const harness = new AgentHarness({
+  name: 'runner',
+  params: {},
+  environment: { subprocess: createLocalSubprocessAdapter() },
+});
 
 await parseAndRunWorkflow({
   json: workflowDocument,

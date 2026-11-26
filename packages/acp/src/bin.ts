@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
  * `noetic-acp serve` — the remote runner, run where an ACP agent should run.
- * Hosts reach it with `webSocketSubprocess()` (listening) or
- * `commandSubprocess()` (`--stdio`, started by ssh or `docker exec -i`).
+ * Hosts reach it with `createWebSocketSubprocessAdapter()` (listening) or
+ * `createCommandSubprocessAdapter()` (`--stdio`, started by ssh or
+ * `docker exec -i`), both from `@noetic-tools/platform-node`.
  *
  *   noetic-acp serve --stdio [--agent <id>] [--spawn <command>]... [--env <name>]...
  *                    [--cwd <dir>]

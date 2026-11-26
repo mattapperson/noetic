@@ -8,6 +8,7 @@ export * from './errors/noetic-error';
 export * from './schemas/expression';
 export * from './schemas/held-call';
 export * from './schemas/item';
+export * from './schemas/runner-protocol';
 export * from './schemas/workflow';
 export * from './types/acp';
 export * from './types/adapter-set';

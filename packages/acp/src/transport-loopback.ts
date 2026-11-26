@@ -9,10 +9,13 @@
 
 import type * as acp from '@agentclientprotocol/sdk';
 import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk';
-import type { AcpTransport, AcpTransportFactory, SpawnCommand } from '@noetic-tools/types';
+import type {
+  AcpTransport,
+  AcpTransportFactory,
+  SpawnCommand,
+  SubprocessOpen,
+} from '@noetic-tools/types';
 import { AcpConnectError, frameworkCast } from '@noetic-tools/types';
-import type { AgentSubprocessAdapter } from './agent-subprocess';
-import { agentSubprocess } from './agent-subprocess';
 
 /** @public The two ends of a loopback connection. */
 export interface AcpLoopbackPair {
@@ -99,15 +102,17 @@ export function loopbackTransport(
 }
 
 /**
- * An adapter that runs the agent in this process: the bridge is reached where
- * it listens, and `launch` stands the in-process agent up with the command it
- * was given, so a test can see the launch settings. It runs no processes.
+ * A subprocess adapter's `open` that runs the agent in this process: the
+ * bridge is reached where it listens, and `launch` stands the in-process
+ * agent up with the command it was given, so a test can see the launch
+ * settings. It runs no processes. Give it to
+ * `createInMemorySubprocessAdapter({ open })` from `@noetic-tools/core`.
  * @public
  */
-export function loopbackSubprocess(
+export function loopbackLink(
   toAgent: (conn: AgentSideConnection, command: SpawnCommand) => acp.Agent,
-): AgentSubprocessAdapter {
-  return agentSubprocess('loopbackSubprocess()', async () => ({
+): SubprocessOpen {
+  return async () => ({
     reach: async (bridge) => bridge,
     launch: (command) =>
       loopbackTransport((conn) => toAgent(conn, command))({
@@ -116,9 +121,9 @@ export function loopbackSubprocess(
     async spawn(command) {
       throw new AcpConnectError({
         agentId: 'loopback',
-        message: `loopbackSubprocess() runs no processes, so it cannot start '${command.command}'.`,
+        message: `loopbackLink() runs no processes, so it cannot start '${command.command}'.`,
       });
     },
     close: async () => undefined,
-  }));
+  });
 }

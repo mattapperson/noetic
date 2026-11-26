@@ -126,7 +126,7 @@ declare interface RerenderRequest {
 | `config` | The `AgentConfig<TParams>` the harness was constructed with. |
 | `fs` | The `FsAdapter` the harness was constructed with (defaults to `createLocalFsAdapter()`). All filesystem operations — CLI tools, skill discovery, and context layers — route through this adapter. |
 | `shell` | The `ShellAdapter` (defaults to `createLocalShellAdapter()`). Tools that need a real shell go through this. |
-| `subprocess` | The `SubprocessAdapter` used by `runCode.subprocess` requests and detached spawns. Defaults to an in-memory adapter. |
+| `subprocess` | The `SubprocessAdapter` used by `runCode.subprocess` requests, detached spawns and ACP agents. Defaults to an in-memory adapter, which runs steps in this process and has no `open`, so it runs no ACP agent; `createLocalSubprocessAdapter()` from `@noetic-tools/platform-node` does. |
 | `adapters` | Every filesystem, shell and subprocess adapter, by name: `adapters.fs.get('builder')`, `adapters.shell.list()`. `fs`, `shell` and `subprocess` above are each kind's default. See [Named adapters](/docs/framework/runtime#named-adapters). |
 | `rootCwdState` | Long-lived shared cwd state, seeded into every root context the harness creates so successive runs and the TUI observe each other's `cd`s. |
 | `callModel(request)` | Issue a single LLM call, bypassing the session/queue runner. Used by plugins that need one-shot generation. |

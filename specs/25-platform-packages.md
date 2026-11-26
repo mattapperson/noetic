@@ -13,7 +13,7 @@
 
 Two platform packages ship:
 
-- **`@noetic-tools/platform-node`** — Node.js ≥ 20 backends: local filesystem, local shell, local subprocess (OS child-process lifecycle, POSIX signals, unix-domain-socket IPC), durable outbound queue, agent-ipc client/server, step bootstrap entry, file-backed storage.
+- **`@noetic-tools/platform-node`** — Node.js ≥ 20 backends: local filesystem, local shell, local subprocess (OS child-process lifecycle, POSIX signals, unix-domain-socket IPC, and `open` for processes whose stdio the caller holds), subprocess adapters that reach a remote runner (`createWebSocketSubprocessAdapter`, `createCommandSubprocessAdapter`), durable outbound queue, agent-ipc client/server, step bootstrap entry, file-backed storage.
 - **`@noetic/platform-browser`** — Browser, Cloudflare Worker, and Vercel Edge adapter glue. Currently re-exports core's runtime-neutral in-memory adapters for ergonomic imports; native OPFS / IndexedDB adapters are a future consideration (see below).
 
 Each platform package declares only the peer dependencies relevant to its runtime. A consumer targeting Node installs `@noetic-tools/platform-node`; a consumer targeting a browser installs `@noetic/platform-browser`. Neither pulls dependencies from the other, so bundle size stays proportional to the chosen runtime.
@@ -23,7 +23,7 @@ Each platform package declares only the peer dependencies relevant to its runtim
 Prior to this split, Node-only code lived inside `@noetic-tools/core` under the `@noetic-tools/core/adapters/node` subpath export. Browser consumers either imported that subpath (and paid for `node:child_process` bundler shims) or hand-rolled their own adapters. Each package now carries exactly the deps it needs:
 
 - `@noetic-tools/core` — zero runtime-specific deps, zero third-party peers beyond `zod` and the OpenRouter SDK. Safe in every environment. Exports only contracts, in-memory adapters, and the agent harness.
-- `@noetic-tools/platform-node` — Node APIs only (`node:fs/promises`, `node:child_process`, `node:net`, `node:path`).
+- `@noetic-tools/platform-node` — Node APIs (`node:fs/promises`, `node:child_process`, `node:net`, `node:path`), `ws`, and `@noetic-tools/acp` for the keeper its local adapter starts agents through.
 - `@noetic/platform-browser` — web platform APIs only (`navigator.storage`, `BroadcastChannel`, `fetch`); no `node:*` imports.
 
 Consumers opt into the surface they want. Test suites that need the Node subprocess adapter add `@noetic-tools/platform-node` to their devDependencies; code-agent and cli (which are Node-only by nature) depend on it directly. Browser apps and edge workers depend on `@noetic/platform-browser`. Runtime-agnostic consumers (eval) stay on `@noetic-tools/core` alone and inject whichever adapters the caller supplies.
@@ -32,7 +32,7 @@ Consumers opt into the surface they want. Test suites that need the Node subproc
 
 ### `@noetic-tools/core`
 
-Only in-memory adapter implementations ship in core. Everything else is a contract or part of the agent harness / interpreter / memory stack.
+Only platform-neutral adapter implementations ship in core: the in-memory ones, and two subprocess adapters built on a link someone else opens. Everything else is a contract or part of the agent harness / interpreter / memory stack.
 
 ```typescript
 // Adapter contracts (types only)
@@ -43,10 +43,15 @@ export type {
   StorageAdapter,
 } from './types/...';
 
-// In-memory adapter factories — the only adapter implementations in core
+// In-memory adapter factories
 export { createInMemoryFsAdapter } from './adapters/in-memory-fs-adapter';
 export { createInMemoryShellAdapter } from './adapters/in-memory-shell-adapter';
 export { createInMemorySubprocessAdapter } from './adapters/in-memory-subprocess-adapter';
+
+// Subprocess adapters that need no platform: one from `open` alone, and the
+// host's end of a remote runner over any frame link (08-runtime § Subprocess Abstraction)
+export { createLinkSubprocessAdapter } from './adapters/link-subprocess-adapter';
+export { createRunnerSubprocessAdapter } from './adapters/runner-subprocess-adapter';
 
 // Harness, interpreter, context, builders — unchanged
 export { AgentHarness, /* … */ } from './harness/agent-harness';
@@ -67,6 +72,12 @@ export { createLocalFsAdapter } from './local-fs-adapter';
 export { createLocalShellAdapter } from './local-shell-adapter';
 export { createLocalSubprocessAdapter } from './local-subprocess-adapter';
 
+// A remote runner (`noetic-acp serve`), dialled by WebSocket or started by a command
+export {
+  createWebSocketSubprocessAdapter,
+  createCommandSubprocessAdapter,
+} from './runner-subprocess-adapters';
+
 // Durable execution glue
 export { createFileStorage } from './file-storage';
 export { createSqliteStorage } from './sqlite-storage';
@@ -81,7 +92,11 @@ export { AgentIpcProtocol } from './agent-ipc-protocol';
 export { runStepBootstrap } from './step-bootstrap';
 ```
 
-Peer dependencies: none. Runtime imports: Node built-ins only (`node:fs/promises`, `node:child_process`, `node:net`, `node:path`, `node:os`, `node:crypto`). No third-party Node deps at runtime.
+Peer dependencies: none. Runtime imports: Node built-ins (`node:fs/promises`, `node:child_process`, `node:net`, `node:path`, `node:os`, `node:crypto`), `ws` for the WebSocket runner adapter, and `@noetic-tools/acp/stdio`, whose `openLocalLink` opens the local adapter's links (`27-acp-agent-steps` § A local agent outlives its host).
+
+`createLocalSubprocessAdapter(options?)` does all three jobs of a subprocess adapter on this machine: it runs `step` requests, runs `process` requests, and has `open`. Its `keeper`, `detachedTimeoutMs`, `wrap`, `onStderr`, `onLaunch` and `agentId` options shape what `open` holds. It is the adapter a Node harness names to run ACP agents: `environment: { subprocess: createLocalSubprocessAdapter() }`.
+
+`createWebSocketSubprocessAdapter({ url, token, ca? })` and `createCommandSubprocessAdapter({ command, args, env? })` are core's `createRunnerSubprocessAdapter` over a link they open: a `ws` socket whose upgrade carries the bearer token (TLS off the loopback interface), or the stdio of a command that starts the runner (`ssh host …`, `docker exec -i …`).
 
 ### `@noetic/platform-browser`
 
@@ -109,9 +124,17 @@ export { eventEndpoint, EventEndpointStatus, standardWebhookVerifier };
 export { alarmWake, sharedAlarm };                               // wake preset: Durable Object alarm
 export { runTurn, startTurn, wakeTurn, turnInstanceId, TURN_WAKE_EVENT }; // wake preset: Cloudflare Workflows
 export { cronTurn, cronWake };                                   // Cron Trigger ticks: a harness turn, a scan
+export { createSocketSubprocessAdapter, createFetchSubprocessAdapter };   // a remote runner over a WebSocket
 ```
 
-Peer dependencies: none. It imports neither `cloudflare:workers` nor a Cloudflare types package: every helper takes a structural type naming the part of a binding it calls (`D1DatabaseLike`, `DurableObjectSqlLike`, `DurableObjectLike`, `BlobStoreLike`, `AlarmStorageLike`, `WorkflowStepLike`, `WorkflowBindingLike`, `CronTick`), so the real bindings fit and a test passes its own. No `node:*` imports. See § Cloudflare Workers.
+A Worker cannot start a process, so its subprocess adapters run processes through a remote runner (`noetic-acp serve`, `27-acp-agent-steps` § The remote runner), each core's `createRunnerSubprocessAdapter` over a WebSocket:
+
+- `createSocketSubprocessAdapter(accepted)` — the runner's host dialled in, and a Durable Object accepted the socket. `accepted()` is called once per link and returns an accepted socket no other link uses (`WebSocketLike`: `send`, `close`, `addEventListener`, `readyState`); closing the link closes it. A socket accepted for hibernation delivers its messages to the object's handlers, not to listeners, so such an object builds a `FrameLink` from those and calls `createRunnerSubprocessAdapter` itself.
+- `createFetchSubprocessAdapter({ url, token, fetch? })` — the Worker dials: each link is a `fetch` upgrade (`Upgrade: websocket`, `Authorization: Bearer <token>`) to the `https:` form of a `wss://` URL, whose `response.webSocket` it accepts. `ws://` is refused except to a loopback host.
+
+Like every runner adapter they refuse a `step` request and a `process` request with `stdin` (`08-runtime` § Request Dispatch).
+
+Peer dependencies: none. It imports neither `cloudflare:workers` nor a Cloudflare types package: every helper takes a structural type naming the part of a binding it calls (`D1DatabaseLike`, `DurableObjectSqlLike`, `DurableObjectLike`, `BlobStoreLike`, `AlarmStorageLike`, `WorkflowStepLike`, `WorkflowBindingLike`, `CronTick`, `UpgradeFetchLike`, `UpgradedSocketLike`, core's `WebSocketLike`), so the real bindings fit and a test passes its own. No `node:*` imports. See § Cloudflare Workers.
 
 ### Migrating `@noetic-tools/core/adapters/node`
 
@@ -127,6 +150,7 @@ The existing `@noetic-tools/core/adapters/node` subpath export is removed. Consu
 ```
 @noetic/plugin-*  ──→  @noetic-tools/cli  ──→  @noetic-tools/code-agent  ──┐
                                                                 ├──→  @noetic-tools/platform-node  ──→  @noetic-tools/core
+                                                                │              └──→  @noetic-tools/acp  ──→  @noetic-tools/types
                                                                 │                                     ↑
                                                                 └─────────────────────────────────────┘
                                                                                                       ↑
@@ -136,8 +160,8 @@ browser/edge consumer  ──→  @noetic/platform-browser  ──────�
 ```
 
 - `@noetic-tools/core` has no dependency on any platform package.
-- `@noetic-tools/platform-cloudflare-worker` depends only on `@noetic-tools/core`, like its two siblings, and imports neither of them.
-- Platform packages depend only on `@noetic-tools/core` (plus their runtime's built-ins and any declared peers).
+- `@noetic-tools/platform-cloudflare-worker` depends only on `@noetic-tools/core` and imports neither of its two siblings.
+- Platform packages depend only on `@noetic-tools/core` (plus their runtime's built-ins and any declared peers), with one exception: `@noetic-tools/platform-node` also depends on `@noetic-tools/acp`, for the keeper its local subprocess adapter starts agents through. `@noetic-tools/acp` depends only on `@noetic-tools/types`, so there is no cycle, and it never imports a platform package.
 - Node-only consumers (`@noetic-tools/cli`, `@noetic-tools/code-agent`, `@noetic/plugin-*`) depend on `@noetic-tools/platform-node`.
 - Runtime-agnostic consumers (`@noetic-tools/eval`) depend only on `@noetic-tools/core` and inject whichever adapters they need via their API surface.
 - Browser consumers depend on `@noetic/platform-browser`.

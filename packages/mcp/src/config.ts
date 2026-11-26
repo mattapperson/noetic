@@ -31,7 +31,7 @@ export interface McpStdioServer {
    * Added to the SDK's default environment (`HOME`, `LOGNAME`, `PATH`,
    * `SHELL`, `TERM`, `USER`), never to the rest of this process's. With
    * `spawn` it is passed as is, and added to that same list where the server
-   * starts (`localSubprocess()` and `noetic-acp serve` do).
+   * starts (`createLocalSubprocessAdapter()` and `noetic-acp serve` do).
    */
   readonly env?: ReadonlyArray<McpNamedValue>;
   readonly cwd?: string;

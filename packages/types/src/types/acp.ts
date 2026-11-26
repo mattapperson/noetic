@@ -712,8 +712,8 @@ export interface AcpConnectOptions {
   whenHostExits?: AcpWhenHostExits;
   /**
    * Where an agent started by a command may run: through the adapter the
-   * step names, else the agent's own, else the harness's default when that
-   * one has `open`.
+   * step names, else the agent's own, else the harness's default. The one it
+   * lands on must have `open`.
    */
   subprocess?: SubprocessChoice;
 }

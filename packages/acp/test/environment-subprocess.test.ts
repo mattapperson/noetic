@@ -7,7 +7,13 @@
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
 import type * as acp from '@agentclientprotocol/sdk';
-import { AgentHarness, createInMemorySubprocessAdapter, execute, step } from '@noetic-tools/core';
+import {
+  AgentHarness,
+  createInMemorySubprocessAdapter,
+  createLinkSubprocessAdapter,
+  execute,
+  step,
+} from '@noetic-tools/core';
 import type {
   AcpAgent,
   AcpClientHost,
@@ -16,13 +22,12 @@ import type {
   SubprocessAdapter,
   SubprocessChoice,
   SubprocessLink,
+  SubprocessOpen,
   SubprocessOpenOptions,
 } from '@noetic-tools/types';
 import { AcpConnectError, adapterSet, frameworkCast, NoeticConfigError } from '@noetic-tools/types';
-import type { AgentSubprocessAdapter } from '../src/agent-subprocess';
-import { agentSubprocess } from '../src/agent-subprocess';
 import { defineAcpAgent } from '../src/define';
-import { loopbackSubprocess } from '../src/transport-loopback';
+import { loopbackLink } from '../src/transport-loopback';
 
 interface Seen {
   launched: SpawnCommand[];
@@ -62,13 +67,15 @@ function quietAgent(): acp.Agent {
 }
 
 /** A loopback adapter that records what it was asked to start and reach again. */
-function recording(log: Seen): AgentSubprocessAdapter {
-  const inner = loopbackSubprocess((_conn, command) => {
+function recording(log: Seen): SubprocessAdapter & {
+  open: SubprocessOpen;
+} {
+  const open = loopbackLink((_conn, command) => {
     log.launched.push(command);
     return quietAgent();
   });
-  return agentSubprocess('recording', async (opts) => {
-    const link = await inner.open(opts);
+  return createLinkSubprocessAdapter(async (opts) => {
+    const link = await open(opts);
     return {
       ...link,
       async spawn(command) {
@@ -174,15 +181,19 @@ function agentOn(subprocess?: SubprocessAdapter | string): AcpAgent {
   });
 }
 
-async function runOn(environment: AgentSubprocessAdapter, agent: AcpAgent): Promise<void> {
+async function runOn(
+  environment: {
+    open: SubprocessOpen;
+  },
+  agent: AcpAgent,
+): Promise<void> {
   const ctx = new AgentHarness({
     name: 'environment-subprocess',
     params: {},
     environment: {
-      subprocess: {
-        ...createInMemorySubprocessAdapter(),
-        open: (options) => environment.open(options),
-      },
+      subprocess: createInMemorySubprocessAdapter({
+        open: environment.open,
+      }),
     },
   }).createContext();
   await execute(
@@ -340,7 +351,7 @@ describe('named subprocess adapters', () => {
       })
       .catch((e: unknown) => e);
     assert(error instanceof NoeticConfigError);
-    expect(error.code).toBe('ACP_SUBPROCESS_NAME_WITHOUT_HARNESS');
+    expect(error.code).toBe('SUBPROCESS_NAME_WITHOUT_HARNESS');
   });
 
   it('starts a process beside the agent through the named adapter', async () => {

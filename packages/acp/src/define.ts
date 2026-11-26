@@ -26,10 +26,9 @@ import type {
 } from '@noetic-tools/types';
 import { AcpConnectError, NoeticConfigError } from '@noetic-tools/types';
 import { z } from 'zod';
-import { agentSubprocess, openLink } from './agent-subprocess';
 import type { InstructionsMeta } from './connection';
 import { openAcpConnection } from './connection';
-import { spawnOn } from './spawn';
+import { cannotOpen, openLink, spawnOn } from './spawn';
 import type { AcpToolWiring, ToolBridge, ToolBridgeCredentials } from './tool-bridge';
 import { startToolBridge } from './tool-bridge';
 import { sessionToolWiring } from './tool-wiring';
@@ -49,8 +48,8 @@ export interface DefineAcpAgentOptions {
   /**
    * Where {@link command} runs: an adapter, or the name of one of the
    * harness's `environment.subprocess` adapters. A step's own `subprocess`
-   * name comes first. Without either it runs through the harness's default
-   * when that adapter has `open`, and as a local process otherwise.
+   * name comes first. Without either it runs through the harness's default.
+   * The adapter it lands on must have `open`.
    */
   subprocess?: SubprocessAdapter | string;
   /**
@@ -174,7 +173,7 @@ export function defineAcpAgent(def: DefineAcpAgentOptions): AcpAgent {
  */
 function attachedRefusal(wiring: AcpToolWiring): AcpToolRefusal {
   const hint =
-    'Give the agent a command and a `subprocess` adapter instead of a `transport` — `webSocketSubprocess()` or `commandSubprocess()` from @noetic-tools/acp/remote reach a remote runner (`noetic-acp serve`) — or leave `tools` off this step.';
+    'Give the agent a command and a subprocess adapter instead of a `transport` — `createWebSocketSubprocessAdapter()` or `createCommandSubprocessAdapter()` from @noetic-tools/platform-node reach a remote runner (`noetic-acp serve`) — or leave `tools` off this step.';
   if (wiring.launchEnv) {
     return {
       code: 'ACP_TRANSPORT_CANNOT_LAUNCH',
@@ -232,10 +231,14 @@ async function openTarget(
       close: async () => undefined,
     };
   }
-  const link = await openLink(subprocessOf(def, given), {
-    signal,
-    whenHostExits,
-  });
+  const link = await openLink(
+    subprocessOf(def, given),
+    {
+      signal,
+      whenHostExits,
+    },
+    `ACP agent '${def.agentId}'`,
+  );
   return {
     open: (env) =>
       link.launch({
@@ -254,11 +257,12 @@ async function openTarget(
 
 /**
  * Where a command agent runs: the adapter the step names, else the agent's
- * own (an adapter, or a name), else the harness's default when that one has
- * `open`, else a local process. A name is one of the harness's adapters.
+ * own (an adapter, or a name), else the harness's default. A name is one of
+ * the harness's adapters.
  *
  * @throws `NoeticConfigError` `ADAPTER_UNKNOWN` for a name the harness lacks,
- * `ACP_SUBPROCESS_NAME_WITHOUT_HARNESS` for a named adapter with no harness set to find it in.
+ * `SUBPROCESS_NAME_WITHOUT_HARNESS` for a named adapter with no harness set
+ * to find it in, `SUBPROCESS_CANNOT_OPEN` when no adapter is given at all.
  */
 function subprocessOf(
   def: DefineAcpAgentOptions,
@@ -269,7 +273,7 @@ function subprocessOf(
   if (name !== undefined) {
     if (!given) {
       throw new NoeticConfigError({
-        code: 'ACP_SUBPROCESS_NAME_WITHOUT_HARNESS',
+        code: 'SUBPROCESS_NAME_WITHOUT_HARNESS',
         message: `ACP agent '${def.agentId}' names the subprocess adapter '${name}', and was given no harness adapters to find it among.`,
         hint: 'Run the agent as a step, so the harness passes its `environment.subprocess`, or give the agent the adapter itself.',
       });
@@ -279,19 +283,12 @@ function subprocessOf(
   if (typeof own === 'object') {
     return own;
   }
-  const fallback = given?.adapters.get();
-  return fallback?.open ? fallback : lazyLocalSubprocess(def.agentId);
-}
-
-/**
- * Defer the `node:child_process` import until a connection is actually opened,
- * so importing `@noetic-tools/acp` in a browser or worker stays safe.
- */
-function lazyLocalSubprocess(agentId: string): SubprocessAdapter {
-  return agentSubprocess('localSubprocess()', async (options) => {
-    const { localSubprocess } = await import('./stdio');
-    return await localSubprocess(agentId).open(options);
-  });
+  if (!given) {
+    throw cannotOpen(
+      `ACP agent '${def.agentId}' has no subprocess adapter to start its command through.`,
+    );
+  }
+  return given.adapters.get();
 }
 
 /** Closing the agent's stream closes the link it was started through. */
@@ -339,10 +336,14 @@ async function reattachTo(
       message: `ACP agent '${def.agentId}' attaches through a transport and cannot be reattached.`,
     });
   }
-  const link = await openLink(subprocessOf(def, opts.subprocess), {
-    signal,
-    whenHostExits,
-  });
+  const link = await openLink(
+    subprocessOf(def, opts.subprocess),
+    {
+      signal,
+      whenHostExits,
+    },
+    `ACP agent '${def.agentId}'`,
+  );
   let bridge: ToolBridge | undefined;
   let attached: AcpTransport | undefined;
   try {

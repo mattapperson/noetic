@@ -240,6 +240,8 @@ interface Entry {
   readonly home: Map<string, Entry>;
   /** The turn's root context, for an attached entry: its events go to that turn. */
   readonly root?: Context;
+  /** See `AttachedEntry.subprocess`. */
+  readonly subprocess?: string;
   readonly viewed: boolean;
   readonly pool?: ConnectionPool;
   connection?: Connection;
@@ -587,6 +589,11 @@ class Runtime implements ConnectionRuntime {
       scope: entry.scope,
       home: attachment.entries,
       root,
+      ...(entry.subprocess === undefined
+        ? {}
+        : {
+            subprocess: entry.subprocess,
+          }),
       viewed: entry.viewed === true && entry.config.expose !== 'call',
       state: 'connecting',
       effects: 0,
@@ -886,6 +893,17 @@ class Runtime implements ConnectionRuntime {
     return entry.connecting;
   }
 
+  /** The harness's subprocess adapters, with the one the entry's step names put first. */
+  private subprocessFor(entry: Entry): SubprocessChoice | undefined {
+    const choice = this.options.subprocess;
+    return choice && entry.subprocess !== undefined
+      ? {
+          ...choice,
+          name: entry.subprocess,
+        }
+      : choice;
+  }
+
   private async connect(entry: Entry): Promise<void> {
     this.setState(entry, 'connecting');
     try {
@@ -898,7 +916,7 @@ class Runtime implements ConnectionRuntime {
         ],
         redact: this.redact,
         secrets: this.options.secrets,
-        subprocess: this.options.subprocess,
+        subprocess: this.subprocessFor(entry),
       });
       if (entry.state === 'closed') {
         await runEvery(connections.map((connection) => () => connection.release()));

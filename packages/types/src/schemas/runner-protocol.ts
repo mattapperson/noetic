@@ -160,7 +160,10 @@ export interface FrameLink {
   close(): Promise<void>;
 }
 
-/** Frames over a byte stream, one JSON object per line. */
+/**
+ * Frames over a byte stream, one JSON object per line.
+ * @public
+ */
 export function lineFrameLink(
   readable: ReadableStream<Uint8Array>,
   writable: WritableStream<Uint8Array>,
@@ -213,6 +216,68 @@ export function lineFrameLink(
   };
 }
 
+/**
+ * The part of a WebSocket a {@link FrameLink} uses. A browser's, a Worker's
+ * and the `ws` package's sockets all fit.
+ * @public
+ */
+export interface WebSocketLike {
+  readonly readyState: number;
+  send(data: string): void;
+  close(): void;
+  addEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
+  addEventListener(type: 'close', listener: () => void): void;
+  addEventListener(type: 'error', listener: (event: { error?: unknown }) => void): void;
+}
+
+/** `WebSocket.OPEN` and `WebSocket.CLOSED`, which a {@link WebSocketLike} need not name. */
+const SOCKET_OPEN = 1;
+const SOCKET_CLOSED = 3;
+
+/**
+ * Frames over an open WebSocket, one JSON object per text message.
+ * @public
+ */
+export function webSocketFrameLink(socket: WebSocketLike): FrameLink {
+  const closeListeners: Array<(reason?: Error) => void> = [];
+  let failure: Error | undefined;
+  socket.addEventListener('error', (event) => {
+    failure = event.error instanceof Error ? event.error : new Error('The WebSocket failed.');
+  });
+  socket.addEventListener('close', () => {
+    for (const listener of closeListeners) {
+      listener(failure);
+    }
+  });
+  return {
+    send(frame) {
+      if (socket.readyState === SOCKET_OPEN) {
+        socket.send(JSON.stringify(frame));
+      }
+    },
+    onFrame(listener) {
+      socket.addEventListener('message', (event) => {
+        const frame = typeof event.data === 'string' ? parseLine(event.data) : undefined;
+        if (frame !== undefined) {
+          listener(frame);
+        }
+      });
+    },
+    onClose(listener) {
+      closeListeners.push(listener);
+    },
+    async close() {
+      if (socket.readyState === SOCKET_CLOSED) {
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        socket.addEventListener('close', () => resolve());
+        socket.close();
+      });
+    },
+  };
+}
+
 async function readLines(
   readable: ReadableStream<Uint8Array>,
   onLine: (line: string) => void,
@@ -232,7 +297,10 @@ async function readLines(
   }
 }
 
-/** The chunks of a byte stream, without relying on its async iterator. */
+/**
+ * The chunks of a byte stream, without relying on its async iterator.
+ * @public
+ */
 export async function* chunksOf(readable: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
   const reader = readable.getReader();
   try {
@@ -263,6 +331,7 @@ function parseLine(line: string): unknown {
 
 //#region Bytes
 
+/** @public A frame's bytes, as the base64 text it carries them in. */
 export function toBase64(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) {
@@ -271,6 +340,7 @@ export function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/** @public The bytes a frame carries as base64 text. */
 export function fromBase64(text: string): Uint8Array<ArrayBuffer> {
   const binary = atob(text);
   const bytes = new Uint8Array(binary.length);
@@ -280,7 +350,10 @@ export function fromBase64(text: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-/** Hosts that never leave the machine, so a hop to them needs no TLS. */
+/**
+ * Hosts that never leave the machine, so a hop to them needs no TLS.
+ * @public
+ */
 export function isLoopbackHost(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, '');
   return host === 'localhost' || host === '::1' || /^127\./.test(host);

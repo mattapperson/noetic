@@ -271,7 +271,7 @@ reason = "code-agent must not depend on eval"
 # ─────────────────────────────────────────────────────────────────────────────
 # Platform packages: runtime-isolated, peer-isolated, and core is forbidden
 # from reaching into either. The invariant is that @noetic-tools/core carries no
-# runtime-specific code — only contracts + in-memory adapters — and that the
+# runtime-specific code — only contracts + platform-neutral adapters — and that the
 # two platform packages never see each other so bundlers can drop one
 # entirely from a target's output.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -443,10 +443,48 @@ from = "packages/acp/src/**"
 to = "packages/core/src/**"
 reason = "@noetic-tools/acp depends only on @noetic-tools/types; it must never import core (acyclic, keeps the protocol layer core-free)"
 
+# @noetic-tools/platform-node depends on @noetic-tools/acp: its local
+# subprocess adapter opens links with the keeper (openLocalLink, ./stdio).
+# The layer order already allows that edge (platform-node 50 → acp 87). The
+# reverse, and the other platform packages, are forbidden: acp exports the
+# pieces adapters are built from and no adapter, and a Worker or a browser
+# reaches a remote runner through core's runner adapter, whose frames are a
+# contract in @noetic-tools/types.
+[[boundaries]]
+from = "packages/acp/src/**"
+to = "packages/platform-node/src/**"
+reason = "@noetic-tools/acp depends only on @noetic-tools/types; platform-node depends on it for the keeper, so the reverse edge would be a cycle"
+
+[[boundaries]]
+from = "packages/acp/src/**"
+to = "packages/platform-browser/src/**"
+reason = "@noetic-tools/acp depends only on @noetic-tools/types; it must never import a platform package"
+
+[[boundaries]]
+from = "packages/acp/src/**"
+to = "packages/platform-cloudflare-worker/src/**"
+reason = "@noetic-tools/acp depends only on @noetic-tools/types; it must never import a platform package"
+
+[[boundaries]]
+from = "packages/platform-cloudflare-worker/src/**"
+to = "packages/acp/src/**"
+reason = "a Worker has no node:* built-ins for the keeper or the runner's server; it reaches a remote runner through core's createRunnerSubprocessAdapter and the frame contract in @noetic-tools/types"
+
+[[boundaries]]
+from = "packages/platform-browser/src/**"
+to = "packages/acp/src/**"
+reason = "platform-browser re-exports core's runtime-neutral adapters only; the keeper and the runner's server in @noetic-tools/acp are Node programs"
+
+[[boundaries]]
+from = "packages/types/src/**"
+to = "packages/acp/src/**"
+reason = "the runner's frame contract (schemas/runner-protocol.ts) lives in @noetic-tools/types so core's runner adapter and acp's runner server both read it; types must never import back into acp"
+
 # The keeper (spec 27 § A local agent outlives its host) has a pure part, the
 # ACP relay and its method names, which the runtime-neutral connection driver
 # uses; and Node-only parts — the keeper process and the host-side client that
-# spawns it and speaks over a local socket — reached only from ./stdio.
+# spawns it and speaks over a local socket — reached only from ./stdio and the
+# runner's server (./remote).
 [[boundaries]]
 from = "packages/acp/src/connection.ts"
 to = "packages/acp/src/keeper/client.ts"

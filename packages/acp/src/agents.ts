@@ -6,12 +6,8 @@
  * protocol code — that is the whole point of standardising on ACP. Any agent
  * not listed here works through {@link customAcpAgent}.
  *
- * The stdio transport is reached through a dynamic `import()`, so this module
- * has no static `node:*` import and nothing loads `child_process` until a
- * connection is actually opened. Note that is a runtime property, not a
- * bundling one: the specifier is static, so a bundler still resolves and
- * includes `./stdio`. A browser build wanting it excluded should alias or
- * externalise `@noetic-tools/acp/stdio`.
+ * A preset starts nothing itself: its command runs through a subprocess
+ * adapter, so this module imports no `node:*`.
  */
 
 import type { AcpAgent, AcpTransportFactory, SubprocessAdapter } from '@noetic-tools/types';
@@ -129,8 +125,7 @@ export interface AcpPresetOptions {
    * name of one of the harness's `environment.subprocess` adapters. The
    * preset's command runs there, with its tool settings. A step's own
    * `subprocess` name comes first. Without either the agent runs through the
-   * harness's default when that adapter has `open`, and as a local process
-   * otherwise.
+   * harness's default. The adapter it lands on must have `open`.
    */
   subprocess?: SubprocessAdapter | string;
   /** Attach to an agent this package does not start, in place of the preset's command. */

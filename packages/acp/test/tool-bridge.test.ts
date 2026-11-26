@@ -10,7 +10,14 @@ import assert from 'node:assert';
 import type * as acp from '@agentclientprotocol/sdk';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import type { ContextData } from '@noetic-tools/context';
-import { AgentHarness, execute, step, tool, toolWithGenerator } from '@noetic-tools/core';
+import {
+  AgentHarness,
+  createInMemorySubprocessAdapter,
+  execute,
+  step,
+  tool,
+  toolWithGenerator,
+} from '@noetic-tools/core';
 import type {
   AcpRequestPermissionRequest,
   AcpToolHost,
@@ -40,7 +47,7 @@ import {
   opencodeToolWiring,
   piToolWiring,
 } from '../src/tool-wiring';
-import { loopbackSubprocess } from '../src/transport-loopback';
+import { loopbackLink } from '../src/transport-loopback';
 
 //#region Tools under test
 
@@ -520,7 +527,9 @@ async function runAcpPath(gateLog: GateLog, agentLog: AgentLog): Promise<Item[]>
       command: {
         command: 'claude-shaped',
       },
-      subprocess: loopbackSubprocess(claudeShapedAgent(agentLog)),
+      subprocess: createInMemorySubprocessAdapter({
+        open: loopbackLink(claudeShapedAgent(agentLog)),
+      }),
       tools: claudeToolWiring,
     }),
     prompt: 'go',

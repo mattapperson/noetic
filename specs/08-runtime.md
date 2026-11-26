@@ -209,17 +209,32 @@ interface SubprocessAdapter {
    */
   listLive(): Promise<ReadonlyArray<SubprocessHandle>>;
   /**
-   * Open a link to where this adapter's processes run, for a process whose
-   * stdio the caller holds: an ACP agent, and a stdio MCP server beside it.
-   * Absent on an adapter that hands back no stdio. See 27-acp-agent-steps
-   * § The subprocess adapter.
+   * Open a link to where this adapter's processes run: through it a caller
+   * starts a process and holds its stdio. Any process may be started this
+   * way — an ACP agent, a stdio MCP server beside it, a command run to
+   * completion. Absent on an adapter that hands back no stdio. See
+   * 27-acp-agent-steps § The subprocess adapter.
    */
-  open?(options: SubprocessOpenOptions): Promise<SubprocessLink>;
+  open?: SubprocessOpen; // (options: SubprocessOpenOptions) => Promise<SubprocessLink>
 }
 ```
 
+An adapter does each of its three jobs where it can:
+
+| Adapter | Package | `step` request | `process` request | `open` |
+|---|---|---|---|---|
+| `createInMemorySubprocessAdapter({ open? })` | `@noetic-tools/core` | in this process | its `run` hook | the one it is given |
+| `createLocalSubprocessAdapter()` | `@noetic-tools/platform-node` | a child Noetic runtime, or in this process | an OS child | this machine |
+| `createLinkSubprocessAdapter(open)` | `@noetic-tools/core` | refused | over a link | the one it is given |
+| `createRunnerSubprocessAdapter(dial)` | `@noetic-tools/core` | refused | over a link, without `stdin` | a remote runner, over any `FrameLink` |
+| `createWebSocketSubprocessAdapter()`, `createCommandSubprocessAdapter()` | `@noetic-tools/platform-node` | refused | as the runner adapter | a runner dialled by WebSocket, or started by a command |
+| `createSocketSubprocessAdapter()`, `createFetchSubprocessAdapter()` | `@noetic-tools/platform-cloudflare-worker` | refused | as the runner adapter | a runner over a WebSocket a Durable Object accepted, or one a Worker dials |
+
+A `step` request needs the Noetic runtime and the program's code where it runs. An adapter that reaches only a remote runner (`noetic-acp serve`) has neither there and refuses the request with `NoeticConfigError` `SUBPROCESS_RUNS_NO_STEPS`.
+
 `createInMemorySubprocessAdapter(opts?)` is the default test double. It dispatches step requests through the in-process execute pipeline via a closure the interpreter attaches to the request, records the handle in memory, and settles synchronously on the microtask queue. Options:
 
+- `open?: SubprocessOpen` — the adapter's `open`. Without it the adapter has none, so an ACP agent cannot run through it (`27-acp-agent-steps` § The subprocess adapter). A test gives it `loopbackLink(toAgent)` from `@noetic-tools/acp`.
 - `storage?: StorageAdapter` — when supplied, the adapter persists handle manifests through the store so `listLive()` survives adapter re-creation within the process lifetime. `reattach()` is implemented as an idempotent replay of the persisted step request; "reattach" here is honestly a test-double semantic rather than a process resume, consistent with the adapter's role as the default in-process backend.
 - `metadataInjector?: (request: SubprocessRequest) => Partial<SubprocessHandleMetadata>` — test ergonomics hook. The returned fields are merged onto `handle.metadata` before the caller sees it, so unit tests can stamp `taskRole`, `taskId`, etc. without mutating the request surface.
 
@@ -227,6 +242,9 @@ interface SubprocessAdapter {
 
 - `storage?: StorageAdapter` — durable handle manifests. When set, every `spawn()` writes `{handleId, pid, pidStarttime, socketPath, cwd, stepId, serializedInput, executionId, metadata}` through the store; `reattach(handleId)` reads the manifest, verifies `pidStarttime` has not drifted (pid reuse), and returns a rehydrated handle; `listLive()` scans the manifest prefix and filters by liveness. Without storage, `listLive()` returns the empty set and `reattach()` returns null (no durability).
 - `signaller?: ProcessSignaller` — injection seam for testing signal delivery.
+- `keeper?`, `detachedTimeoutMs?`, `wrap?`, `onStderr?`, `onLaunch?`, `agentId?` — shape the processes its `open` holds (`27-acp-agent-steps` § The subprocess adapter, § A local agent outlives its host). Its links come from `openLocalLink` in `@noetic-tools/acp/stdio`, which is why `@noetic-tools/platform-node` depends on `@noetic-tools/acp`.
+
+`createLinkSubprocessAdapter(open, { runtime? })` builds an adapter from `open` alone, for a place reached only through a link. `createRunnerSubprocessAdapter(dial)` is that adapter over a remote runner: `dial` opens one `FrameLink` per link, and the frames are the contract in `@noetic-tools/types` (`HostFrame`, `RunnerFrame`), so core never imports `@noetic-tools/acp`, which serves the runner's other end.
 
 The adapter is threaded through the harness: `AgentHarness.subprocess` → `Context.subprocess`. Each is the default subprocess adapter; the others a harness names are reached through `adapters` (§ Named Adapters).
 
@@ -234,7 +252,11 @@ The adapter is threaded through the harness: `AgentHarness.subprocess` → `Cont
 
 `adapter.spawn(request)` is the single entry point. `request.kind === 'process'` launches an OS child; `request.kind === 'step'` dispatches a registered Noetic step.
 
-A process request that carries `stdin` is a **run-to-result** call, the shape a JSON workflow `runCode` node sends (`26-json-workflow-runtime`). The local adapter pipes the child's stdio, writes `stdin` and closes it, and settles on `close` (after stdout has drained, so output larger than a pipe buffer arrives whole). Exit code 0 completes the handle with stdout as `metadata.result`. Any other code fails it, with the end of stderr (up to 2,000 characters) in `metadata.error.message`. A child that exits without reading its input is not an error. A process request without `stdin` runs with its stdio ignored and settles on `exit`, for long-lived children whose output nobody collects. The pipes belong to the adapter's process, so a run-to-result child does not outlive its host: reattaching to one after a restart finds it gone. The in-memory adapter always runs step requests in-process; the local adapter spawns `bun run <step-bootstrap>` with `NOETIC_REGISTRY_ENTRY` pointing at the user's entry module, passes the serialised input over stdin, and captures the result from stdout. The bootstrap's contract lives at `packages/core/src/adapters/node/step-bootstrap.ts`.
+A process request that carries `stdin` is a **run-to-result** call, the shape a JSON workflow `runCode` node sends (`26-json-workflow-runtime`). The local adapter pipes the child's stdio, writes `stdin` and closes it, and settles on `close` (after stdout has drained, so output larger than a pipe buffer arrives whole). Exit code 0 completes the handle with stdout as `metadata.result`. Any other code fails it, with the end of stderr (up to 2,000 characters) in `metadata.error.message`. A child that exits without reading its input is not an error. A process request without `stdin` runs with its stdio ignored and settles on `exit`, for long-lived children whose output nobody collects. The pipes belong to the adapter's process, so a run-to-result child does not outlive its host: reattaching to one after a restart finds it gone.
+
+**A process request over a link.** An adapter built from `open` (`createLinkSubprocessAdapter`) runs a process request on a link of its own, opened with `whenHostExits: 'stop'`: it starts the command with the link's `spawn`, writes `stdin` and closes the input, reads stdout to the end, and settles the handle as the local adapter does — exit code 0 completes it, with stdout as `metadata.result` when the request carried `stdin`; any other code fails it with `Subprocess exited with code <n>`. The exit code comes from the stream's `exited` (`ByteStream.exited`); a link whose streams report none completes the handle when stdout ends. `metadata` carries `runtime`, `command`, `args`, `cwd` and `exitCode`, and no `pid`. Three things differ from the local adapter: a link carries no stderr, so a failure names the exit code alone; `detached` means nothing; and the command gets the environment a link's `spawn` gives — the MCP SDK's default list where it runs, plus the request's `env`. `stop` closes the stream and the link and settles the handle `stopped`; `pause` and `resume` are `unsupported`; `reattach` returns `null`, since a link's processes end with it. The handle settles first and the link is released just after.
+
+A remote runner's frames carry no end of input (`27-acp-agent-steps` § The remote runner), so a runner adapter cannot close a command's stdin. It refuses a process request that has `stdin` — the shape a `runCode` node sends — with `NoeticConfigError` `SUBPROCESS_CANNOT_END_INPUT`, where it would otherwise leave the command waiting forever; a command it runs without `stdin` finds its input open and empty. The in-memory adapter always runs step requests in-process; the local adapter spawns `bun run <step-bootstrap>` with `NOETIC_REGISTRY_ENTRY` pointing at the user's entry module, passes the serialised input over stdin, and captures the result from stdout. The bootstrap's contract lives at `packages/core/src/adapters/node/step-bootstrap.ts`.
 
 ### Handle Metadata Contract
 
@@ -300,9 +322,9 @@ const harness = new AgentHarness({
   environment: {
     shell: createLocalShellAdapter(),
     subprocess: {
-      laptop: { adapter: localSubprocess(), default: true },
+      laptop: { adapter: createLocalSubprocessAdapter(), default: true },
       builder: {
-        adapter: webSocketSubprocess({ url, token }),
+        adapter: createWebSocketSubprocessAdapter({ url, token }),
         displayName: 'Build host',
         description: 'Linux, 64 cores',
       },

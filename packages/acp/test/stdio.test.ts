@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { AcpTransport } from '@noetic-tools/types';
 import { isAcpConnectError } from '@noetic-tools/types';
-import { localSubprocess, stdioAcpTransport, stopProcessTree } from '../src/stdio';
+import { openLocalLink, stdioAcpTransport, stopProcessTree } from '../src/stdio';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/stdio-tree.ts', import.meta.url));
 const POSIX = process.platform !== 'win32';
@@ -108,11 +108,12 @@ describe.skipIf(!POSIX)('stdio transport lifetime', () => {
     await transport.close();
   });
 
-  it('localSubprocess().close() stops every tree it launched', async () => {
+  it("openLocalLink()'s close() stops every tree it launched", async () => {
     // Direct children: the keeper's own shutdown is covered in keeper.test.ts.
-    const link = await localSubprocess('tree', {
+    const link = await openLocalLink({
+      agentId: 'tree',
       keeper: false,
-    }).open({});
+    });
     const transport = await link.launch({
       command: process.execPath,
       args: [

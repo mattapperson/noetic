@@ -10,6 +10,7 @@ An ACP step delegates a turn to an external coding agent, exactly the way [`call
 ```ts
 import { AgentHarness, type ContextData, step } from '@noetic-tools/core';
 import { claudeCode } from '@noetic-tools/acp';
+import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 const review = step.acpAgent<ContextData, string, string>({
   id: 'review',
@@ -18,11 +19,19 @@ const review = step.acpAgent<ContextData, string, string>({
   permissions: { default: 'deny', allow: [{ kind: 'read' }] },
 });
 
+// The agent is a process, so the harness says where processes run: here, on
+// this machine.
+const harness = new AgentHarness({
+  name: 'reviewer',
+  params: {},
+  environment: { subprocess: createLocalSubprocessAdapter() },
+});
 // `run` returns the step's output; `execute` starts a run and reports through
 // the harness streams instead.
-const harness = new AgentHarness({ name: 'reviewer', params: {} });
 const summary = await harness.run(review, 'go', harness.createContext());
 ```
+
+An agent starts through the harness's [subprocess adapter](#where-the-agent-runs), and that adapter must be able to hold a process's stdio (`open`). The harness's default adapter runs steps in memory and cannot, so a harness that runs a command agent names one that can: `createLocalSubprocessAdapter()` from `@noetic-tools/platform-node` for this machine. Without it the step fails with [`SUBPROCESS_CANNOT_OPEN`](/docs/framework/errors#subprocess_cannot_open).
 
 The integration is the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP), a JSON-RPC 2.0 standard in which **Noetic is the Client and the coding agent is the Agent**.
 
@@ -66,18 +75,24 @@ Every preset accepts `command`, `args`, and `env` overrides, a `subprocess` adap
 
 ### When your host process dies
 
-A local agent does not die with your host. Each one runs through a small *keeper* process that holds its stdio, so if your host crashes, is killed, or gets Ctrl-C mid-turn, the agent keeps working. Its updates, the requests it is waiting on (a permission prompt, a file read), and its tool calls are held until a host reattaches.
+An agent on the local adapter does not die with your host. Each one runs through a small *keeper* process that holds its stdio, so if your host crashes, is killed, or gets Ctrl-C mid-turn, the agent keeps working. Its updates, the requests it is waiting on (a permission prompt, a file read), and its tool calls are held until a host reattaches.
 
 On a [durable](/docs/framework/durability) run, resuming the run reattaches. The resumed step reaches the same agent, gets its live session back (modes and config options included), and collects the turn that was running. Every update of that turn streams again as the step's output, from the first, and requests the agent is still waiting on are answered by the new host's policy and handlers. The step's result is that turn's result. It only prompts again (behind a short "you were cut off" notice) if no turn was running. If the agent is gone, the step falls back to `session/load` or a new session, as before.
 
 ```ts
 import { AgentHarness } from '@noetic-tools/core';
+import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 
 // Stop every agent when this process goes away instead of keeping it.
-const harness = new AgentHarness({ name: 'coder', params: {}, killAgentsOnExit: true });
+const harness = new AgentHarness({
+  name: 'coder',
+  params: {},
+  environment: { subprocess: createLocalSubprocessAdapter() },
+  killAgentsOnExit: true,
+});
 ```
 
-With `killAgentsOnExit: true`, a kept agent stops as soon as its host's connection drops, whatever ended the host. A kept agent runs until a host reattaches and closes it, or it exits; set `localSubprocess(agentId, { detachedTimeoutMs })` to stop one no host has reattached to after a while. `localSubprocess(agentId, { keeper: false })` starts the agent as a plain child process that ends with your host. Closing a session, or a step whose session closes with it, always stops the agent.
+With `killAgentsOnExit: true`, a kept agent stops as soon as its host's connection drops, whatever ended the host. A kept agent runs until a host reattaches and closes it, or it exits; set `createLocalSubprocessAdapter({ detachedTimeoutMs })` to stop one no host has reattached to after a while. `createLocalSubprocessAdapter({ keeper: false })` starts the agent as a plain child process that ends with your host. Closing a session, or a step whose session closes with it, always stops the agent.
 
 This is checked against the real Claude Code and Codex bridges by an opt-in test in the repository (`ACP_LIVE_AGENT=1 bun test test/live-reattach.test.ts` in `packages/acp`). The test kills the first host, reattaches a new one, and has the agent call a noetic tool on it. The agent's MCP client reconnects to the bridge the new host serves.
 
@@ -91,7 +106,7 @@ To run the agent your own way — inside a sandbox, with an environment you buil
 
 ```ts
 import { claudeCode } from '@noetic-tools/acp';
-import { localSubprocess } from '@noetic-tools/acp/stdio';
+import { createLocalSubprocessAdapter } from '@noetic-tools/platform-node';
 import type { ToolBridgeAddress } from '@noetic-tools/types';
 
 declare const profileFor: (bridges: ReadonlyArray<ToolBridgeAddress>) => string;
@@ -99,7 +114,7 @@ declare const cleanEnv: (env: Readonly<Record<string, string>>) => Record<string
 declare const log: { debug(text: string): void };
 
 const agent = claudeCode({
-  subprocess: localSubprocess('sandboxed', {
+  subprocess: createLocalSubprocessAdapter({
     // `command.env` is the full environment, `agentEnv` what the agent sets on top of yours;
     // `bridges` the tool bridge addresses to let through.
     wrap: (command, { bridges }) => ({
@@ -704,37 +719,41 @@ const fake = defineAcpAgent({
 });
 ```
 
-Because the wire protocol really runs, this catches contract mistakes a hand-rolled stub would hide. An agent on a transport takes no tools, so to test a step with `tools`, stand the same agent up with `loopbackSubprocess` and give it a command, as a preset has:
+Because the wire protocol really runs, this catches contract mistakes a hand-rolled stub would hide. An agent on a transport takes no tools, so to test a step with `tools`, stand the same agent up behind a subprocess adapter with `loopbackLink` and give it a command, as a preset has:
 
 ```ts
-import { claudeToolWiring, defineAcpAgent, loopbackSubprocess } from '@noetic-tools/acp';
+import { claudeToolWiring, defineAcpAgent, loopbackLink } from '@noetic-tools/acp';
+import { createInMemorySubprocessAdapter } from '@noetic-tools/core';
 
-declare const fakeAgent: Parameters<typeof loopbackSubprocess>[0];
+declare const fakeAgent: Parameters<typeof loopbackLink>[0];
 
 const withTools = defineAcpAgent({
   agentId: 'fake',
   command: { command: 'fake-agent' },
-  subprocess: loopbackSubprocess(fakeAgent),
+  subprocess: createInMemorySubprocessAdapter({ open: loopbackLink(fakeAgent) }),
   tools: claudeToolWiring,
 });
 ```
 
 ## Where the agent runs
 
-A preset runs its command through a **subprocess adapter**. The default starts a local process. Give it another and the same preset — command, tool settings, and all — runs where that adapter runs processes, and its tools still behave exactly as on `callModel`:
+A preset runs its command through a **subprocess adapter**: the harness's, unless the step or the preset names another. `createLocalSubprocessAdapter()` runs it on this machine. Give it another and the same preset — command, tool settings, and all — runs where that adapter runs processes, and its tools still behave exactly as on `callModel`:
 
 ```ts
 import { codex } from '@noetic-tools/acp';
-import { commandSubprocess, webSocketSubprocess } from '@noetic-tools/acp/remote';
+import {
+  createCommandSubprocessAdapter,
+  createWebSocketSubprocessAdapter,
+} from '@noetic-tools/platform-node';
 
 // A runner listening on a build host, over TLS.
 const overWebSocket = codex({
-  subprocess: webSocketSubprocess({ url: 'wss://build-host:7000', token: process.env.RUNNER_TOKEN ?? '' }),
+  subprocess: createWebSocketSubprocessAdapter({ url: 'wss://build-host:7000', token: process.env.RUNNER_TOKEN ?? '' }),
 });
 
 // A runner started over ssh, or in a container with `docker exec -i`.
 const overSsh = codex({
-  subprocess: commandSubprocess({
+  subprocess: createCommandSubprocessAdapter({
     command: 'ssh',
     args: ['build-host', 'npx', '-y', '@noetic-tools/acp', 'serve', '--stdio'],
   }),
@@ -770,35 +789,46 @@ A stdio MCP server that must run where the agent runs — one that reads its wor
 A host that runs every agent in one place says so once, on the harness's subprocess adapter, and leaves `subprocess` off the presets:
 
 ```ts
-import { AgentHarness, createInMemorySubprocessAdapter } from '@noetic-tools/core';
-import { webSocketSubprocess } from '@noetic-tools/acp/remote';
-
-const runner = webSocketSubprocess({ url: 'wss://build-host:7000', token: process.env.RUNNER_TOKEN ?? '' });
+import { AgentHarness } from '@noetic-tools/core';
+import { createWebSocketSubprocessAdapter } from '@noetic-tools/platform-node';
 
 const harness = new AgentHarness({
   name: 'builder',
   params: {},
   environment: {
-    subprocess: {
-      ...createInMemorySubprocessAdapter(),
-      open: (options) => runner.open(options),
-    },
+    subprocess: createWebSocketSubprocessAdapter({
+      url: 'wss://build-host:7000',
+      token: process.env.RUNNER_TOKEN ?? '',
+    }),
   },
 });
 ```
 
-The subprocess adapter is the one place a harness's processes run: its step children, and, through `open`, its agents. An agent runs through the adapter its step names, else the one its preset names, else the harness's default when that adapter has `open`, else as a local process. A resumed step reattaches through the same adapter, and `agent.spawn` starts an MCP server there too.
+The subprocess adapter is the one place a harness's processes run: its step children, the commands it runs to completion, and, through `open`, processes whose stdio it holds, such as its agents. An agent runs through the adapter its step names, else the one its preset names, else the harness's default. Nothing stands in for the adapter it lands on: one with no `open` fails the step with `SUBPROCESS_CANNOT_OPEN`. A resumed step reattaches through the same adapter, and `agent.spawn` starts an MCP server there too.
 
-The adapters `@noetic-tools/acp` builds — `localSubprocess()`, `webSocketSubprocess()`, `commandSubprocess()` — run agents and the processes beside them, and no step children: their `spawn` fails with `ACP_SUBPROCESS_RUNS_NO_STEPS`. So the harness above keeps the in-memory adapter for its steps and adds the runner's `open`.
+Each adapter does what it can where it runs:
+
+| Adapter | From | Steps | Commands | `open` (agents) |
+|---|---|---|---|---|
+| `createLocalSubprocessAdapter()` | `@noetic-tools/platform-node` | yes | yes | yes, on this machine |
+| `createWebSocketSubprocessAdapter()`, `createCommandSubprocessAdapter()` | `@noetic-tools/platform-node` | no | without `stdin` | yes, through a remote runner |
+| `createSocketSubprocessAdapter()`, `createFetchSubprocessAdapter()` | `@noetic-tools/platform-cloudflare-worker` | no | without `stdin` | yes, through a remote runner |
+| `createRunnerSubprocessAdapter(dial)` | `@noetic-tools/core` | no | without `stdin` | yes, through a remote runner over any frame link |
+| `createInMemorySubprocessAdapter()` (the default) | `@noetic-tools/core` | in this process | a test hook | only when given one (`{ open }`) |
+
+A remote runner has no Noetic runtime and none of your program's code, so an adapter that reaches one cannot run a step child: a `spawn` step sent to it fails with `SUBPROCESS_RUNS_NO_STEPS`. Its frames carry no end of input either, so it refuses a command that is given `stdin` — a JSON workflow's `runCode` node — with `SUBPROCESS_CANNOT_END_INPUT`. A harness whose steps spawn children, or run code, keeps an adapter that can as its default and names the runner beside it, as below.
 
 ### Picking an adapter by name
 
 A harness can name several adapters of each kind and mark one the default (see [Named adapters](/docs/framework/runtime#named-adapters)). A step then says where its agent runs, and which filesystem and shell serve the agent's `fs/*` and `terminal/*` calls, by name:
 
 ```ts
-import { AgentHarness, createInMemoryFsAdapter, createInMemorySubprocessAdapter, step } from '@noetic-tools/core';
+import { AgentHarness, createInMemoryFsAdapter, step } from '@noetic-tools/core';
 import { claudeCode } from '@noetic-tools/acp';
-import { webSocketSubprocess } from '@noetic-tools/acp/remote';
+import {
+  createLocalSubprocessAdapter,
+  createWebSocketSubprocessAdapter,
+} from '@noetic-tools/platform-node';
 
 declare const buildHostFs: ReturnType<typeof createInMemoryFsAdapter>;
 
@@ -807,10 +837,10 @@ const harness = new AgentHarness({
   params: {},
   environment: {
     subprocess: {
-      // Runs step children here, and agents that name no adapter as local processes.
-      laptop: { adapter: createInMemorySubprocessAdapter(), default: true },
+      // Runs step children here, and agents that name no adapter.
+      laptop: { adapter: createLocalSubprocessAdapter(), default: true },
       builder: {
-        adapter: webSocketSubprocess({ url: 'wss://build-host:7000', token: process.env.RUNNER_TOKEN ?? '' }),
+        adapter: createWebSocketSubprocessAdapter({ url: 'wss://build-host:7000', token: process.env.RUNNER_TOKEN ?? '' }),
         displayName: 'Build host',
         description: 'Linux, 64 cores',
       },
@@ -840,13 +870,13 @@ const onBuilder = claudeCode({ subprocess: 'builder' });
 
 | Step option | Picks | Default |
 |---|---|---|
-| `subprocess` | the adapter the agent's process runs through | the preset's `subprocess`, else the harness's default when it has `open`, else a local process |
+| `subprocess` | the adapter the agent's process runs through | the preset's `subprocess`, else the harness's default |
 | `fs` | the filesystem that serves the agent's `fs/*` calls | the harness's default (`ctx.fs`) |
 | `shell` | the shell that serves the agent's `terminal/*` calls | the harness's default (`ctx.shell`) |
 
-The three are independent, so name each one the step needs. A name the harness lacks fails the step with `ADAPTER_UNKNOWN` before the agent starts, and the message lists the names there are. A named subprocess adapter must have `open`; only the unnamed default falls back to a local process. The adapters `@noetic-tools/acp` builds run no step children, so make one the default only on a harness whose steps spawn none.
+The three are independent, so name each one the step needs. A name the harness lacks fails the step with `ADAPTER_UNKNOWN` before the agent starts, and the message lists the names there are. The adapter the agent lands on must have `open`. An adapter that reaches a remote runner runs no step children, so make one the default only on a harness whose steps spawn none.
 
-A stdio `mcp()` server started with `agent.spawn` follows the preset's adapter or the harness's default, not a step's `subprocess` name. Name the adapter on the preset when the server must follow the agent.
+A stdio `mcp()` server started with `agent.spawn` follows the agent: a step that names a `subprocess` starts the servers its `tools` list through that adapter too, in TypeScript and in a JSON document alike.
 
 To attach to an agent someone else started, supply a `transport` — anything that yields a duplex byte stream:
 
@@ -871,11 +901,11 @@ const attached = defineAcpAgent({
 
 An attached agent takes no tools: see [Giving the agent your tools](#giving-the-agent-your-tools).
 
-The Node stdio transport lives at `@noetic-tools/acp/stdio`. The main entry has no static `node:*` import and never loads `child_process` unless a stdio connection is opened — but that is a runtime property: the dynamic `import('./stdio')` uses a static specifier, so a bundler still pulls the module in. A browser build should alias or externalise `@noetic-tools/acp/stdio`.
+The Node stdio transport lives at `@noetic-tools/acp/stdio`, and the runner's server at `@noetic-tools/acp/remote`. The main entry imports no `node:*` and starts no process itself, so a browser or Worker bundle of it pulls in no `child_process`.
 
 ## API reference
 
-Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, turn accumulator, terminal registry, permission engine — are deliberately not exported; they are implementation detail and free to change.
+Everything `@noetic-tools/acp` exports. It exports no subprocess adapter: those come from `@noetic-tools/core` (`createInMemorySubprocessAdapter`, `createRunnerSubprocessAdapter`, `createLinkSubprocessAdapter`), `@noetic-tools/platform-node` (`createLocalSubprocessAdapter`, `createWebSocketSubprocessAdapter`, `createCommandSubprocessAdapter`) and `@noetic-tools/platform-cloudflare-worker` (`createSocketSubprocessAdapter`, `createFetchSubprocessAdapter`). Internal helpers — the item builders, turn accumulator, terminal registry, permission engine — are deliberately not exported; they are implementation detail and free to change.
 
 ### Agents
 
@@ -906,13 +936,11 @@ Everything `@noetic-tools/acp` exports. Internal helpers — the item builders, 
 | Export | What it is |
 |---|---|
 | `loopbackTransport(toAgent)` | Stands an in-process agent on the far end of a real protocol connection. The recommended way to test an ACP step. |
-| `loopbackSubprocess(toAgent)` | The same agent behind a subprocess adapter, so a test step can give it tools. |
-| `localSubprocess()` | Runs agents as local processes: what a preset uses when it names no adapter and the harness's has no `open`. Lives at `@noetic-tools/acp/stdio`. |
+| `loopbackLink(toAgent)` | The same agent as a subprocess adapter's `open`, so a test step can give it tools: `createInMemorySubprocessAdapter({ open: loopbackLink(toAgent) })`. |
+| `openLocalLink(options?, openOptions?)` | Opens a link to this machine: what `createLocalSubprocessAdapter()` opens its links with. `LocalLinkOptions` are `keeper`, `detachedTimeoutMs`, `wrap`, `onStderr`, `onLaunch` and `agentId`. Lives at `@noetic-tools/acp/stdio`. |
 | `spawnOn(adapter)` | A `Spawn` that starts a process through `adapter` and returns its stdio; a command agent's `agent.spawn`. |
-| `SubprocessAdapter.open(options)` | Opens a `SubprocessLink` (`reach`, `launch`, `spawn`, `attach?`, `close`). On `environment.subprocess`, where an agent that names no `subprocess` adapter runs and reattaches. |
+| `SubprocessAdapter.open(options)` | Opens a `SubprocessLink` (`reach`, `launch`, `spawn`, `attach?`, `close`): start a process and hold its stdio. On `environment.subprocess`, where an agent that names no `subprocess` adapter runs and reattaches. |
 | `SubprocessChoice` | `{ adapters, name? }`: the harness's subprocess adapters and the one a step names. What `AcpConnectOptions.subprocess`, `SpawnOptions.subprocess` and `ConnectOptions.subprocess` carry. |
-| `AgentSubprocessAdapter` | What the adapters below are: a `SubprocessAdapter` that always has `open` and runs no step children. |
-| `webSocketSubprocess(opts)`, `commandSubprocess(opts)`, `runnerSubprocess(openLink)` | A remote runner over WebSocket, over a command's stdio, or over any `FrameLink`. Live at `@noetic-tools/acp/remote`. |
 | `listenAcpRunner(opts)`, `serveAcpRunner(link)`, `serveAcpRunnerOverStdio()` | The runner itself, as the `noetic-acp serve` bin uses it. Live at `@noetic-tools/acp/remote`. |
 | `AcpRunnerGrant` | One entry of `AcpRunnerOptions.allow`: a `command`, its exact `args`, and the `env` names a host may set for it. Lives at `@noetic-tools/acp/remote`. |
 | `createAcpLoopbackPair()` | The two raw ends, when you want to drive both sides yourself. |

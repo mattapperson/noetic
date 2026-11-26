@@ -49,12 +49,10 @@ interface SubprocessRequestBase {
 
 /**
  * @public
- * Launches an OS-level child process. This is the classic variant used by the
- * tasks runner to spawn planner / implementer children.
- *
- * When `kind` is omitted the request is treated as a process request — this
- * preserves backward compatibility with callers that predate the
- * `StepSubprocessRequest` variant.
+ * Runs a command to completion. With `stdin` the adapter writes it, closes
+ * the input and stores the command's stdout as the handle's `result` when it
+ * exits 0; any other exit fails the handle. A request with no `kind` is a
+ * process request.
  */
 export interface ProcessSubprocessRequest extends SubprocessRequestBase {
   kind?: 'process';
@@ -81,7 +79,10 @@ export interface StepSubprocessOverrides {
  * Dispatches a step through the adapter. `stepId` resolves against the shared
  * step registry — the in-memory adapter invokes the in-process execute pipeline,
  * while out-of-process adapters spawn a child runtime that re-imports the same
- * registry via a configured entry point.
+ * registry via a configured entry point. The far side therefore needs the
+ * Noetic runtime and the program's code; an adapter that reaches only a
+ * remote runner refuses the request with `NoeticConfigError`
+ * `SUBPROCESS_RUNS_NO_STEPS`.
  */
 export interface StepSubprocessRequest extends SubprocessRequestBase {
   kind: 'step';
@@ -225,12 +226,12 @@ export interface SubprocessAdapter {
    */
   listLive(): Promise<ReadonlyArray<SubprocessHandle>>;
   /**
-   * Opens a link to where this adapter's processes run, for a process whose
-   * stdio the caller holds: an ACP agent, and a stdio MCP server beside it. A
-   * resumed step reaches the agent it left running through the link's
-   * `attach`. Absent on an adapter that hands back no stdio.
+   * Opens a link to where this adapter's processes run: through it a caller
+   * starts a process and holds its stdio. A process that outlived its host is
+   * reached again through the link's `attach`. Absent on an adapter that
+   * hands back no stdio.
    */
-  open?(options: SubprocessOpenOptions): Promise<SubprocessLink>;
+  open?: SubprocessOpen;
 }
 
 //#endregion
@@ -248,6 +249,11 @@ export interface ByteStream {
   readonly writable: WritableStream<Uint8Array>;
   /** Tear the stream down and release what holds it (process, socket, …). */
   close(): Promise<void>;
+  /**
+   * For a process's stdio: settles with its exit code once it has exited,
+   * `null` when a signal ended it. Absent where the far end reports no exit.
+   */
+  readonly exited?: Promise<number | null>;
 }
 
 /** @public A process to start. */
@@ -282,7 +288,7 @@ export interface SubprocessChoice {
 export interface SpawnOptions {
   /**
    * A `Spawn` bound to no adapter of its own starts the process through the
-   * named adapter, else the default when that one has `open`.
+   * named adapter, else the default. The one it lands on must have `open`.
    */
   readonly subprocess?: SubprocessChoice;
 }
@@ -297,8 +303,8 @@ export interface SpawnOptions {
 export type Spawn = (command: SpawnCommand, options?: SpawnOptions) => Promise<ByteStream>;
 
 /**
- * A bidirectional byte stream to an ACP agent — the substrate JSON-RPC frames
- * ride on. A {@link SubprocessLink} hands one back.
+ * The stdio of a process a {@link SubprocessLink} launched, which may outlive
+ * its host: the byte stream an ACP agent's JSON-RPC frames ride on.
  * @public
  */
 export type AcpTransport = ByteStream & {
@@ -354,11 +360,16 @@ export interface SubprocessOpenOptions {
   whenHostExits?: AcpWhenHostExits;
 }
 
+/** @public {@link SubprocessAdapter.open}: opens one {@link SubprocessLink}. */
+export type SubprocessOpen = (options: SubprocessOpenOptions) => Promise<SubprocessLink>;
+
 /**
- * One link to where an adapter's processes run, opened once per connection
- * before the agent starts. The tool bridge listens on the host's loopback
- * interface, so the link first carries it to where the agent can reach it,
- * then starts the agent with launch settings that may name that address.
+ * One link to where an adapter's processes run. Everything started through
+ * it stops when it closes. An ACP connection opens one before its agent
+ * starts: the tool bridge listens on the host's loopback interface, so the
+ * link first carries it to where the agent can reach it (`reach`), then
+ * starts the agent with launch settings that may name that address
+ * (`launch`).
  * @public
  */
 export interface SubprocessLink {
@@ -368,13 +379,16 @@ export interface SubprocessLink {
    * non-loopback hop is TLS.
    */
   reach(bridge: ToolBridgeAddress): Promise<ToolBridgeAddress>;
-  /** Start the agent and return its ACP byte stream. */
+  /**
+   * Start a process that may outlive this host — an ACP agent — and return
+   * its stdio. It gets the whole environment where it runs, plus `env`.
+   */
   launch(command: SpawnCommand): Promise<AcpTransport>;
   /**
-   * Start a process beside the agent — a stdio MCP server that must run
-   * there — and carry its stdio back, so noetic stays its client. It gets the
-   * MCP SDK's default environment there plus `env`, as a local server does,
-   * not the agent's.
+   * Start a process that lives no longer than the link — a stdio MCP server
+   * beside an agent, a command run to completion — and carry its stdio back.
+   * It gets the MCP SDK's default environment there plus `env`, as a local
+   * MCP server does.
    */
   spawn: Spawn;
   /**

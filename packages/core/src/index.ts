@@ -6,9 +6,14 @@ export { createInMemoryFsAdapter } from './adapters/in-memory-fs-adapter';
 export { createInMemoryShellAdapter } from './adapters/in-memory-shell-adapter';
 /** @public */
 export { createInMemorySubprocessAdapter } from './adapters/in-memory-subprocess-adapter';
-
+/** @public */
+export type { CreateLinkSubprocessAdapterOptions } from './adapters/link-subprocess-adapter';
+/** @public */
+export { createLinkSubprocessAdapter } from './adapters/link-subprocess-adapter';
 /** @public */
 export { createOpenRouterEmbed } from './adapters/openrouter';
+/** @public */
+export { createRunnerSubprocessAdapter } from './adapters/runner-subprocess-adapter';
 
 //#endregion
 
@@ -943,6 +948,7 @@ export type {
   SubprocessHandle,
   SubprocessHandleMetadata,
   SubprocessLink,
+  SubprocessOpen,
   SubprocessOpenOptions,
   SubprocessRequest,
   SubprocessStatus,
@@ -956,6 +962,21 @@ export { serializeError } from './adapters/in-memory-subprocess/metadata';
 export type { LiveHandles } from './adapters/live-handles';
 /** @public */
 export { createLiveHandles } from './adapters/live-handles';
+
+//#endregion
+
+//#region Types — Remote runner frames
+
+/** @public The frames between a host and a remote runner, and the links that carry them. */
+export type { FrameLink, HostFrame, RunnerFrame, WebSocketLike } from '@noetic-tools/types';
+/** @public */
+export {
+  HostFrameSchema,
+  isLoopbackHost,
+  lineFrameLink,
+  RunnerFrameSchema,
+  webSocketFrameLink,
+} from '@noetic-tools/types';
 
 //#endregion
 

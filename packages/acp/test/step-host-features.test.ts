@@ -10,12 +10,12 @@ import assert from 'node:assert';
 import type * as acp from '@agentclientprotocol/sdk';
 import type { AgentSideConnection } from '@agentclientprotocol/sdk';
 import { RequestError } from '@agentclientprotocol/sdk';
-import { AgentHarness, execute, step } from '@noetic-tools/core';
+import { AgentHarness, createInMemorySubprocessAdapter, execute, step } from '@noetic-tools/core';
 import type { AgentScope, ContextData, HeldCall, HeldCallHandler } from '@noetic-tools/types';
 import { isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { claudeCode } from '../src/agents';
 import { defineAcpAgent } from '../src/define';
-import { loopbackSubprocess } from '../src/transport-loopback';
+import { loopbackLink } from '../src/transport-loopback';
 
 //#region Agent
 
@@ -114,7 +114,9 @@ function emptyLog(): AgentLog {
 
 function agent(log: AgentLog, script?: AgentScript, sessionMeta?: Record<string, unknown>) {
   return claudeCode({
-    subprocess: loopbackSubprocess(agentFor(log, script)),
+    subprocess: createInMemorySubprocessAdapter({
+      open: loopbackLink(agentFor(log, script)),
+    }),
     ...(sessionMeta
       ? {
           sessionMeta,
@@ -407,7 +409,9 @@ describe('an agent step, as a host sees it', () => {
           command: {
             command: 'plain',
           },
-          subprocess: loopbackSubprocess(agentFor(emptyLog())),
+          subprocess: createInMemorySubprocessAdapter({
+            open: loopbackLink(agentFor(emptyLog())),
+          }),
         }),
         prompt: 'go',
         tools: [],
