@@ -208,10 +208,12 @@ gets the same shutdown from `stopProcessTree(child, { graceMs? })`
 **A wrapped launch.** A host that must start the agent its own way — inside a
 sandbox (`sandbox-exec`, `bwrap`), with an environment it built, from a
 binary it ships — keeps the machine and changes the command:
-`localMachine(id, { wrap })`. `wrap(command, { bridges })` runs just before
+`localMachine(id, { wrap })`. `wrap(command, { bridges, agentEnv })` runs just before
 the agent starts. It receives the command the preset built, with `env` already
 the complete environment the agent would get (this process's, plus the
-preset's and the tool wiring's), and the bridge addresses `reach` handed out,
+preset's and the tool wiring's), `agentEnv` — the preset's and the wiring's
+variables alone, for a wrapper that builds the agent's environment itself —
+and the bridge addresses `reach` handed out,
 so a sandbox can let exactly those loopback ports through. The command it
 returns runs with exactly its own `args`, `env` and `cwd` — nothing is merged
 back in — as the leader of its own process group, through the keeper or not,

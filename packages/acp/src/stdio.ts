@@ -128,6 +128,13 @@ export interface LocalAgentCommand extends SpawnCommand {
 export interface LocalWrapInfo {
   /** Every tool bridge address `reach` handed out on this machine, in order. */
   readonly bridges: ReadonlyArray<ToolBridgeAddress>;
+  /**
+   * The variables the agent itself sets — its definition's and its tool
+   * wiring's (`CODEX_CONFIG`, `MCP_TOOL_TIMEOUT`, …) — without this process's
+   * environment under them: what a wrapper that builds the agent's
+   * environment itself must add to it.
+   */
+  readonly agentEnv: Readonly<Record<string, string>>;
 }
 
 /** The variables that are set, so a wrapper sees plain strings. */
@@ -195,6 +202,7 @@ export function localMachine(
           bridges: [
             ...bridges,
           ],
+          agentEnv: definedEnv(command.env ?? {}),
         },
       );
       return {

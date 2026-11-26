@@ -135,6 +135,10 @@ describe.each([
     expect(seen[0]?.info.bridges).toEqual([
       reached,
     ]);
+    // And what the agent sets apart, without this process's environment.
+    expect(seen[0]?.info.agentEnv).toEqual({
+      PRESET_FLAG: 'on',
+    });
 
     await waitFor(() => stderr.includes('\n'));
     const report = reportOf(stderr);
