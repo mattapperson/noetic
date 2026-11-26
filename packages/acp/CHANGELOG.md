@@ -1,3 +1,7 @@
+## @noetic-tools/acp-v2.0.0-next.10 (2026-11-26)
+
+* feat!: one subprocess adapter concept, and named fs, shell and subprocess adapters (#182) ([096c64d](https://github.com/mattapperson/noetic/commit/096c64d)), closes [#182](https://github.com/mattapperson/noetic/issues/182)
+
 ## @noetic-tools/acp-v2.0.0-next.9 (2026-11-26)
 
 * Read Codex quota usage from ACP prompt replies (#176) ([68084b9](https://github.com/mattapperson/noetic/commit/68084b9)), closes [#176](https://github.com/mattapperson/noetic/issues/176)
