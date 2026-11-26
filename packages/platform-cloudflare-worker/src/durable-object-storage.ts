@@ -1,5 +1,7 @@
-import type { StorageAdapter } from '@noetic-tools/core';
+import type { StorageAdapter, StorageEnvironmentConfig } from '@noetic-tools/core';
 
+import type { DurableObjectStateLike } from './alarm-wake';
+import { durableObjectHolder } from './alarm-wake';
 import type { SpillOptions } from './spill-storage';
 import { withSpill } from './spill-storage';
 import {
@@ -44,9 +46,55 @@ export interface CreateDurableObjectStorageOptions {
   spill?: SpillOptions;
 }
 
+/** @public The part of a Durable Object's state `durableObjectEnvironment` reads: `ctx`. */
+export interface DurableObjectLike extends DurableObjectStateLike {
+  readonly storage: {
+    readonly sql: DurableObjectSqlLike;
+  };
+}
+
 //#endregion
 
 //#region Factory
+
+/**
+ * @public
+ * The `environment` of a harness a Durable Object owns: the object's SQLite as
+ * storage, its id as the lease holder (`durableObjectHolder`), and parking with
+ * no timers of the harness's own, since the object's alarm wakes its turns
+ * (`alarmWake`). Build the harness once, in a field of the object, so its
+ * requests, alarms and cron ticks all reach the same one.
+ *
+ * @example
+ * ```ts
+ * #harness = new AgentHarness({
+ *   name: 'agent',
+ *   agentGraph,
+ *   environment: durableObjectEnvironment(this.ctx),
+ * });
+ * ```
+ */
+export function durableObjectEnvironment(
+  state: DurableObjectLike,
+  options?: Omit<CreateDurableObjectStorageOptions, 'sql'>,
+): {
+  storage: StorageEnvironmentConfig;
+} {
+  return {
+    storage: {
+      adapter: createDurableObjectStorage({
+        ...options,
+        sql: state.storage.sql,
+      }),
+      lease: {
+        holder: durableObjectHolder(state),
+      },
+      park: {
+        autoWake: false,
+      },
+    },
+  };
+}
 
 /**
  * @public

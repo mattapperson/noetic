@@ -3,9 +3,9 @@
  *
  * Durable storage with `swap` over D1 and over a Durable Object's SQLite, with a
  * scope per tenant and a blob store for values too large for a row, an HTTP
- * endpoint that turns an accepted request into a stored event, and two ways to
- * wake parked turns: a Durable Object alarm, or one Cloudflare Workflow instance
- * per turn.
+ * endpoint that turns an accepted request into a stored event, two ways to wake
+ * parked turns (a Durable Object alarm, or one Cloudflare Workflow instance per
+ * turn), and Cron Trigger ticks as scans or as turns of a Durable Object's harness.
  *
  * Nothing here imports `cloudflare:workers` or a Cloudflare types package: each
  * helper takes the small part of a binding it uses, so the same code runs under
@@ -26,6 +26,13 @@ export {
   type WakeableHarness,
 } from './alarm-wake';
 export {
+  type CronTick,
+  type CronTurnOptions,
+  type CronWakeOptions,
+  cronTurn,
+  cronWake,
+} from './cron-wake';
+export {
   type CreateD1StorageOptions,
   createD1Storage,
   type D1DatabaseLike,
@@ -34,7 +41,9 @@ export {
 export {
   type CreateDurableObjectStorageOptions,
   createDurableObjectStorage,
+  type DurableObjectLike,
   type DurableObjectSqlLike,
+  durableObjectEnvironment,
 } from './durable-object-storage';
 export { type EventEndpointOptions, EventEndpointStatus, eventEndpoint } from './event-endpoint';
 export {

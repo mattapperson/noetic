@@ -212,11 +212,13 @@ export class SessionRunner {
    *  queued, the caller is asking about the NEXT response — we must wait
    *  for that turn rather than reject with the stale error. */
   getAgentResponse(): Promise<HarnessResponse> {
-    if (this.status.kind === 'idle' && this.queue.size === 0 && this.lastResponse) {
-      return Promise.resolve(this.lastResponse);
-    }
-    if (this.status.kind === 'idle' && this.queue.size === 0 && this.lastError) {
-      return Promise.reject(this.lastError);
+    if (this.status.kind === 'idle' && this.queue.size === 0) {
+      if (this.lastError) {
+        return Promise.reject(this.lastError);
+      }
+      if (this.lastResponse) {
+        return Promise.resolve(this.lastResponse);
+      }
     }
     return new Promise<HarnessResponse>((resolve, reject) => {
       this.responseWaiters.push({
