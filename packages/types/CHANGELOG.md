@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.19.0-next.20 (2026-11-27)
+
+* fix(core): recheck resumed waits and scope ACP tool replay (#188) ([c94c577](https://github.com/mattapperson/noetic/commit/c94c577)), closes [#188](https://github.com/mattapperson/noetic/issues/188) [hi#fan-out](https://github.com/hi/issues/fan-out)
+
 ## @noetic-tools/types-v3.19.0-next.19 (2026-11-27)
 
 * feat: MCP Events extension, trigger outcomes and replay, checked triggers (#187) ([9c6a91c](https://github.com/mattapperson/noetic/commit/9c6a91c)), closes [#187](https://github.com/mattapperson/noetic/issues/187)
