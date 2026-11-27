@@ -112,11 +112,14 @@ export interface BridgedCallRecord {
    * changes when the agent makes it again.
    */
   readonly id: string;
+  readonly blocked?: true;
   /** The result an earlier attempt of the step recorded for this call. */
   take(): ToolCallResult | undefined;
   /** Record what the call produced. Resolves whether the record was stored. */
   store(result: ToolCallResult): Promise<boolean>;
 }
+
+export type BridgeMode = 'fresh' | 'resume' | 'legacy' | 'collect' | 'attach';
 
 /** The kind of a bridged call's ledger entry. */
 const BRIDGED_KIND = 'acp-tool';
@@ -299,11 +302,11 @@ export function acpSessionRecords(
 /** Match a redelivered bridge request to the original call when the keeper reconnects. */
 export class BridgedCallRecords {
   private readonly seen = new Map<string, number>();
-  private mode: 'fresh' | 'resume' | 'legacy' = 'fresh';
+  private mode: BridgeMode = 'fresh';
   private path?: string;
   private prompt?: number;
 
-  bind(path: string | undefined, mode: 'fresh' | 'resume' | 'legacy', prompt?: number): void {
+  bind(path: string | undefined, mode: BridgeMode, prompt?: number): void {
     this.mode = mode;
     this.path = path;
     this.prompt = prompt;
@@ -317,14 +320,22 @@ export class BridgedCallRecords {
     wireName: string;
     agentCallId?: string;
     args: unknown;
+    attributed?: boolean;
   }): Promise<BridgedCallRecord> {
     const { ctx, stepId, tool, wireName, agentCallId } = opts;
     const inputHash = hashStepInput({
       name: wireName,
       arguments: opts.args,
     });
+    if (this.mode === 'collect' && inputHash === undefined && tool?.durable !== false) {
+      throw new NoeticErrorImpl({
+        kind: 'acp_outcome_unknown',
+        stepId,
+      });
+    }
     const step = this.path ?? stepPathOf(ctx) ?? stepId;
     const prompt = this.prompt;
+    const otherPrompts = this.mode === 'collect' && !opts.attributed;
     const scope = prompt === undefined ? step : `${step}/prompt:${prompt}`;
     const call = `${wireName}:${inputHash ?? 'unhashed'}`;
     const ledger = ctx instanceof ContextImpl ? ctx.ledger : undefined;
@@ -339,6 +350,7 @@ export class BridgedCallRecords {
             stepId,
             agentCallId,
             inputHash,
+            otherPrompts,
           })
         : undefined;
     while (
@@ -356,6 +368,14 @@ export class BridgedCallRecords {
       this.seen.set(call, order + 1);
     }
     const path = prior ?? stable ?? pathAt(order);
+    if (this.mode === 'attach' && prior === undefined) {
+      return {
+        id: `acp:${path}`,
+        blocked: true,
+        take: () => undefined,
+        store: async () => false,
+      };
+    }
     // `durable: false` records nothing; unhashable arguments cannot be matched.
     const records = ledger !== undefined && tool?.durable !== false && inputHash !== undefined;
     if (records && !prior) {
@@ -368,6 +388,7 @@ export class BridgedCallRecords {
         stable: stable !== undefined,
         inputHash,
         stepId,
+        otherPrompts,
       });
     }
     return {
@@ -434,6 +455,7 @@ export class BridgedCallRecords {
     stable,
     inputHash,
     stepId,
+    otherPrompts,
   }: {
     ctx: Context<ContextData>;
     ledger: StepLedger;
@@ -443,6 +465,7 @@ export class BridgedCallRecords {
     stable: boolean;
     inputHash: string;
     stepId: string;
+    otherPrompts: boolean;
   }): Promise<void> {
     const storage = storageOf(ctx);
     if (!storage) {
@@ -452,6 +475,9 @@ export class BridgedCallRecords {
       new StepIntent(storage, pendingEntryKey(runRootOf(ctx).id, `${path}/tool`), ledger);
     const identity = intent(path);
     const saved = await identity.read();
+    if (otherPrompts && saved === null) {
+      await this.checkEarlierIntent(storage, runRootOf(ctx).id, step, inputHash, stepId, stable);
+    }
     if (!stable && this.mode !== 'fresh') {
       const prefix = pendingEntryKey(runRootOf(ctx).id, `${step}/bridged:id:`);
       for (const key of await storage.list(prefix)) {
@@ -501,6 +527,36 @@ export class BridgedCallRecords {
     });
   }
 
+  /** Before collection proves where the call belongs, earlier intents can still be redelivered. */
+  private async checkEarlierIntent(
+    storage: StorageAdapter,
+    executionId: string,
+    step: string,
+    inputHash: string,
+    stepId: string,
+    stable: boolean,
+  ): Promise<void> {
+    const prefix = pendingEntryKey(executionId, `${step}/`);
+    for (const key of await storage.list(prefix)) {
+      const call = key.slice(prefix.length).replace(/^prompt:\d+\//, '');
+      if (!call.startsWith('bridged:') || !call.endsWith('/tool')) {
+        continue;
+      }
+      const other = await new StepIntent(storage, key).read();
+      if (
+        other &&
+        typeof other === 'object' &&
+        Reflect.get(other, 'inputHash') === inputHash &&
+        (!stable || !call.startsWith('bridged:id:'))
+      ) {
+        throw new NoeticErrorImpl({
+          kind: 'acp_outcome_unknown',
+          stepId,
+        });
+      }
+    }
+  }
+
   private savedPath({
     ledger,
     step,
@@ -508,6 +564,7 @@ export class BridgedCallRecords {
     stepId,
     agentCallId,
     inputHash,
+    otherPrompts,
   }: {
     ledger: StepLedger;
     step: string;
@@ -515,13 +572,13 @@ export class BridgedCallRecords {
     stepId: string;
     agentCallId?: string;
     inputHash?: string;
+    otherPrompts: boolean;
   }): string | undefined {
-    const root = `${step}/bridged:`;
+    if (this.mode === 'attach') {
+      return this.attachPath(ledger, step, agentCallId, inputHash);
+    }
     const active = `${scope}/bridged:`;
-    const prefixes = [
-      root,
-      active,
-    ];
+    const prefixes = this.prefixes(step, active, otherPrompts);
     let unmatched = false;
     for (const entry of ledger.savedEntries()) {
       if (
@@ -548,7 +605,7 @@ export class BridgedCallRecords {
         return entry.path;
       }
       unmatched ||=
-        samePrompt &&
+        (samePrompt || otherPrompts) &&
         entry.inputHash === inputHash &&
         (agentCallId === undefined || id === undefined);
     }
@@ -559,6 +616,41 @@ export class BridgedCallRecords {
       });
     }
     return undefined;
+  }
+
+  private attachPath(
+    ledger: StepLedger,
+    step: string,
+    id?: string,
+    inputHash?: string,
+  ): string | undefined {
+    if (id === undefined || inputHash === undefined) {
+      return undefined;
+    }
+    const path = `${step}/bridged:id:${hashStepInput(id)}`;
+    for (const entry of ledger.savedEntries()) {
+      if (entry.path !== path || entry.kind !== BRIDGED_KIND || entry.inputHash !== inputHash) {
+        continue;
+      }
+      const result = BridgedOutputSchema.safeParse(entry.output);
+      if (result.success && result.data.agentCallId === id && result.data.prompt === this.prompt) {
+        return path;
+      }
+    }
+    return undefined;
+  }
+
+  private prefixes(step: string, active: string, otherPrompts: boolean): string[] {
+    const prefixes = [
+      `${step}/bridged:`,
+      active,
+    ];
+    if (otherPrompts) {
+      for (let i = 1; i < (this.prompt ?? 0); i += 1) {
+        prefixes.push(`${step}/prompt:${i}/bridged:`);
+      }
+    }
+    return prefixes;
   }
 }
 

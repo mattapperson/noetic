@@ -28,6 +28,7 @@ import { allowCustomItems, appendReplayed, beginEmitItems, emitStepItems } from 
 import { retryStep } from './execute-run-code';
 import { dispatchStepKind, executeLocally } from './step-kind-dispatch';
 import { isMutableContext } from './typeguards';
+import { pinAroundStep, replayAroundStep } from './wait-around';
 
 //#region Constants
 
@@ -404,6 +405,13 @@ async function executeStep<TContext, I, O>(
   // Before replay: a recorded entry may hold this step's custom items.
   allowCustomItems(step, stepCtx);
   const ledgerKey = resolveLedgerKey(step, input, stepCtx);
+  const pinned = lane && pinAroundStep(lane, ledgerKey);
+  if (pinned) {
+    await pinned.catch((error: unknown) => {
+      lane?.leaveStep(frame);
+      throw error;
+    });
+  }
   if (ledgerKey === undefined) {
     lane?.skipLedger();
   }
@@ -421,6 +429,9 @@ async function executeStep<TContext, I, O>(
     agentName,
   });
   if (replay.hit) {
+    if (lane) {
+      replayAroundStep(lane);
+    }
     lane?.leaveStep(frame);
     const replayScope = recordedScopeOf(step);
     if (replayScope) {

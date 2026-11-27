@@ -379,6 +379,7 @@ function promptFailure({
     kind: 'acp_outcome_unknown',
     stepId: step.id,
     sessionId: session.sessionId,
+    cause: failure.noeticError.kind === 'step_failed' ? failure.noeticError.cause : failure,
   });
 }
 

@@ -439,6 +439,7 @@ export class ContextImpl implements Context<ContextData> {
       node: new PathNode(parent, `/${frame.stepId}#${occurrence}`),
       parent,
       occurrence,
+      slot: parent.nextSlot++,
       stepId: frame.stepId,
       inputHash: this.ledger ? hashStepInput(frame.input) : undefined,
       recorded: true,
@@ -478,6 +479,12 @@ export class ContextImpl implements Context<ContextData> {
           inputHash: lane.inputHash,
         }
       : undefined;
+  }
+
+  /** The dispatch's place among its parent's children, independent of step id. */
+  dispatchSlot(): string | undefined {
+    const lane = this._lane;
+    return lane ? `${lane.parent.path}/wait-child:${lane.slot}` : undefined;
   }
 
   /**
@@ -763,6 +770,7 @@ export class PathNode {
   readonly counts = new Map<string, number>();
   private text?: string;
   hasChild = false;
+  nextSlot = 0;
 
   constructor(
     private readonly parent: PathNode | undefined,
@@ -791,6 +799,7 @@ interface Lane {
   /** The node whose count this dispatch took its ordinal from. */
   parent: PathNode;
   occurrence: number;
+  slot: number;
   stepId: string;
   /** `hashStepInput` of the step's input, taken only when the context has a ledger. */
   inputHash: string | undefined;

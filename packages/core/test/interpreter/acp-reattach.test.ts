@@ -86,8 +86,9 @@ function keptAgent(opts: {
   /** What the first host gets before it can commit its step. */
   first?: 'link-lost' | 'rpc-error' | 'answered';
   cutGuidance?: boolean;
+  onConnect?: (tools: AcpToolHost | undefined) => Promise<void>;
   onPrompt?: (tools: AcpToolHost | undefined, number: number) => Promise<void>;
-  onCollect?: (tools: AcpToolHost | undefined) => Promise<void>;
+  onCollect?: (tools: AcpToolHost | undefined, promptId?: string) => Promise<void>;
   /** The agent is gone: reattaching fails with `AcpConnectError`. */
   gone?: boolean;
   /** Reattaching fails some other way: the old turn may still be there. */
@@ -100,6 +101,7 @@ function keptAgent(opts: {
     agentId: 'kept',
     async connect(connect): Promise<AcpAgentConnection> {
       opts.seen.connects.push(connect);
+      await opts.onConnect?.(connect.host.tools);
       if (connect.reattach && opts.gone) {
         throw new AcpConnectError({
           agentId: 'kept',
@@ -167,7 +169,7 @@ function keptAgent(opts: {
                 if (text === undefined) {
                   return undefined;
                 }
-                await opts.onCollect?.(connect.host.tools);
+                await opts.onCollect?.(connect.host.tools, promptId);
                 for (const part of text.split(' ')) {
                   connect.host.onSessionUpdate({
                     sessionId,
@@ -391,6 +393,10 @@ interface GuidanceCalls {
   guidanceId?: string;
   nextId?: string;
   loseIntent?: boolean;
+  lateCall?: boolean;
+  callOnAttach?: boolean;
+  replayOnAttach?: boolean;
+  attributed?: boolean;
   redeliver?: boolean;
   answer?: string;
   runs?: number;
@@ -406,6 +412,7 @@ it.each<
     'after collecting the original prompt',
     {
       loseIntent: true,
+      lateCall: true,
       answer: 'prompted',
     },
   ],
@@ -413,6 +420,7 @@ it.each<
     'unseen guidance',
     {
       answer: 'prompted',
+      callOnAttach: true,
     },
   ],
   [
@@ -439,6 +447,22 @@ it.each<
     },
   ],
   [
+    'stable redelivery during attachment',
+    {
+      redeliver: true,
+      replayOnAttach: true,
+      guidanceId: 'guided',
+      answer: 'guided answer',
+    },
+  ],
+  [
+    'first call attributed to the active guidance prompt',
+    {
+      attributed: true,
+      answer: 'guided answer',
+    },
+  ],
+  [
     'anonymous redelivery',
     {
       redeliver: true,
@@ -452,15 +476,22 @@ it.each<
     ...backing,
     async swap(key, prev, next) {
       if (
-        scenario.loseIntent &&
-        !guidedIntentLost &&
         key.endsWith('/acp-session') &&
         next &&
         typeof next === 'object' &&
         Reflect.get(next, 'guidance') !== undefined
       ) {
-        guidedIntentLost = true;
-        throw new Error('lost the guidance prompt intent');
+        if (scenario.loseIntent && !guidedIntentLost) {
+          guidedIntentLost = true;
+          throw new Error('lost the guidance prompt intent');
+        }
+        if (scenario.lateCall) {
+          expect(after.prompts).toHaveLength(0);
+          expect(await call(after.connects[0]?.host.tools)).toMatchObject({
+            isError: true,
+          });
+          expect(runs).toBe(1);
+        }
       }
       return backing.swap!(key, prev, next);
     },
@@ -479,7 +510,7 @@ it.each<
       return `${file} #${++runs}`;
     },
   });
-  const call = (tools: AcpToolHost | undefined, agentCallId?: string) => {
+  const call = (tools: AcpToolHost | undefined, agentCallId?: string, promptId?: string) => {
     assert(tools);
     return tools.call({
       name: 'write',
@@ -487,6 +518,7 @@ it.each<
         file: 'report',
       },
       agentCallId,
+      promptId,
       signal: new AbortController().signal,
     });
   };
@@ -555,14 +587,37 @@ it.each<
       seen: after,
       collected: scenario.loseIntent
         ? 'original answer'
-        : scenario.redeliver
+        : scenario.redeliver || scenario.attributed
           ? 'guided answer'
+          : undefined,
+      onConnect:
+        scenario.callOnAttach || scenario.replayOnAttach
+          ? async (tools) => {
+              const reply = await call(tools, scenario.guidanceId);
+              if (scenario.replayOnAttach) {
+                replies.push(reply);
+                expect(runs).toBe(2);
+              } else {
+                expect(reply).toMatchObject({
+                  isError: true,
+                });
+                expect(runs).toBe(1);
+              }
+            }
           : undefined,
       async onPrompt(tools) {
         replies.push(await call(tools, scenario.nextId));
       },
-      async onCollect(tools) {
-        if (scenario.redeliver) {
+      async onCollect(tools, promptId) {
+        if (scenario.attributed) {
+          assert(promptId);
+          expect(await call(tools, undefined, 'another-prompt')).toMatchObject({
+            isError: true,
+          });
+          expect(runs).toBe(1);
+          replies.push(await call(tools, undefined, promptId));
+        }
+        if (scenario.redeliver && !scenario.replayOnAttach) {
           replies.push(await call(tools, scenario.guidanceId));
         }
       },
@@ -596,7 +651,7 @@ it.each<
         },
       ]);
     }
-    expect(after.prompts).toHaveLength(scenario.redeliver ? 0 : 1);
+    expect(after.prompts).toHaveLength(scenario.redeliver || scenario.attributed ? 0 : 1);
     expect(runs).toBe(scenario.runs ?? 2);
   } finally {
     await Promise.all([
@@ -987,6 +1042,9 @@ it('does not retry an ACP internal error after dispatch', async () => {
   ).rejects.toMatchObject({
     noeticError: {
       kind: 'acp_outcome_unknown',
+    },
+    cause: {
+      message: expect.stringContaining('lost result after writing'),
     },
   });
   expect(log.prompts).toHaveLength(1);

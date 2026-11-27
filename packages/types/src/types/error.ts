@@ -145,6 +145,7 @@ export type NoeticError =
       kind: 'acp_outcome_unknown';
       stepId: string;
       sessionId?: string;
+      cause?: Error;
     }
   | {
       /** The host lost its ACP link; the original prompt can be collected on a later attachment. */

@@ -90,6 +90,13 @@ const PendingEntrySchema = z.object({
   leaseId: z.string().optional(),
   cursor: z.string().nullish(),
   deadline: z.number().optional(),
+  around: z
+    .object({
+      path: z.string(),
+      inputHash: z.string(),
+      shape: z.string(),
+    })
+    .optional(),
   /** On a `wait`: the event it listens for, so a parked turn can be watched over. */
   event: z.string().optional(),
   matched: z

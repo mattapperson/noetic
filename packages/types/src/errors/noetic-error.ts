@@ -133,7 +133,7 @@ function formatMessage(error: NoeticError): string {
     case 'subprocess_outcome_unknown':
       return `Subprocess step '${error.stepId}' has an unknown outcome${error.cause ? `: ${error.cause.message}` : '.'}`;
     case 'acp_outcome_unknown':
-      return `ACP step '${error.stepId}' has an unknown outcome${error.sessionId ? ` for session '${error.sessionId}'` : ''}.`;
+      return `ACP step '${error.stepId}' has an unknown outcome${error.sessionId ? ` for session '${error.sessionId}'` : ''}${error.cause ? `: ${error.cause.message}` : '.'}`;
     case 'acp_link_lost':
       return `ACP step '${error.stepId}' lost its link: ${error.cause.message}`;
     case 'lease_lost':

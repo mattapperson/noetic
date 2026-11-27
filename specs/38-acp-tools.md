@@ -142,6 +142,13 @@ the step reports `acp_outcome_unknown`. A new guidance prompt can make a call
 with the same tool and arguments. Reusing an ID from an earlier prompt still
 refuses the call. Running prompts saved before prompt scoping keep their
 original call records. The step's own entry prunes its receipts when it lands.
+The bridge stops taking calls between prompts and binds the next prompt's
+records when dispatching it. A queued call keeps the binding it arrived on.
+While attaching to a guidance prompt, the bridge can return an exact stable
+receipt for that prompt. During collection it refuses a call whose identity
+could belong to an earlier prompt. An adapter that can prove which prompt
+originated a request may set `AcpToolCall.promptId`. A different prompt ID is
+refused and a matching one limits the identity check to the active prompt.
 
 A tool's `durable` setting means what it means in `callModel`
 (`23a-step-level-resume` § Tool calls in a round): unset records the call,
