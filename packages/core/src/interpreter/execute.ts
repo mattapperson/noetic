@@ -405,7 +405,7 @@ async function executeStep<TContext, I, O>(
   // Before replay: a recorded entry may hold this step's custom items.
   allowCustomItems(step, stepCtx);
   const ledgerKey = resolveLedgerKey(step, input, stepCtx);
-  const pinned = lane && pinAroundStep(lane, ledgerKey);
+  const pinned = lane && pinAroundStep(lane, ledgerKey, step.kind);
   if (pinned) {
     await pinned.catch((error: unknown) => {
       lane?.leaveStep(frame);

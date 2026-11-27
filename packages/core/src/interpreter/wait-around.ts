@@ -1,4 +1,4 @@
-import type { NoeticErrorImpl, StorageAdapter } from '@noetic-tools/types';
+import type { NoeticErrorImpl, Step, StorageAdapter } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
 import type { ContextImpl } from '../runtime/context-impl';
 import { isBeneath } from '../runtime/durable/parking';
@@ -54,6 +54,7 @@ export function guardAround(
 export function pinAroundStep(
   ctx: ContextImpl,
   key: string | undefined,
+  kind: Step['kind'],
 ): Promise<void> | undefined {
   const { ledger } = ctx;
   const active = ledger && guards.get(ledger);
@@ -83,6 +84,7 @@ export function pinAroundStep(
       path: dispatch.path,
       key: key ?? null,
       inputHash: dispatch.inputHash,
+      kind,
     },
     guard.unknown,
   ).then(() => {
@@ -130,6 +132,7 @@ async function pin(
     path: string;
     key: string | null;
     inputHash: string;
+    kind: Step['kind'];
   },
   unknown: Guard['unknown'],
 ): Promise<void> {
@@ -141,6 +144,7 @@ async function pin(
     dispatch.key === null ||
     Reflect.get(saved, 'path') !== dispatch.path ||
     Reflect.get(saved, 'key') !== dispatch.key ||
+    Reflect.get(saved, 'kind') !== dispatch.kind ||
     Reflect.get(saved, 'inputHash') !== dispatch.inputHash
   ) {
     throw unknown();

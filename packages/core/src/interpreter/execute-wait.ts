@@ -18,7 +18,8 @@ import type {
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
 import { ContextImpl } from '../runtime/context-impl';
-import { hashStepInput } from '../runtime/durable/step-ledger';
+import { isBeneath } from '../runtime/durable/parking';
+import { hashStepInput, REPLAY_KEY_PREFIX } from '../runtime/durable/step-ledger';
 import type { PendingEntry, StepConnection } from './connection-steps';
 import {
   evaluateTarget,
@@ -81,7 +82,10 @@ function aroundSteps<TContext, I>(
 function aroundDispatch<TContext, I>(listen: WaitContext<TContext, I>): PendingEntry['around'] {
   const { step, ctx } = listen;
   const steps = aroundSteps(step);
-  if (steps.length === 0 || !(ctx instanceof ContextImpl)) {
+  if (steps.length === 0) {
+    return null;
+  }
+  if (!(ctx instanceof ContextImpl)) {
     return undefined;
   }
   const dispatch = ctx.currentDispatch();
@@ -108,15 +112,42 @@ function stepShape(step: Step): unknown {
 /** A moved or changed wait could run its earlier actions under new ledger keys. */
 function sameAround<TContext, I>(listen: WaitContext<TContext, I>, prior: PendingEntry): boolean {
   if (aroundSteps(listen.step).length === 0) {
-    return prior.around === undefined;
+    return prior.around === null || prior.around === undefined;
   }
   const current = aroundDispatch(listen);
   return (
     current !== undefined &&
+    current !== null &&
     current.path === prior.around?.path &&
     current.inputHash === prior.around.inputHash &&
     current.shape === prior.around.shape
   );
+}
+
+/** Before the around marker existed, a descendant receipt or intent is evidence of prior work. */
+async function checkLegacyAround<TContext, I>(
+  listen: WaitContext<TContext, I>,
+  prior: PendingEntry,
+): Promise<void> {
+  const { ctx, connection, step } = listen;
+  if (!(ctx instanceof ContextImpl)) {
+    return;
+  }
+  const execution = connection.scope.executionId;
+  // A keyed legacy wait may have moved, so its old children can be anywhere in this run.
+  const keyed = connection.idempotencyKey.startsWith(`${execution}:${REPLAY_KEY_PREFIX}`);
+  const path = keyed ? undefined : ctx.currentPath();
+  for (const entry of ctx.ledger?.savedEntries() ?? []) {
+    if (
+      (path !== undefined && isBeneath(entry.path, path)) ||
+      (entry.effect && (keyed || entry.path.startsWith(REPLAY_KEY_PREFIX)))
+    ) {
+      throw unknownWait(connection, step.event, prior.key);
+    }
+  }
+  if (await connection.pending?.hasLegacyActions(execution, path)) {
+    throw unknownWait(connection, step.event, prior.key);
+  }
 }
 
 /** Runs `around` in sequence, each step's output the next one's input. */
@@ -220,7 +251,7 @@ function nowOf(ctx: Context): number {
 
 /** Resolves `undefined` once `remainingMs` pass or `signal` aborts; `clear` cancels the timer. */
 function deadlineTimer(
-  remainingMs: number,
+  remainingMs: number | undefined,
   signal: AbortSignal,
   stop: () => void,
 ): {
@@ -234,7 +265,9 @@ function deadlineTimer(
       stop();
       resolve(undefined);
     };
-    timer = setTimeout(onAbort, Math.max(0, remainingMs));
+    if (remainingMs !== undefined) {
+      timer = setTimeout(onAbort, Math.max(0, remainingMs));
+    }
     if (signal.aborted) {
       onAbort();
     }
@@ -251,6 +284,27 @@ function deadlineTimer(
       }
     },
   };
+}
+
+/** A saved event can still match after the deadline, but validation must stop on abort. */
+async function recheck<TContext, I>(
+  listen: WaitContext<TContext, I>,
+  event: ConnectionEvent,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const ctx = frameworkCast<Context>(listen.ctx);
+  assertRunning(ctx, signal);
+  const abort = deadlineTimer(undefined, signal, () => {});
+  try {
+    const accepted = await Promise.race([
+      acceptsEvent(listen, event),
+      abort.promise,
+    ]);
+    assertRunning(ctx, signal);
+    return accepted === true;
+  } finally {
+    abort.clear();
+  }
 }
 
 function endedError(connection: string, stepId: string, reason: string): NoeticErrorImpl {
@@ -425,13 +479,7 @@ function matchedEvent<TContext, I>(
   runSignal: AbortSignal,
 ): ConnectionEvent {
   const { step, connection } = listen;
-  const baseCtx = frameworkCast<Context>(listen.ctx);
-  if (runSignal.aborted) {
-    throw new NoeticErrorImpl({
-      kind: 'cancelled',
-      reason: baseCtx.abortReason ?? 'context aborted',
-    });
-  }
+  assertRunning(frameworkCast<Context>(listen.ctx), runSignal);
   if (outcome === undefined) {
     throw timeoutError(step);
   }
@@ -439,6 +487,41 @@ function matchedEvent<TContext, I>(
     throw endedError(connection.resolved.name, step.id, outcome.reason);
   }
   return outcome.event;
+}
+
+function assertRunning(ctx: Context, signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw new NoeticErrorImpl({
+      kind: 'cancelled',
+      reason: ctx.abortReason ?? 'context aborted',
+    });
+  }
+}
+
+function checkPendingWait<TContext, I>(
+  listen: WaitContext<TContext, I>,
+  entry: PendingEntry | undefined,
+): void | Promise<void> {
+  const { connection, step } = listen;
+  if (connection.pending?.unreadable) {
+    throw unknownWait(connection, step.event, connection.idempotencyKey);
+  }
+  if (!entry) {
+    return;
+  }
+  if (
+    entry.kind !== 'wait' ||
+    entry.stepId !== step.id ||
+    entry.event !== step.event ||
+    entry.connection !== connection.resolved.name ||
+    !sameAround(listen, entry) ||
+    (entry.durable === false && !entry.matched)
+  ) {
+    throw unknownWait(connection, step.event, entry.key);
+  }
+  if (entry.around === undefined) {
+    return checkLegacyAround(listen, entry);
+  }
 }
 
 //#endregion
@@ -480,22 +563,7 @@ export async function executeWait<TContext, I, O>(
   };
   const prior = await reconcilePending(connection, runSignal, {
     ctx: baseCtx,
-    check: (entry) => {
-      if (connection.pending?.unreadable) {
-        throw unknownWait(connection, step.event, connection.idempotencyKey);
-      }
-      if (
-        entry &&
-        (entry.kind !== 'wait' ||
-          entry.stepId !== step.id ||
-          entry.event !== step.event ||
-          entry.connection !== connection.resolved.name ||
-          !sameAround(listen, entry) ||
-          (entry.durable === false && !entry.matched))
-      ) {
-        throw unknown(entry);
-      }
-    },
+    check: (entry) => checkPendingWait(listen, entry),
   });
   options.onRecorded?.(async (stored) => {
     if (stored) {
@@ -503,7 +571,7 @@ export async function executeWait<TContext, I, O>(
     }
   });
   const cached = prior?.matched;
-  if (prior && cached && (await acceptsEvent(listen, cached))) {
+  if (prior && cached && (await recheck(listen, cached, runSignal))) {
     const around =
       step.around === undefined ? undefined : await runAround(listen, prior, true, executeStep);
     return frameworkCast<O>({

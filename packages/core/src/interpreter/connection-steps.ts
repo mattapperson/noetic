@@ -96,7 +96,7 @@ const PendingEntrySchema = z.object({
       inputHash: z.string(),
       shape: z.string(),
     })
-    .optional(),
+    .nullish(),
   /** On a `wait`: the event it listens for, so a parked turn can be watched over. */
   event: z.string().optional(),
   matched: z
@@ -538,7 +538,11 @@ export class PendingEntries {
   private readonly intent: StepIntent;
   unreadable = false;
 
-  constructor(storage: StorageAdapter, key: string, ledger?: StepLedger) {
+  constructor(
+    private readonly storage: StorageAdapter,
+    private readonly key: string,
+    ledger?: StepLedger,
+  ) {
     this.intent = new StepIntent(storage, key, ledger);
   }
 
@@ -560,6 +564,29 @@ export class PendingEntries {
 
   clear(): Promise<void> {
     return this.intent.clear();
+  }
+
+  /** Legacy wait records did not say whether they ran any actions. */
+  async hasLegacyActions(executionId: string, path?: string): Promise<boolean> {
+    const root = pendingEntryKey(executionId, '');
+    const prefixes =
+      path === undefined
+        ? [
+            root,
+          ]
+        : [
+            `${root}${path}/`,
+            `${root}${path}[`,
+            `${root}key:`,
+          ];
+    for (const prefix of prefixes) {
+      for (const key of await this.storage.list(prefix)) {
+        if (key !== this.key && (await new StepIntent(this.storage, key).read()) !== null) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 }
 
@@ -675,11 +702,14 @@ export async function reconcilePending(
   signal: AbortSignal,
   options?: {
     ctx: Context;
-    check?: (entry: PendingEntry | undefined) => void;
+    check?: (entry: PendingEntry | undefined) => void | Promise<void>;
   },
 ): Promise<PendingEntry | undefined> {
   const entry = await connection.pending?.load();
-  options?.check?.(entry);
+  const checked = options?.check?.(entry);
+  if (checked) {
+    await checked;
+  }
   const ctx = options?.ctx;
   if (!entry) {
     return undefined;

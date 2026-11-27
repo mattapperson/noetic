@@ -25,7 +25,7 @@ import { stepPathOf } from '../connections/durability';
 import { ContextImpl } from '../runtime/context-impl';
 import { TURN_CUT_ABORT } from '../runtime/durable/parking';
 import { StepIntent } from '../runtime/durable/step-intent';
-import type { StepLedger } from '../runtime/durable/step-ledger';
+import type { StepLedger, StepLedgerEntry } from '../runtime/durable/step-ledger';
 import { hashStepInput } from '../runtime/durable/step-ledger';
 import type { ToolCallResult } from '../runtime/tool-call';
 import { pendingEntryKey, runRootOf } from './connection-steps';
@@ -580,16 +580,7 @@ export class BridgedCallRecords {
     const active = `${scope}/bridged:`;
     const prefixes = this.prefixes(step, active, otherPrompts);
     let unmatched = false;
-    for (const entry of ledger.savedEntries()) {
-      if (
-        entry.kind !== BRIDGED_KIND ||
-        !prefixes.some(
-          (prefix) =>
-            entry.path.startsWith(prefix) && !entry.path.slice(prefix.length).includes('/'),
-        )
-      ) {
-        continue;
-      }
+    for (const entry of callsWithin(ledger.savedEntries(), prefixes)) {
       const saved = BridgedOutputSchema.safeParse(entry.output);
       const id = saved.success ? saved.data.agentCallId : undefined;
       const samePrompt = saved.success
@@ -651,6 +642,20 @@ export class BridgedCallRecords {
       }
     }
     return prefixes;
+  }
+}
+
+function* callsWithin(
+  entries: Iterable<StepLedgerEntry>,
+  prefixes: string[],
+): Generator<StepLedgerEntry> {
+  for (const entry of entries) {
+    const direct = prefixes.some(
+      (prefix) => entry.path.startsWith(prefix) && !entry.path.slice(prefix.length).includes('/'),
+    );
+    if (entry.kind === BRIDGED_KIND && direct) {
+      yield entry;
+    }
   }
 }
 
