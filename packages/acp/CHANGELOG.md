@@ -1,3 +1,7 @@
+## @noetic-tools/acp-v2.0.0-next.11 (2026-11-27)
+
+* feat: say in a JSON workflow document everything a TypeScript workflow can (#185) ([d448249](https://github.com/mattapperson/noetic/commit/d448249)), closes [#185](https://github.com/mattapperson/noetic/issues/185) [#184](https://github.com/mattapperson/noetic/issues/184) [#182](https://github.com/mattapperson/noetic/issues/182) [#184](https://github.com/mattapperson/noetic/issues/184) [#184](https://github.com/mattapperson/noetic/issues/184)
+
 ## @noetic-tools/acp-v2.0.0-next.10 (2026-11-26)
 
 * feat!: one subprocess adapter concept, and named fs, shell and subprocess adapters (#182) ([096c64d](https://github.com/mattapperson/noetic/commit/096c64d)), closes [#182](https://github.com/mattapperson/noetic/issues/182)
