@@ -1,6 +1,6 @@
 {
   "name": "@noetic-tools/types",
-  "version": "3.19.0-next.18",
+  "version": "3.19.0-next.19",
   "type": "module",
   "description": "Foundational type contracts and primitives shared across the Noetic framework (items, LLM config, adapters, steering, errors).",
   "license": "Apache-2.0",

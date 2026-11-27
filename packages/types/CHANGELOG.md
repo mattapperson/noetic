@@ -1,3 +1,7 @@
+## @noetic-tools/types-v3.19.0-next.19 (2026-11-27)
+
+* feat: MCP Events extension, trigger outcomes and replay, checked triggers (#187) ([9c6a91c](https://github.com/mattapperson/noetic/commit/9c6a91c)), closes [#187](https://github.com/mattapperson/noetic/issues/187)
+
 ## @noetic-tools/types-v3.19.0-next.18 (2026-11-27)
 
 * Recover interrupted durable workflows (#186) ([5aba218](https://github.com/mattapperson/noetic/commit/5aba218)), closes [#186](https://github.com/mattapperson/noetic/issues/186)
