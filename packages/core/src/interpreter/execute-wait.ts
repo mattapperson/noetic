@@ -47,11 +47,14 @@ type ListenOutcome =
       reason: string;
     };
 
-interface ListenContext<TContext, I> {
+interface WaitContext<TContext, I> {
   step: StepWait<TContext, I, unknown>;
   input: I;
   ctx: Context<TContext>;
   connection: StepConnection;
+}
+
+interface ListenContext<TContext, I> extends WaitContext<TContext, I> {
   stream: EventStream<ConnectionEvent>;
 }
 
@@ -92,15 +95,19 @@ async function runAround<TContext, I>(
  * the turn must not park, or a filter slower than the park's grace would be cut off
  * on every wake and its event never delivered.
  */
-async function passesFilter<TContext, I>(
-  filter: NonNullable<StepWait<TContext, I, unknown>['filter']>,
+async function acceptsEvent<TContext, I>(
+  { step, input, ctx }: WaitContext<TContext, I>,
   event: ConnectionEvent,
-  listen: ListenContext<TContext, I>,
 ): Promise<boolean> {
-  const { ctx, input } = listen;
+  if (event.type !== step.event) {
+    return false;
+  }
+  if (!step.filter) {
+    return true;
+  }
   const busy = ctx instanceof ContextImpl ? ctx.ledger?.parking.enter(undefined) : undefined;
   try {
-    return await filter(event, input, ctx);
+    return await step.filter(event, input, ctx);
   } finally {
     busy?.();
   }
@@ -109,9 +116,10 @@ async function passesFilter<TContext, I>(
 /** Consumes the stream until an event the filter accepts arrives, or the stream ends. */
 async function listenForMatch<TContext, I>(
   listen: ListenContext<TContext, I>,
+  rejected: ConnectionEvent | undefined,
   save: (event: ConnectionEvent) => boolean,
 ): Promise<ListenOutcome> {
-  const { step, stream } = listen;
+  const { stream } = listen;
   // The registry's stream emits `connection_event` and `stream_changed` (once each).
   for await (const message of stream) {
     if (message.type === 'gap') {
@@ -124,10 +132,7 @@ async function listenForMatch<TContext, I>(
       };
     }
     const event = message.event;
-    if (event.type !== step.event) {
-      continue;
-    }
-    if (step.filter && !(await passesFilter(step.filter, event, listen))) {
+    if (event.id === rejected?.id || !(await acceptsEvent(listen, event))) {
       continue;
     }
     if (!save(event)) {
@@ -240,7 +245,7 @@ async function recordListening<TContext, I>(
     connection: connection.resolved.name,
     key: prior?.key ?? connection.idempotencyKey,
     identity: connection.resolved.identity(),
-    cursor: prior?.cursor ?? cursor,
+    cursor: prior?.cursor === undefined ? cursor : prior.cursor,
     deadline,
     event: step.event,
     durable: replaysFromCursor(listen),
@@ -258,6 +263,7 @@ async function recordListening<TContext, I>(
 async function waitOnStream<TContext, I>(opts: {
   listen: ListenContext<TContext, I>;
   prior: PendingEntry | undefined;
+  rejected: ConnectionEvent | undefined;
   executeStep: ExecuteStepFn;
   runSignal: AbortSignal;
 }): Promise<StepWaitOutput> {
@@ -268,7 +274,7 @@ async function waitOnStream<TContext, I>(opts: {
   let saved: Promise<void> | undefined;
   let accepting = true;
   const baseCtx = frameworkCast<Context>(ctx);
-  const matched = listenForMatch(listen, (event) => {
+  const matched = listenForMatch(listen, opts.rejected, (event) => {
     if (!accepting || runSignal.aborted || nowOf(baseCtx) > deadline) {
       return false;
     }
@@ -315,7 +321,7 @@ async function waitOnStream<TContext, I>(opts: {
 }
 
 /** True when the event this wait listens for replays from a cursor. */
-function replaysFromCursor<TContext, I>(listen: ListenContext<TContext, I>): boolean {
+function replaysFromCursor<TContext, I>(listen: WaitContext<TContext, I>): boolean {
   return listen.connection.resolved.manifest.events[listen.step.event]?.replay === 'durable';
 }
 
@@ -349,7 +355,7 @@ function markWaiting<TContext, I>(
  * @throws `NoeticErrorImpl` `cancelled`, `step_failed` (timeout) or `connection_unavailable` (stream ended).
  */
 function matchedEvent<TContext, I>(
-  listen: ListenContext<TContext, I>,
+  listen: WaitContext<TContext, I>,
   outcome: ListenOutcome | undefined,
   runSignal: AbortSignal,
 ): ConnectionEvent {
@@ -400,16 +406,18 @@ export async function executeWait<TContext, I, O>(
     ledgerKey: options.ledgerKey,
   });
   const runSignal = signalOf(baseCtx);
+  const unknown = (entry: PendingEntry) =>
+    new NoeticErrorImpl({
+      kind: 'connection_outcome_unknown',
+      connection: connection.resolved.name,
+      op: step.event,
+      key: entry.key,
+    });
   const prior = await reconcilePending(connection, runSignal, {
     ctx: baseCtx,
     check: (entry) => {
       if (entry?.durable === false && !entry.matched) {
-        throw new NoeticErrorImpl({
-          kind: 'connection_outcome_unknown',
-          connection: connection.resolved.name,
-          op: step.event,
-          key: entry.key,
-        });
+        throw unknown(entry);
       }
     },
   });
@@ -418,23 +426,44 @@ export async function executeWait<TContext, I, O>(
       await connection.pending?.clear().catch(() => undefined);
     }
   });
-  if (
-    prior?.matched &&
+  const listen = {
+    step: erased,
+    input,
+    ctx,
+    connection,
+  };
+  const cached =
+    prior?.kind === 'wait' &&
+    prior.stepId === step.id &&
     prior.event === step.event &&
     prior.connection === connection.resolved.name
-  ) {
+      ? prior.matched
+      : undefined;
+  if (cached && (await acceptsEvent(listen, cached))) {
     const around =
       step.around === undefined
         ? undefined
         : await runAround(aroundSteps(erased), input, ctx, executeStep);
     return frameworkCast<O>({
-      event: prior.matched,
+      event: matchedEvent(
+        listen,
+        {
+          kind: 'matched',
+          event: cached,
+        },
+        runSignal,
+      ),
       ...(step.around === undefined
         ? {}
         : {
             around,
           }),
     });
+  }
+  // Without an accepted receipt, a live-only wait cannot account for events
+  // it missed during the cut. A durable wait can still use the original cursor.
+  if (prior && (prior.durable === false || (cached && !replaysFromCursor(listen)))) {
+    throw unknown(prior);
   }
   const listening = new AbortController();
   const stopListening = (): void => listening.abort();
@@ -449,13 +478,11 @@ export async function executeWait<TContext, I, O>(
   try {
     const output = await waitOnStream({
       listen: {
-        step: erased,
-        input,
-        ctx,
-        connection,
+        ...listen,
         stream,
       },
       prior,
+      rejected: cached,
       executeStep,
       runSignal,
     });

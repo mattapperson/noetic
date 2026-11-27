@@ -223,7 +223,10 @@ describe('harness ↔ connection steps', () => {
     'match',
     'match-lost',
     'late-filter',
-  ])('recovers a matched wait beyond the deadline after a cut in %s', async (cut) => {
+    'changed-filter-durable',
+    'changed-filter-live',
+    'changed-filter-expired',
+  ])('recovers an interrupted wait (%s)', async (cut) => {
     const backing = createInMemoryStorage({
       swap: true,
     });
@@ -247,16 +250,22 @@ describe('harness ↔ connection steps', () => {
         return backing.swap!(key, prev, next);
       },
     };
+    const durable =
+      cut === 'wait' || cut === 'changed-filter-durable' || cut === 'changed-filter-expired';
     const source = createInMemoryConnection({
       instance: 'same-deployments',
       events: {
         ready: {
-          replay: cut === 'wait' ? 'durable' : 'live',
+          replay: durable ? 'durable' : 'live',
         },
       },
     });
+    if (durable) {
+      source.connection.emit('ready', 'before the wait');
+    }
     let now = 1_000;
     let events = 0;
+    let wanted = 'confirmed';
     const matched = Promise.withResolvers<void>();
     const filter = Promise.withResolvers<boolean>();
     const wait = step.wait({
@@ -264,9 +273,9 @@ describe('harness ↔ connection steps', () => {
       connection: 'app',
       event: 'ready',
       timeoutMs: cut === 'late-filter' ? 10 : 1_000,
-      filter: () => {
+      filter: (event) => {
         matched.resolve();
-        return cut === 'late-filter' ? filter.promise : true;
+        return cut === 'late-filter' ? filter.promise : event.payload === wanted;
       },
       around: [
         runCode({
@@ -290,7 +299,12 @@ describe('harness ↔ connection steps', () => {
         params: {},
         now: () => now,
         connections: {
-          app: source,
+          // Both hosts subscribe to the same event log.
+          app: {
+            connect: async () => [
+              source.connection,
+            ],
+          },
         },
         agentGraph: runCode<ContextData, string, string>({
           id: 'flow',
@@ -342,18 +356,26 @@ describe('harness ↔ connection steps', () => {
         return;
       }
       expect(initial.cut?.reason).toBe('ledger_write_failed');
-      now += 2_000;
+      if (cut.startsWith('changed-filter')) {
+        wanted = 'replacement';
+        source.connection.emit('ready', wanted);
+      }
+      if (cut !== 'changed-filter-live' && cut !== 'changed-filter-durable') {
+        now += 2_000;
+      }
       expect(await second.wake()).toEqual([
         't',
       ]);
-      if (cut === 'match-lost') {
+      if (cut === 'match-lost' || cut === 'changed-filter-live') {
         await expect(second.getAgentResponse(delivery)).rejects.toMatchObject({
           noeticError: {
             kind: 'connection_outcome_unknown',
           },
         });
+      } else if (cut === 'changed-filter-expired') {
+        await expect(second.getAgentResponse(delivery)).rejects.toThrow('saw no matching');
       } else {
-        expect((await second.getAgentResponse(delivery)).text).toBe('confirmed');
+        expect((await second.getAgentResponse(delivery)).text).toBe(wanted);
       }
       expect(events).toBe(1);
     } finally {

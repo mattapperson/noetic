@@ -40,6 +40,8 @@ const AcpSessionRecordSchema = z.object({
   promptId: z.string().optional(),
   guidance: z.string().optional(),
   bridgePath: z.string().optional(),
+  /** Guidance prompts written before this flag shared the step's call records. */
+  scopedCalls: z.literal(true).optional(),
   stableCalls: z.literal(true).optional(),
   steering: z.number().int().nonnegative().optional(),
   promptHash: z.string().optional(),
@@ -96,6 +98,7 @@ const SteeringRecord = z.object({
 
 const BridgedOutputSchema = z.object({
   agentCallId: z.string().optional(),
+  prompt: z.number().int().nonnegative().optional(),
   output: z.string(),
   result: z.unknown().optional(),
   error: z.boolean().optional(),
@@ -298,10 +301,13 @@ export class BridgedCallRecords {
   private readonly seen = new Map<string, number>();
   private mode: 'fresh' | 'resume' | 'legacy' = 'fresh';
   private path?: string;
+  private prompt?: number;
 
-  bind(path: string | undefined, mode: 'fresh' | 'resume' | 'legacy'): void {
+  bind(path: string | undefined, mode: 'fresh' | 'resume' | 'legacy', prompt?: number): void {
     this.mode = mode;
     this.path = path;
+    this.prompt = prompt;
+    this.seen.clear();
   }
 
   async recordFor(opts: {
@@ -318,16 +324,18 @@ export class BridgedCallRecords {
       arguments: opts.args,
     });
     const step = this.path ?? stepPathOf(ctx) ?? stepId;
+    const prompt = this.prompt;
+    const scope = prompt === undefined ? step : `${step}/prompt:${prompt}`;
     const call = `${wireName}:${inputHash ?? 'unhashed'}`;
     const ledger = ctx instanceof ContextImpl ? ctx.ledger : undefined;
-    const pathAt = (n: number): string => `${step}/bridged:${call}#${n}`;
-    const key = `${step}\u0000${call}`;
-    let order = this.seen.get(key) ?? 0;
+    const pathAt = (n: number): string => `${scope}/bridged:${call}#${n}`;
+    let order = this.seen.get(call) ?? 0;
     const prior =
       this.mode !== 'fresh' && ledger && tool?.durable !== false
         ? this.savedPath({
             ledger,
             step,
+            scope,
             stepId,
             agentCallId,
             inputHash,
@@ -341,10 +349,11 @@ export class BridgedCallRecords {
     ) {
       order += 1;
     }
+    // Keep stable IDs at the step path so a reused ID cannot execute twice.
     const stable =
       agentCallId === undefined ? undefined : `${step}/bridged:id:${hashStepInput(agentCallId)}`;
     if (prior === undefined && stable === undefined) {
-      this.seen.set(key, order + 1);
+      this.seen.set(call, order + 1);
     }
     const path = prior ?? stable ?? pathAt(order);
     // `durable: false` records nothing; unhashable arguments cannot be matched.
@@ -353,6 +362,7 @@ export class BridgedCallRecords {
       await this.bindInput({
         ctx,
         ledger,
+        step,
         path,
         anonymous: pathAt(order),
         stable: stable !== undefined,
@@ -387,6 +397,11 @@ export class BridgedCallRecords {
           kind: BRIDGED_KIND,
           inputHash,
           output: {
+            ...(prompt === undefined
+              ? {}
+              : {
+                  prompt,
+                }),
             ...(agentCallId === undefined
               ? {}
               : {
@@ -413,6 +428,7 @@ export class BridgedCallRecords {
   private async bindInput({
     ctx,
     ledger,
+    step,
     path,
     anonymous,
     stable,
@@ -421,6 +437,7 @@ export class BridgedCallRecords {
   }: {
     ctx: Context<ContextData>;
     ledger: StepLedger;
+    step: string;
     path: string;
     anonymous: string;
     stable: boolean;
@@ -436,16 +453,18 @@ export class BridgedCallRecords {
     const identity = intent(path);
     const saved = await identity.read();
     if (!stable && this.mode !== 'fresh') {
-      const prefix = pendingEntryKey(
-        runRootOf(ctx).id,
-        `${path.slice(0, path.lastIndexOf('/'))}/bridged:id:`,
-      );
+      const prefix = pendingEntryKey(runRootOf(ctx).id, `${step}/bridged:id:`);
       for (const key of await storage.list(prefix)) {
         if (!key.endsWith('/tool')) {
           continue;
         }
         const other = await new StepIntent(storage, key).read();
-        if (other && typeof other === 'object' && Reflect.get(other, 'inputHash') === inputHash) {
+        if (
+          other &&
+          typeof other === 'object' &&
+          Reflect.get(other, 'prompt') === this.prompt &&
+          Reflect.get(other, 'inputHash') === inputHash
+        ) {
           throw new NoeticErrorImpl({
             kind: 'acp_outcome_unknown',
             stepId,
@@ -459,6 +478,11 @@ export class BridgedCallRecords {
     ) {
       await identity.write({
         inputHash,
+        ...(this.prompt === undefined
+          ? {}
+          : {
+              prompt: this.prompt,
+            }),
       });
       return;
     }
@@ -466,6 +490,7 @@ export class BridgedCallRecords {
       stable &&
       typeof saved === 'object' &&
       saved !== null &&
+      Reflect.get(saved, 'prompt') === this.prompt &&
       Reflect.get(saved, 'inputHash') === inputHash
     ) {
       return;
@@ -479,30 +504,42 @@ export class BridgedCallRecords {
   private savedPath({
     ledger,
     step,
+    scope,
     stepId,
     agentCallId,
     inputHash,
   }: {
     ledger: StepLedger;
     step: string;
+    scope: string;
     stepId: string;
     agentCallId?: string;
     inputHash?: string;
   }): string | undefined {
-    const prefix = step + '/bridged:';
+    const root = `${step}/bridged:`;
+    const active = `${scope}/bridged:`;
+    const prefixes = [
+      root,
+      active,
+    ];
     let unmatched = false;
     for (const entry of ledger.savedEntries()) {
       if (
         entry.kind !== BRIDGED_KIND ||
-        !entry.path.startsWith(prefix) ||
-        entry.path.slice(prefix.length).includes('/')
+        !prefixes.some(
+          (prefix) =>
+            entry.path.startsWith(prefix) && !entry.path.slice(prefix.length).includes('/'),
+        )
       ) {
         continue;
       }
       const saved = BridgedOutputSchema.safeParse(entry.output);
       const id = saved.success ? saved.data.agentCallId : undefined;
+      const samePrompt = saved.success
+        ? saved.data.prompt === this.prompt
+        : entry.path.startsWith(active);
       if (agentCallId !== undefined && id === agentCallId) {
-        if (entry.inputHash !== inputHash) {
+        if (!samePrompt || entry.inputHash !== inputHash) {
           throw new NoeticErrorImpl({
             kind: 'acp_outcome_unknown',
             stepId,
@@ -511,7 +548,9 @@ export class BridgedCallRecords {
         return entry.path;
       }
       unmatched ||=
-        entry.inputHash === inputHash && (agentCallId === undefined || id === undefined);
+        samePrompt &&
+        entry.inputHash === inputHash &&
+        (agentCallId === undefined || id === undefined);
     }
     if (unmatched || this.mode === 'legacy') {
       throw new NoeticErrorImpl({

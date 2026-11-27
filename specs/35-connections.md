@@ -956,7 +956,9 @@ outcome for that key. Other unresolved writes, including writes whose provider
 gave no usable response, raise `connection_outcome_unknown`. A leased turn
 can cut and wake after a lost response when the pending record gives it a
 safe way to recover the outcome. A `wait` records its cursor and deadline
-before it listens and resumes from that cursor.
+when the subscription is ready. On resume it checks any saved match against
+the current filter. A match that still passes can finish even after the
+deadline.
 
 **A call that waits on a long operation.** Once the operation has an id on
 record, the call does not depend on the connection instance either: any instance
@@ -972,7 +974,9 @@ pending entry is marked so, and any instance of the same surface picks it up:
 it listens again from the recorded cursor until the recorded deadline. This is
 what lets a parked turn (`23-durable-execution` § Parked turns) resume in
 another process, where every connection is a new instance. A wait on a `live`
-event follows the rule for a replaced connection below.
+event follows the rule for a replaced connection below. An interrupted
+live-only wait without a saved event that passes its filter reports
+`connection_outcome_unknown`.
 
 **A replaced connection.** If a connection's identity instance changed — the
 browser restarted, the lease expired, the simulator was reset — results

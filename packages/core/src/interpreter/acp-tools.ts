@@ -429,9 +429,13 @@ export class AcpToolRunner implements AcpToolHost {
     } while (settled !== this.queue);
   }
 
-  /** Bind tool receipts to this step's dispatch, even if the step moves on wake. */
-  recordCallsAt(path: string | undefined, mode: 'fresh' | 'resume' | 'legacy'): void {
-    this.records.bind(path, mode);
+  /** Bind tool receipts to the active prompt, even if the step moves on wake. */
+  recordCallsAt(
+    path: string | undefined,
+    mode: 'fresh' | 'resume' | 'legacy',
+    prompt?: number,
+  ): void {
+    this.records.bind(path, mode, prompt);
   }
 
   /**

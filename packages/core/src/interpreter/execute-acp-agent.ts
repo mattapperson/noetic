@@ -269,10 +269,17 @@ async function runAcpStep<TContext, I, O>(params: {
   if (reattach) {
     await ledger?.verifyHeld();
   }
+  const prompt: PromptAttempt = {
+    steering: recorded?.steering ?? 0,
+    promptId: recorded?.promptId,
+    guidance: recorded?.guidance,
+    scopedCalls: recorded?.scopedCalls,
+  };
   // The bridge starts accepting calls during the connection handshake.
   tools?.recordCallsAt(
     bridgePath,
     reattach === undefined ? 'fresh' : recorded?.stableCalls ? 'resume' : 'legacy',
+    prompt.scopedCalls ? prompt.steering : undefined,
   );
   const resolution = await openSession({
     step,
@@ -362,11 +369,8 @@ async function runAcpStep<TContext, I, O>(params: {
     turnError,
     beforePrompt,
     beforeCollect: () => ledger?.verifyHeld(),
-    prompt: {
-      steering: recorded?.steering ?? 0,
-      promptId: recorded?.promptId,
-      guidance: recorded?.guidance,
-    },
+    prompt,
+    bridgePath,
     sessions,
     keepPromptId: sessions !== undefined && (handle ?? recorded?.reattach) !== undefined,
     recovery: sessions ? (handle && connection.detach ? 'reattach' : 'unavailable') : undefined,
@@ -383,6 +387,7 @@ interface PromptAttempt {
   steering: number;
   promptId?: string;
   guidance?: string;
+  scopedCalls?: true;
 }
 
 async function promptAgent<TContext, I, O>(params: {
@@ -398,6 +403,7 @@ async function promptAgent<TContext, I, O>(params: {
   beforePrompt(prompt: PromptAttempt): Promise<void>;
   beforeCollect(): Promise<void> | undefined;
   prompt: PromptAttempt;
+  bridgePath: string | undefined;
   keepPromptId: boolean;
   sessions?: AcpSessionRecords;
   recovery?: 'reattach' | 'unavailable';
@@ -532,6 +538,8 @@ async function promptAgent<TContext, I, O>(params: {
       prompt.steering += 1;
       prompt.guidance = guidance;
       prompt.promptId = undefined;
+      prompt.scopedCalls = true;
+      tools?.recordCallsAt(params.bridgePath, 'fresh', prompt.steering);
       bridge = new AcpEventBridge(step, baseCtx);
       bridge.identifyToolCalls(agent.toolIdOf?.bind(agent));
       bindHostToStep(resolution.live.host, bindingFor(bridge));

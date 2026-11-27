@@ -126,21 +126,22 @@ the agent gets an error result, so one id never keys two calls.
 ### Replay
 
 On a durable run each call is recorded in the step ledger as it finishes,
-beneath the step's entry:
+beneath the step's entry. Calls without an agent ID use these paths:
 
 ```
 <step path>/bridged:<wire name>:<hash of the arguments>#<n>
+<step path>/prompt:<guidance number>/bridged:<wire name>:<hash of the arguments>#<n>
 ```
 
-`<n>` is the call's place among the step's calls with that tool and those
-arguments, so two equal calls keep two records. The receipt also records the
-agent's call ID when it supplies one. The ID also identifies any pending
-approval or tool intent, so calls with equal arguments keep distinct approvals
-even when they arrive in a different order. After reattachment, a request
-with the same ID and input gets the saved result. A different ID permits a new call,
-even when the tool and arguments match. If a matching receipt exists and
-either side lacks a call ID, the step reports `acp_outcome_unknown`. The
-step's own entry prunes these records when it lands.
+`<n>` is the call's place among calls in that prompt with the same tool and
+arguments. When the agent supplies an ID, the bridge stores it with the prompt
+and uses it to find the receipt, approval or tool intent. After reattachment,
+the same ID and input in the same prompt get the saved result. If a receipt
+or intent from that prompt matches the input but either side lacks a call ID,
+the step reports `acp_outcome_unknown`. A new guidance prompt can make a call
+with the same tool and arguments. Reusing an ID from an earlier prompt still
+refuses the call. Running prompts saved before prompt scoping keep their
+original call records. The step's own entry prunes its receipts when it lands.
 
 A tool's `durable` setting means what it means in `callModel`
 (`23a-step-level-resume` § Tool calls in a round): unset records the call,

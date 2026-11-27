@@ -14,6 +14,7 @@ import type {
   AcpConnectOptions,
   AcpPromptOptions,
   AcpSession,
+  AcpToolHost,
   AcpTurnResult,
   AcpWhenHostExits,
   ContextData,
@@ -26,8 +27,10 @@ import {
   NoeticErrorImpl,
   SteeringAction,
 } from '@noetic-tools/types';
+import { z } from 'zod';
 import { inParallel } from '../../src/builders/control-flow-builders';
 import { runCode, step } from '../../src/builders/step-builders';
+import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { ACP_RESUME_NOTICE } from '../../src/interpreter/acp-resume';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
@@ -83,6 +86,8 @@ function keptAgent(opts: {
   /** What the first host gets before it can commit its step. */
   first?: 'link-lost' | 'rpc-error' | 'answered';
   cutGuidance?: boolean;
+  onPrompt?: (tools: AcpToolHost | undefined, number: number) => Promise<void>;
+  onCollect?: (tools: AcpToolHost | undefined) => Promise<void>;
   /** The agent is gone: reattaching fails with `AcpConnectError`. */
   gone?: boolean;
   /** Reattaching fails some other way: the old turn may still be there. */
@@ -119,6 +124,7 @@ function keptAgent(opts: {
         availableCommands: [],
         async prompt(prompt) {
           opts.seen.prompts.push(promptText(prompt));
+          await opts.onPrompt?.(connect.host.tools, opts.seen.prompts.length);
           if (!reattached) {
             if (opts.cutGuidance && opts.seen.prompts.length === 2) {
               throw new AcpConnectError({
@@ -161,6 +167,7 @@ function keptAgent(opts: {
                 if (text === undefined) {
                   return undefined;
                 }
+                await opts.onCollect?.(connect.host.tools);
                 for (const part of text.split(' ')) {
                   connect.host.onSessionUpdate({
                     sessionId,
@@ -371,6 +378,226 @@ it.each([
         expect(after.prompts[0]).toContain('revise');
       }
     }
+  } finally {
+    await Promise.all([
+      first.close(),
+      second.close(),
+    ]);
+  }
+});
+
+interface GuidanceCalls {
+  originalId?: string;
+  guidanceId?: string;
+  nextId?: string;
+  loseIntent?: boolean;
+  redeliver?: boolean;
+  answer?: string;
+  runs?: number;
+}
+
+it.each<
+  [
+    string,
+    GuidanceCalls,
+  ]
+>([
+  [
+    'after collecting the original prompt',
+    {
+      loseIntent: true,
+      answer: 'prompted',
+    },
+  ],
+  [
+    'unseen guidance',
+    {
+      answer: 'prompted',
+    },
+  ],
+  [
+    'unseen guidance after a stable call',
+    {
+      originalId: 'original',
+      answer: 'prompted',
+    },
+  ],
+  [
+    'reused ID',
+    {
+      originalId: 'original',
+      nextId: 'original',
+      runs: 1,
+    },
+  ],
+  [
+    'stable redelivery',
+    {
+      redeliver: true,
+      guidanceId: 'guided',
+      answer: 'guided answer',
+    },
+  ],
+  [
+    'anonymous redelivery',
+    {
+      redeliver: true,
+    },
+  ],
+])('keeps guidance tool calls scoped to their prompt (%s)', async (_name, scenario) => {
+  const backing = createInMemoryStorage({
+    swap: true,
+  });
+  const storage: StorageAdapter = {
+    ...backing,
+    async swap(key, prev, next) {
+      if (
+        scenario.loseIntent &&
+        !guidedIntentLost &&
+        key.endsWith('/acp-session') &&
+        next &&
+        typeof next === 'object' &&
+        Reflect.get(next, 'guidance') !== undefined
+      ) {
+        guidedIntentLost = true;
+        throw new Error('lost the guidance prompt intent');
+      }
+      return backing.swap!(key, prev, next);
+    },
+  };
+  let guidedIntentLost = false;
+  let runs = 0;
+  const write = tool({
+    name: 'write',
+    description: 'Write a report.',
+    input: z.object({
+      file: z.string(),
+    }),
+    output: z.string(),
+    durable: true,
+    async execute({ file }) {
+      return `${file} #${++runs}`;
+    },
+  });
+  const call = (tools: AcpToolHost | undefined, agentCallId?: string) => {
+    assert(tools);
+    return tools.call({
+      name: 'write',
+      args: {
+        file: 'report',
+      },
+      agentCallId,
+      signal: new AbortController().signal,
+    });
+  };
+  const before = seen();
+  const after = seen();
+  let guided = false;
+  const build = (agent: AcpAgent) =>
+    new AgentHarness({
+      name: 'guidance-tools',
+      params: {},
+      agentGraph: step.acpAgent({
+        id: 'code',
+        agent,
+        prompt: 'Write the report.',
+        tools: [
+          write,
+        ],
+      }),
+      contextLayers: [
+        makeLayer('guide', {
+          hooks: {
+            async afterModelCall() {
+              const action = guided ? SteeringAction.Allow : SteeringAction.Guide;
+              guided = true;
+              return {
+                decision: {
+                  action,
+                  guidance: 'Revise the report.',
+                },
+              };
+            },
+          },
+        }),
+      ],
+      environment: {
+        storage: {
+          adapter: storage,
+          lease: {
+            cut: {
+              delayMs: 0,
+            },
+          },
+          park: {
+            autoWake: false,
+          },
+        },
+      },
+    });
+  const first = build(
+    keptAgent({
+      seen: before,
+      first: 'answered',
+      cutGuidance: true,
+      async onPrompt(tools, number) {
+        if (number === 1) {
+          await call(tools, scenario.originalId);
+        } else if (scenario.redeliver) {
+          await call(tools, scenario.guidanceId);
+        }
+      },
+    }),
+  );
+  const replies: Array<Awaited<ReturnType<typeof call>>> = [];
+  const second = build(
+    keptAgent({
+      seen: after,
+      collected: scenario.loseIntent
+        ? 'original answer'
+        : scenario.redeliver
+          ? 'guided answer'
+          : undefined,
+      async onPrompt(tools) {
+        replies.push(await call(tools, scenario.nextId));
+      },
+      async onCollect(tools) {
+        if (scenario.redeliver) {
+          replies.push(await call(tools, scenario.guidanceId));
+        }
+      },
+    }),
+  );
+  const delivery = {
+    threadId: 'thread',
+    messageId: 'start',
+  };
+  try {
+    await first.execute('begin', delivery);
+    expect((await first.getAgentResponse(delivery)).cut?.reason).toBe(
+      scenario.loseIntent ? 'ledger_write_failed' : 'acp_link_lost',
+    );
+    expect(runs).toBe(scenario.redeliver ? 2 : 1);
+    expect(await second.wake()).toEqual([
+      'thread',
+    ]);
+    if (scenario.answer === undefined) {
+      await expect(second.getAgentResponse(delivery)).rejects.toMatchObject({
+        noeticError: {
+          kind: 'acp_outcome_unknown',
+        },
+      });
+    } else {
+      expect((await second.getAgentResponse(delivery)).text).toBe(scenario.answer);
+      expect(replies).toEqual([
+        {
+          output: 'report #2',
+          isError: false,
+        },
+      ]);
+    }
+    expect(after.prompts).toHaveLength(scenario.redeliver ? 0 : 1);
+    expect(runs).toBe(scenario.runs ?? 2);
   } finally {
     await Promise.all([
       first.close(),
