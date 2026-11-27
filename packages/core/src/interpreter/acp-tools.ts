@@ -57,7 +57,7 @@ import type { ToolProgressReport } from '../runtime/tool-call';
 import { createToolResultItem, executeToolCall, resolveWireJsonSchema } from '../runtime/tool-call';
 import { sanitizeToolNameForWire } from '../util/tool-name';
 import type { AcpEventBridge } from './acp-events';
-import type { BridgedCallRecord } from './acp-resume';
+import type { BridgedCallRecord, BridgeMode } from './acp-resume';
 import { BridgedCallRecords } from './acp-resume';
 import { resolveLazy, resolveToolsAndRestrictions, splitResolvedTools } from './action-tools';
 import { openChildSpan, traceChild } from './child-span';
@@ -372,6 +372,7 @@ export class AcpToolRunner implements AcpToolHost {
   private readonly claimed = new Set<string>();
   /** What each call recorded, so a resumed step replays it (spec 27 § Resuming a step). */
   private readonly records = new BridgedCallRecords();
+  private promptId?: string;
 
   constructor(private readonly source: ReadonlyArray<Tool>) {
     const wrapped = new Set<string>();
@@ -429,9 +430,13 @@ export class AcpToolRunner implements AcpToolHost {
     } while (settled !== this.queue);
   }
 
-  /** Bind tool receipts to this step's dispatch, even if the step moves on wake. */
-  recordCallsAt(path: string | undefined, mode: 'fresh' | 'resume' | 'legacy'): void {
-    this.records.bind(path, mode);
+  /** Bind tool receipts to the active prompt, even if the step moves on wake. */
+  recordCallsAt(path: string | undefined, mode: BridgeMode, prompt?: number): void {
+    this.records.bind(path, mode, prompt);
+  }
+
+  setPrompt(id: string | undefined): void {
+    this.promptId = id;
   }
 
   /**
@@ -635,14 +640,23 @@ export class AcpToolRunner implements AcpToolHost {
   }
 
   readonly call = (call: AcpToolCall): Promise<AcpToolResult> => {
-    const next = this.queue.then(() => this.run(call));
+    if (call.promptId !== undefined && call.promptId !== this.promptId) {
+      return Promise.resolve({
+        output: 'Error: the tool call belongs to a different ACP prompt.',
+        isError: true,
+      });
+    }
+    const binding = this.binding;
+    const next = this.queue.then(() => this.run(call, binding));
     this.queue = next.catch(() => undefined);
     return next;
   };
 
-  private async run(call: AcpToolCall): Promise<AcpToolResult> {
-    const binding = this.binding;
-    if (!binding) {
+  private async run(
+    call: AcpToolCall,
+    binding: AcpToolBinding | undefined,
+  ): Promise<AcpToolResult> {
+    if (!binding || binding !== this.binding) {
       return {
         output: `Error: unknown tool '${call.name}'`,
         isError: true,
@@ -658,7 +672,7 @@ export class AcpToolRunner implements AcpToolHost {
     const callId = await this.callIdFor(binding, call);
     // Like the `callModel` loop, which starts no call once its step is aborted
     // or a call's pipeline has thrown. Checked after every wait.
-    if (this.failed || binding.ctx.aborted || call.signal.aborted) {
+    if (binding !== this.binding || this.failed || binding.ctx.aborted || call.signal.aborted) {
       return {
         output: CANCELLED_OUTPUT,
         isError: true,
@@ -666,7 +680,7 @@ export class AcpToolRunner implements AcpToolHost {
     }
     const owner = await this.ownerOf(callId);
     // Waiting for its owner was a wait too: nothing starts once the call is off.
-    if (this.failed || binding.ctx.aborted || call.signal.aborted) {
+    if (binding !== this.binding || this.failed || binding.ctx.aborted || call.signal.aborted) {
       return {
         output: CANCELLED_OUTPUT,
         isError: true,
@@ -931,8 +945,16 @@ export class AcpToolRunner implements AcpToolHost {
       tool,
       wireName: call.name,
       agentCallId: call.agentCallId,
+      attributed: call.promptId !== undefined,
       args,
     });
+    if (record.blocked) {
+      this.claimed.delete(callId);
+      return {
+        output: 'Error: the host is still attaching to the ACP prompt.',
+        error: true,
+      };
+    }
     const replayed = record.take();
     if (replayed && mayWriteHolds(binding.ctx)) {
       // A host that died after recording this result, and before dropping the call's

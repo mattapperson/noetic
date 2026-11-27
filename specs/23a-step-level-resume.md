@@ -300,6 +300,17 @@ model rounds included. Binary outputs are blobs in the artifact store
 are specific to connection steps; other tools keep the at-least-once behavior
 in § The side-effect boundary.
 
+A wait that saved a match before its step finished checks that event against
+the current filter when it resumes. A match the filter still accepts can
+complete after the deadline. If the filter rejects it, a durable stream
+replays from the original cursor within the original deadline. A wait without
+a replayable starting cursor reports `connection_outcome_unknown` instead.
+A pending `around` records the wait's path, input hash, and declared child
+shape before running. Each descendant pins its path, input, and resolved
+ledger key to its parent's dispatch order before it can run, including steps
+built at runtime. Recovery refuses to run an action whose recorded identity
+cannot be matched.
+
 ## Future Considerations
 
 - **Mid-item resume.** A resume goes on from the last item the stream finished; an item cut off part way is made again. Providers that expose resumable streams would let a round resume where its stream stopped.

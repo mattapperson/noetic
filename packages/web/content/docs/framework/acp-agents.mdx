@@ -506,7 +506,9 @@ agent could have changed before sending a new prompt.
 When a reattached agent redelivers a tool call with its original call ID,
 Noetic returns the saved result or keeps waiting on that call's approval.
 For an interrupted tool call without a stable ID, Noetic reports an unknown
-outcome when it cannot safely assign the earlier receipt or approval.
+outcome when it cannot safely assign the earlier receipt or approval. This
+check applies within the prompt that made the call. A new guidance prompt
+can call the same tool with the same arguments.
 The keeper also matches each original or guidance prompt by ID. It can
 accept that prompt only once. If it can prove a prompt never arrived, the
 replacement can send it. When it cannot establish the outcome, the step reports

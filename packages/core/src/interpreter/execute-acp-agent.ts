@@ -269,10 +269,25 @@ async function runAcpStep<TContext, I, O>(params: {
   if (reattach) {
     await ledger?.verifyHeld();
   }
+  const prompt: PromptAttempt = {
+    steering: recorded?.steering ?? 0,
+    promptId: recorded?.promptId,
+    guidance: recorded?.guidance,
+    scopedCalls: recorded?.scopedCalls,
+  };
+  const scoped = reattach !== undefined && prompt.scopedCalls === true;
+  tools?.setPrompt(prompt.promptId);
   // The bridge starts accepting calls during the connection handshake.
   tools?.recordCallsAt(
     bridgePath,
-    reattach === undefined ? 'fresh' : recorded?.stableCalls ? 'resume' : 'legacy',
+    scoped
+      ? 'attach'
+      : reattach === undefined
+        ? 'fresh'
+        : recorded?.stableCalls
+          ? 'resume'
+          : 'legacy',
+    prompt.scopedCalls ? prompt.steering : undefined,
   );
   const resolution = await openSession({
     step,
@@ -361,12 +376,15 @@ async function runAcpStep<TContext, I, O>(params: {
     tools,
     turnError,
     beforePrompt,
-    beforeCollect: () => ledger?.verifyHeld(),
-    prompt: {
-      steering: recorded?.steering ?? 0,
-      promptId: recorded?.promptId,
-      guidance: recorded?.guidance,
+    beforeCollect: async () => {
+      await ledger?.verifyHeld();
+      if (scoped) {
+        tools?.recordCallsAt(bridgePath, 'collect', prompt.steering);
+        bindHostToStep(resolution.live.host, bindingFor(bridge));
+      }
     },
+    prompt,
+    bridgePath,
     sessions,
     keepPromptId: sessions !== undefined && (handle ?? recorded?.reattach) !== undefined,
     recovery: sessions ? (handle && connection.detach ? 'reattach' : 'unavailable') : undefined,
@@ -383,6 +401,7 @@ interface PromptAttempt {
   steering: number;
   promptId?: string;
   guidance?: string;
+  scopedCalls?: true;
 }
 
 async function promptAgent<TContext, I, O>(params: {
@@ -398,6 +417,7 @@ async function promptAgent<TContext, I, O>(params: {
   beforePrompt(prompt: PromptAttempt): Promise<void>;
   beforeCollect(): Promise<void> | undefined;
   prompt: PromptAttempt;
+  bridgePath: string | undefined;
   keepPromptId: boolean;
   sessions?: AcpSessionRecords;
   recovery?: 'reattach' | 'unavailable';
@@ -443,6 +463,7 @@ async function promptAgent<TContext, I, O>(params: {
         : promptText);
   let turnBlocks = prompt.guidance === undefined ? blocks : undefined;
   let collect = resolution.reattached;
+  let freshPrompt = false;
   for (;;) {
     // Recall runs before every turn, as before every model call; its output
     // leads the prompt.
@@ -475,7 +496,13 @@ async function promptAgent<TContext, I, O>(params: {
       collectRequired,
       recovery,
       beforeCollect,
-      beforePrompt: () => beforePrompt(prompt),
+      beforePrompt: () =>
+        preparePrompt({
+          collect,
+          tools,
+          prompt,
+          save: beforePrompt,
+        }),
       content: buildContent({
         text: [
           context.text,
@@ -485,14 +512,21 @@ async function promptAgent<TContext, I, O>(params: {
           .join('\n\n'),
         blocks: turnBlocks,
       }),
-      onPrompt:
-        observation &&
-        ((content) =>
-          observation.request({
-            target: 'acp',
-            content,
-            layerText: context.layerText,
-          })),
+      onPrompt: (content) => {
+        observation?.request({
+          target: 'acp',
+          content,
+          layerText: context.layerText,
+        });
+        bindPrompt({
+          tools,
+          path: params.bridgePath,
+          prompt,
+          freshPrompt,
+          collect,
+          rebind: () => bindHostToStep(resolution.live.host, bindingFor(bridge)),
+        });
+      },
     }).finally(() => observation?.end());
     collect = false;
     applyTurnResult(baseCtx, result);
@@ -532,9 +566,10 @@ async function promptAgent<TContext, I, O>(params: {
       prompt.steering += 1;
       prompt.guidance = guidance;
       prompt.promptId = undefined;
+      prompt.scopedCalls = true;
+      freshPrompt = true;
       bridge = new AcpEventBridge(step, baseCtx);
       bridge.identifyToolCalls(agent.toolIdOf?.bind(agent));
-      bindHostToStep(resolution.live.host, bindingFor(bridge));
       continue;
     }
     publishStepMeta(baseCtx, result, currentModel(resolution.live.session, selectedModel));
@@ -542,5 +577,50 @@ async function promptAgent<TContext, I, O>(params: {
       await baseCtx.harness.storeLayers(layers, response, baseCtx);
     }
     return await stepOutput(step, result);
+  }
+}
+
+/** A keeper-confirmed unsent legacy guidance prompt can start with its own records. */
+function preparePrompt({
+  collect,
+  tools,
+  prompt,
+  save,
+}: {
+  collect: boolean;
+  tools: AcpToolRunner | undefined;
+  prompt: PromptAttempt;
+  save: (prompt: PromptAttempt) => Promise<void>;
+}): Promise<void> {
+  if (collect) {
+    tools?.unbind();
+    if (prompt.guidance !== undefined) {
+      prompt.scopedCalls = true;
+    }
+  }
+  return save(prompt);
+}
+
+function bindPrompt({
+  tools,
+  path,
+  prompt,
+  freshPrompt,
+  collect,
+  rebind,
+}: {
+  tools: AcpToolRunner | undefined;
+  path: string | undefined;
+  prompt: PromptAttempt;
+  freshPrompt: boolean;
+  collect: boolean;
+  rebind: () => void;
+}): void {
+  tools?.setPrompt(prompt.promptId);
+  if (freshPrompt || (collect && prompt.scopedCalls)) {
+    tools?.recordCallsAt(path, freshPrompt ? 'fresh' : 'resume', prompt.steering);
+  }
+  if (freshPrompt || collect) {
+    rebind();
   }
 }

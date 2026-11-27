@@ -223,11 +223,27 @@ describe('harness ↔ connection steps', () => {
     'match',
     'match-lost',
     'late-filter',
-  ])('recovers a matched wait beyond the deadline after a cut in %s', async (cut) => {
+    'changed-filter-durable',
+    'changed-filter-live',
+    'changed-filter-expired',
+    'changed-filter-no-cursor',
+    'changed-around-input',
+    'changed-around-child',
+    'changed-around-key',
+    'changed-around-dynamic-child',
+    'removed-around',
+    'omitted-around-child',
+  ])('recovers an interrupted wait (%s)', async (cut) => {
     const backing = createInMemoryStorage({
       swap: true,
     });
     let failed = false;
+    const cutAt =
+      cut === 'changed-around-dynamic-child' || cut === 'omitted-around-child'
+        ? 'build-action'
+        : cut === 'around'
+          ? 'finish-around'
+          : 'wait';
     const storage = {
       ...backing,
       async swap<T>(key: string, prev: T | null, next: T) {
@@ -236,9 +252,7 @@ describe('harness ↔ connection steps', () => {
             (cut === 'match' || cut === 'match-lost') &&
             key.includes(':pending:') &&
             Reflect.has(next, 'matched');
-          const losesCompletion =
-            key.includes(':ledger:') &&
-            Reflect.get(next, 'stepId') === (cut === 'around' ? 'finish-around' : 'wait');
+          const losesCompletion = key.includes(':ledger:') && Reflect.get(next, 'stepId') === cutAt;
           if (losesMatch || losesCompletion) {
             failed = true;
             throw new Error('lost wait record');
@@ -247,56 +261,106 @@ describe('harness ↔ connection steps', () => {
         return backing.swap!(key, prev, next);
       },
     };
+    const durable = ![
+      'around',
+      'match',
+      'match-lost',
+      'late-filter',
+      'changed-filter-live',
+    ].includes(cut);
+    let events = 0;
     const source = createInMemoryConnection({
       instance: 'same-deployments',
+      operations: {
+        'app.emit': {
+          effects: true,
+          run: () => {
+            events++;
+            source.connection.emit('ready', 'confirmed');
+            return null;
+          },
+        },
+      },
       events: {
         ready: {
-          replay: cut === 'wait' ? 'durable' : 'live',
+          replay: durable ? 'durable' : 'live',
         },
       },
     });
+    if (durable && cut !== 'changed-filter-no-cursor') {
+      source.connection.emit('ready', 'before the wait');
+    }
     let now = 1_000;
-    let events = 0;
+    let wanted = 'confirmed';
     const matched = Promise.withResolvers<void>();
     const filter = Promise.withResolvers<boolean>();
-    const wait = step.wait({
-      id: 'wait',
-      connection: 'app',
-      event: 'ready',
-      timeoutMs: cut === 'late-filter' ? 10 : 1_000,
-      filter: () => {
-        matched.resolve();
-        return cut === 'late-filter' ? filter.promise : true;
-      },
-      around: [
-        runCode({
-          id: 'emit',
-          async execute() {
-            events++;
-            source.connection.emit('ready', 'confirmed');
-          },
-        }),
-        runCode({
-          id: 'finish-around',
-          async execute() {
-            await matched.promise;
-          },
-        }),
-      ],
-    });
-    const build = () =>
+    const action = (id: string) =>
+      step.call({
+        id,
+        connection: 'app',
+        op: 'app.emit',
+        args: {},
+        ...(cut === 'changed-around-key'
+          ? {
+              execution: {
+                replayKey: () => wanted,
+              },
+            }
+          : {}),
+      });
+    const around = (id: string) =>
+      cut === 'changed-around-dynamic-child' || cut === 'omitted-around-child'
+        ? runCode({
+            id: 'build-action',
+            execute: (input, ctx) =>
+              id === 'omitted' ? Promise.resolve(null) : ctx.harness.run(action(id), input, ctx),
+          })
+        : action(id);
+    const wait = (emitId: string) =>
+      step.wait({
+        id: 'wait',
+        connection: 'app',
+        event: 'ready',
+        timeoutMs: cut === 'late-filter' ? 10 : 1_000,
+        filter: (event) => {
+          matched.resolve();
+          return cut === 'late-filter' ? filter.promise : event.payload === wanted;
+        },
+        around:
+          cut === 'removed-around' && emitId === 'removed'
+            ? []
+            : [
+                around(emitId),
+                runCode({
+                  id: 'finish-around',
+                  async execute() {
+                    await matched.promise;
+                  },
+                }),
+              ],
+      });
+    const build = (emitId = 'emit') =>
       new AgentHarness({
         name: 'wait-recovery',
         params: {},
         now: () => now,
         connections: {
-          app: source,
+          // Both hosts subscribe to the same event log.
+          app: {
+            connect: async () => [
+              source.connection,
+            ],
+          },
         },
         agentGraph: runCode<ContextData, string, string>({
           id: 'flow',
           execute: async (_input, ctx) => {
             const result = frameworkCast<StepWaitOutput>(
-              await ctx.harness.run(wait, undefined, ctx),
+              await ctx.harness.run(
+                wait(emitId),
+                cut === 'changed-around-input' ? wanted : undefined,
+                ctx,
+              ),
             );
             return String(result.event.payload);
           },
@@ -320,7 +384,15 @@ describe('harness ↔ connection steps', () => {
       messageId: 'wait',
     };
     const first = build();
-    const second = build();
+    const second = build(
+      cut === 'omitted-around-child'
+        ? 'omitted'
+        : cut === 'removed-around'
+          ? 'removed'
+          : cut.endsWith('-child')
+            ? 'emit-renamed'
+            : 'emit',
+    );
     try {
       await first.execute('start', delivery);
       if (cut === 'late-filter') {
@@ -342,18 +414,42 @@ describe('harness ↔ connection steps', () => {
         return;
       }
       expect(initial.cut?.reason).toBe('ledger_write_failed');
-      now += 2_000;
+      if (
+        cut.startsWith('changed-') ||
+        cut === 'removed-around' ||
+        cut === 'omitted-around-child'
+      ) {
+        wanted = 'replacement';
+        source.connection.emit('ready', wanted);
+      }
+      if (!cut.startsWith('changed-') || cut === 'changed-filter-expired') {
+        now += 2_000;
+      }
       expect(await second.wake()).toEqual([
         't',
       ]);
-      if (cut === 'match-lost') {
+      if (
+        [
+          'match-lost',
+          'changed-filter-live',
+          'changed-filter-no-cursor',
+          'changed-around-input',
+          'changed-around-child',
+          'changed-around-key',
+          'changed-around-dynamic-child',
+          'removed-around',
+          'omitted-around-child',
+        ].includes(cut)
+      ) {
         await expect(second.getAgentResponse(delivery)).rejects.toMatchObject({
           noeticError: {
             kind: 'connection_outcome_unknown',
           },
         });
+      } else if (cut === 'changed-filter-expired') {
+        await expect(second.getAgentResponse(delivery)).rejects.toThrow('saw no matching');
       } else {
-        expect((await second.getAgentResponse(delivery)).text).toBe('confirmed');
+        expect((await second.getAgentResponse(delivery)).text).toBe(wanted);
       }
       expect(events).toBe(1);
     } finally {

@@ -410,6 +410,8 @@ export interface AcpToolCall {
    * same call, which is how the two records are joined.
    */
   readonly agentCallId?: string;
+  /** Set by a transport that can prove which prompt originated the call. */
+  readonly promptId?: string;
   /** Aborted when the agent cancels the call. */
   readonly signal: AbortSignal;
 }
