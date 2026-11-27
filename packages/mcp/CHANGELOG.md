@@ -1,3 +1,7 @@
+## @noetic-tools/mcp-v1.2.0-next.1 (2026-11-27)
+
+* feat: MCP Events extension, trigger outcomes and replay, checked triggers (#187) ([9c6a91c](https://github.com/mattapperson/noetic/commit/9c6a91c)), closes [#187](https://github.com/mattapperson/noetic/issues/187)
+
 ## @noetic-tools/mcp-v1.1.1-next.1 (2026-11-27)
 
 * feat!: one subprocess adapter concept, and named fs, shell and subprocess adapters (#182) ([096c64d](https://github.com/mattapperson/noetic/commit/096c64d)), closes [#182](https://github.com/mattapperson/noetic/issues/182)
