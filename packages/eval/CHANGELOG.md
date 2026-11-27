@@ -1,3 +1,7 @@
+## @noetic-tools/eval-v1.4.0-next.1 (2026-11-27)
+
+* feat: say in a JSON workflow document everything a TypeScript workflow can (#185) ([d448249](https://github.com/mattapperson/noetic/commit/d448249)), closes [#185](https://github.com/mattapperson/noetic/issues/185) [#184](https://github.com/mattapperson/noetic/issues/184) [#182](https://github.com/mattapperson/noetic/issues/182) [#184](https://github.com/mattapperson/noetic/issues/184) [#184](https://github.com/mattapperson/noetic/issues/184)
+
 ## @noetic-tools/eval-v1.3.0 (2026-11-04)
 
 * feat: one way to attach MCP servers, served to every agent (#156) ([2195f69](https://github.com/mattapperson/noetic/commit/2195f69)), closes [#156](https://github.com/mattapperson/noetic/issues/156)
