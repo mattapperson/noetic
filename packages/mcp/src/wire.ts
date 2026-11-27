@@ -15,16 +15,18 @@
  * inputResponses }` answers input requests, `tasks/cancel { taskId }` cancels,
  * and `notifications/tasks/status` pushes a status change.
  *
- * Events (SEP-3415): `events/list` lists event types. Delivery is by push
- * (`events/stream` → `{ subscriptionId, cursor }`, then
- * `notifications/events/{event,gap,terminated}` carrying the
- * `subscriptionId`), webhook (`events/subscribe` with `delivery: { url,
- * secret }`, then Standard Webhooks POSTs whose body is
- * `{ type: 'event' | 'gap' | 'terminated', subscriptionId, … }`) or poll
- * (`events/poll { name, arguments?, cursor }` → `{ events, cursor, gap?,
- * terminated? }`). `events/unsubscribe { subscriptionId }` ends a push or
- * webhook subscription. A wire event is `{ eventId, name, timestamp, data,
- * cursor?, actionId? }`.
+ * Events (SEP-3415): `events/list` lists event types, each naming the delivery
+ * modes it offers. Poll: `events/poll { name, arguments?, cursor }` →
+ * `{ events, cursor, truncated?, hasMore?, nextPollMs? }`; a subscription that
+ * ended answers with a JSON-RPC error. Push: `events/stream` stays open, and
+ * `notifications/events/{active,event,heartbeat,error,terminated}` name their
+ * stream by the request's id under `_meta[SUBSCRIPTION_META]`. Webhook:
+ * `events/subscribe` with `delivery: { mode, url, secret }` →
+ * `{ id, refreshBefore, cursor, truncated? }`, then Standard Webhooks POSTs
+ * whose body is an event, or a control envelope with a `type` (`gap`,
+ * `terminated`, `verification`); `events/unsubscribe { name, arguments?,
+ * delivery: { url } }` ends it. A wire event is `{ eventId, name, timestamp,
+ * data, cursor? }`; `actionId` is Noetic's addition.
  */
 
 import { z } from 'zod';
@@ -81,13 +83,21 @@ export const McpNotification = {
   ResourceUpdated: 'notifications/resources/updated',
   EventsListChanged: 'notifications/events/list_changed',
   TaskStatus: 'notifications/tasks/status',
+  EventsActive: 'notifications/events/active',
   EventsEvent: 'notifications/events/event',
-  EventsGap: 'notifications/events/gap',
+  EventsHeartbeat: 'notifications/events/heartbeat',
+  EventsError: 'notifications/events/error',
   EventsTerminated: 'notifications/events/terminated',
 } as const;
 
 /** @public How a server delivers events. */
 export type EventDelivery = 'push' | 'webhook' | 'poll';
+
+/** @public The `_meta` key a push notification names its `events/stream` request under. */
+export const SUBSCRIPTION_META = 'io.modelcontextprotocol/subscriptionId';
+
+/** @public The header a webhook delivery names its subscription in. */
+export const SUBSCRIPTION_HEADER = 'x-mcp-subscription-id';
 
 //#endregion
 
@@ -234,12 +244,22 @@ export type WireTaskStatus = z.infer<typeof TaskStatusSchema>;
 /** @public An empty result. */
 export const EmptyResultSchema = z.looseObject({});
 
-/** @public One event type, as `events/list` describes it. */
+const DeliverySchema = z.enum([
+  'push',
+  'webhook',
+  'poll',
+]);
+
+/**
+ * @public One event type, as `events/list` describes it. `replay`, `sense` and
+ * `thread` are Noetic's additions.
+ */
 export const EventInfoSchema = z.looseObject({
   name: z.string().min(1),
   description: z.string().optional(),
+  delivery: z.array(DeliverySchema).optional(),
+  inputSchema: z.record(z.string(), z.unknown()).optional(),
   payloadSchema: z.record(z.string(), z.unknown()).optional(),
-  argumentsSchema: z.record(z.string(), z.unknown()).optional(),
   replay: z
     .enum([
       'durable',
@@ -260,19 +280,6 @@ export const EventListSchema = z.looseObject({
   nextCursor: z.string().optional(),
 });
 
-/** @public The Events extension's capability value. */
-export const EventsCapabilitySchema = z.looseObject({
-  delivery: z
-    .array(
-      z.enum([
-        'push',
-        'webhook',
-        'poll',
-      ]),
-    )
-    .optional(),
-});
-
 /** @public One event on the wire. */
 export const WireEventSchema = z.looseObject({
   eventId: z.string().min(1),
@@ -286,58 +293,79 @@ export const WireEventSchema = z.looseObject({
 /** @public One event on the wire. */
 export type WireEvent = z.infer<typeof WireEventSchema>;
 
-/** @public A gap control message. */
-export const WireGapSchema = z.looseObject({
-  reason: z.string(),
-  from: z.string().nullish(),
-  to: z.string().nullish(),
-});
-
-/** @public A terminated control message. */
-export const WireTerminatedSchema = z.looseObject({
-  reason: z.string(),
-});
-
-/** @public The confirmation of a push or webhook subscription. */
-export const SubscriptionResultSchema = z.looseObject({
-  subscriptionId: z.string().min(1),
-  cursor: z.string().nullish(),
+/** @public Why a subscription ended, or what went wrong on it. */
+export const WireErrorSchema = z.looseObject({
+  code: z.number().optional(),
+  message: z.string(),
+  data: z.unknown().optional(),
 });
 
 /** @public An `events/poll` result. */
 export const PollResultSchema = z.looseObject({
   events: z.array(WireEventSchema),
   cursor: z.string().nullish(),
-  gap: WireGapSchema.optional(),
-  terminated: WireTerminatedSchema.optional(),
-  pollInterval: z.number().positive().optional(),
+  /** The server started later than the cursor asked: events may be missing. */
+  truncated: z.boolean().optional(),
+  /** More is ready: poll again at once. */
+  hasMore: z.boolean().optional(),
+  nextPollMs: z.number().nonnegative().optional(),
 });
 
-/** @public A push notification's params: an event, gap or terminated message for one subscription. */
-export const PushEventParamsSchema = WireEventSchema.extend({
-  subscriptionId: z.string().min(1),
+/** Names the `events/stream` request a push notification belongs to. */
+const StreamMetaSchema = z.looseObject({
+  [SUBSCRIPTION_META]: z.union([
+    z.string(),
+    z.number(),
+  ]),
 });
 
-/** @public A push gap's params. */
-export const PushGapParamsSchema = WireGapSchema.extend({
-  subscriptionId: z.string().min(1),
+/** @public `notifications/events/active`: the stream is confirmed, or has skipped ahead. */
+export const StreamActiveParamsSchema = z.looseObject({
+  cursor: z.string().nullish(),
+  truncated: z.boolean().optional(),
+  heartbeatMs: z.number().positive().optional(),
+  _meta: StreamMetaSchema,
 });
 
-/** @public A push terminated's params. */
-export const PushTerminatedParamsSchema = WireTerminatedSchema.extend({
-  subscriptionId: z.string().min(1),
+/** @public `notifications/events/event`: one event on a stream. */
+export const StreamEventParamsSchema = WireEventSchema.extend({
+  _meta: StreamMetaSchema,
 });
 
-/** @public A webhook delivery's body. */
-export const WebhookBodySchema = z.discriminatedUnion('type', [
-  PushEventParamsSchema.extend({
-    type: z.literal('event'),
-  }),
-  PushGapParamsSchema.extend({
+/** @public `notifications/events/heartbeat`: the stream is alive, and how far it has read. */
+export const StreamHeartbeatParamsSchema = z.looseObject({
+  cursor: z.string().nullish(),
+  _meta: StreamMetaSchema,
+});
+
+/** @public `notifications/events/error` and `notifications/events/terminated`. */
+export const StreamErrorParamsSchema = z.looseObject({
+  error: WireErrorSchema,
+  _meta: StreamMetaSchema,
+});
+
+/** @public An `events/subscribe` result. */
+export const SubscribeResultSchema = z.looseObject({
+  id: z.string().min(1),
+  /** When to subscribe again by; `null` for a subscription that does not expire. */
+  refreshBefore: z.string().nullish(),
+  cursor: z.string().nullish(),
+  truncated: z.boolean().optional(),
+});
+
+/** @public A webhook body that is not an event: it has a `type`. */
+export const WebhookControlSchema = z.discriminatedUnion('type', [
+  z.looseObject({
     type: z.literal('gap'),
+    cursor: z.string().nullish(),
   }),
-  PushTerminatedParamsSchema.extend({
+  z.looseObject({
     type: z.literal('terminated'),
+    error: WireErrorSchema,
+  }),
+  z.looseObject({
+    type: z.literal('verification'),
+    challenge: z.string().min(1),
   }),
 ]);
 

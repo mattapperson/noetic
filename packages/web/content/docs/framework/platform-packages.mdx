@@ -113,7 +113,7 @@ const slack = mcp({ type: 'http', url: 'https://slack-mcp.example.com/mcp', webh
 | `maxBodyBytes` | 1 MiB | Larger bodies are refused with 413. |
 | `toleranceMs` | five minutes | The accepted timestamp window. |
 
-The contract `mcp()` consumes is transport only: `register(handler)` opens an endpoint and returns `{ url, close() }`; each POST reaches the handler as `{ headers, body }` (lowercase header names, raw body text) and is answered with the `{ status }` the handler returns. `mcp()` verifies deliveries itself with the secret it sent when subscribing.
+The contract `mcp()` consumes is transport only: `register(handler)` opens an endpoint and returns `{ url, close() }`; each POST reaches the handler as `{ headers, body }` (lowercase header names, raw body text) and is answered with the `{ status, body? }` the handler returns (the body answers a server's verification challenge). `mcp()` verifies deliveries itself with the secret it sent when subscribing.
 
 The receiver also accepts `register({ onDelivery, secret?, signal? })` for your own webhooks, in which case it verifies each delivery — [Standard Webhooks](https://www.standardwebhooks.com) signature, five-minute timestamp window, duplicate ids — before calling `onDelivery`. Either way it refuses methods other than POST (405), oversized bodies (413), and unknown or closed endpoints (404). `signStandardWebhook()` and `verifyStandardWebhook()` are exported for senders and tests.
 

@@ -2292,11 +2292,33 @@ A call that needs approval with no approver, or whose approver answers `hold`, i
 harness.addTrigger(trigger): Promise<void>;        // data triggers are kept in storage
 harness.removeTrigger(id): Promise<boolean>;
 harness.listTriggers(): ConnectionTrigger[];
-// after 5 failed tries a trigger gives up on an event: reported, marked seen, not kept
+// after 5 failed tries the trigger keeps the entry for replay
 await source.emit(event);   // resolves once every listening trigger has stored it
 ```
 
 A message passed to `execute()` with a `messageId` whose turn already finished is answered from the record: `HarnessResponse.replayed`, event `{name}:turn_replayed`.
+
+### Trigger outcomes and replay
+
+```typescript
+harness.getTriggerOutcomes(triggerId): Promise<TriggerOutcome[]>;   // pending | delivered | failed
+harness.replayTriggerEvent(triggerId, eventId): Promise<boolean>;    // same event and message ids; false when there is no failed turn to run again
+```
+
+A trigger may state the `payload` it expects (zod or JSON Schema). At
+`harness.start()` each `triggerTurnOn` entry is checked against the event its
+connection declares (an MCP server's `payloadSchema` and `inputSchema`):
+unaccepted `arguments`, an expression reading an undeclared `event.payload`
+field, or a `payload` the event does not give throws `CONNECTION_INVALID`. An
+arriving event that does not fit the trigger's `payload` starts no turn and is
+a `failed` outcome that cannot be replayed. An event the filter turns away
+leaves no outcome.
+
+A connector that reports events is an MCP server offering the Events extension
+(SEP-3415): attach it with `mcp(...)` and name its events in `triggerTurnOn`. The
+server owns identity and grants, and ends the subscription on revocation. The
+bridge picks webhook, push or poll per event type, and commits a cursor only
+after the events before it are stored.
 
 ### `harness.approve()`: the one approval seam
 
@@ -3114,7 +3136,7 @@ const harness = new AgentHarness({
     browsers: { provider: mcp({ command: 'npx', args: ['playwright-noetic-mcp'], profiles: [browser] }), pool: { max: 8, warm: 1, waitMs: 3e4 } },
     morning: cron('0 8 * * *', { timezone: 'America/New_York' }),
   },
-  triggers: [{ id: 'daily', connection: 'morning', event: 'tick', input: () => 'Write the daily summary' }],
+  triggerTurnOn: [{ id: 'daily', connection: 'morning', event: 'tick', input: () => 'Write the daily summary' }],
   verification: verifier(),
   environment: {
     secrets: { resolve: async (name) => process.env[name.toUpperCase().replace('.', '_')] ?? '' },
@@ -3195,7 +3217,7 @@ const deploys = defineSource({
 });
 await deploys.emit({ type: 'deploy.failed', id: run.id, payload });   // push from host code
 
-triggers: [{ id: 'mentions', connection: 'slack', event: 'chat.message.created',
+triggerTurnOn: [{ id: 'mentions', connection: 'slack', event: 'chat.message.created',
   arguments: { mentionsAgent: true }, filter: (e) => …, input: (e) => …, thread?: (e) => … }]
 ```
 

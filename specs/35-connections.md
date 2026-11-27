@@ -356,12 +356,14 @@ inParallel({ id: 'suite', mode: 'all', paths: () => [checkoutFlow(app), signupFl
 
 ## Triggers
 
-A **trigger** starts or joins a turn when a connection reports an event:
+A **trigger** starts or joins a turn when a connection reports an event. The
+harness option is `triggerTurnOn`: a connection's events start nothing until an
+entry there names one.
 
 ```ts
 new AgentHarness({
   connections: { slack: mcp({ type: 'http', url: SLACK_MCP }), morning: cron('0 8 * * *', { timezone: 'America/New_York' }) },
-  triggers: [
+  triggerTurnOn: [
     { id: 'mentions', connection: 'slack', event: 'chat.message.created',
       arguments: { mentionsAgent: true },                 // filter on the server
       filter: (e) => !e.payload.author.isBot,             // filter here
@@ -374,8 +376,33 @@ new AgentHarness({
 Each matching event starts a turn on its thread — `thread(event)`, defaulting
 to the profile's natural thread for that event (a chat thread) or the trigger's
 id — with `input(event)` as the message. The event itself is attached to the
-turn as a `noetic:connection_event` item, so steps can read it. A trigger
-delivers each event once, even across crashes (§ Durability).
+turn as a `noetic:connection_event` item, so steps can read it. A stored
+receipt suppresses duplicate deliveries (§ Durability).
+
+**Checked against the event.** A connection's manifest says what each event
+carries (`payloadSchema`) and what a subscription may ask for
+(`argumentsSchema`); for an MCP server these are `events/list`'s `payloadSchema`
+and `inputSchema`. When the harness starts, and when a trigger is added, each
+trigger is checked against them, and a disagreement is `CONNECTION_INVALID`. A
+trigger whose connection is not connected yet is checked when it first
+listens; one that does not fit is reported, reads no event, and is checked
+again each time it tries to listen:
+
+- its `arguments` must be ones the event accepts;
+- a `filter`, `input` or `thread` expression may read only `event.payload`
+  fields the event declares. An object schema that lists `properties` is
+  taken to list them all; one that says more may come (`additionalProperties`
+  true or a schema, `patternProperties`, a combinator, a `$ref`) is not
+  checked;
+- its `payload`, the shape the turn expects as a zod schema or a JSON Schema,
+  must be one the event gives: a field it requires is declared and required
+  there, with the same type.
+
+What the event declares is read, not enforced: a server schema the check
+cannot make sense of is left unchecked, and an arriving payload is not held to
+it. Each arriving event is held to the trigger's own `payload` before it
+becomes a turn. One that does not fit starts no turn, is not read again, and
+shows as a `failed` outcome with the reason.
 
 **Triggers as data.** `filter`, `input` and `thread` each take a function or
 an expression (`33-expressions`): JSONata over `{ event }`. A filter passes on
@@ -393,24 +420,48 @@ A trigger written with expressions only is plain data, so it can be added while
 the harness runs:
 
 - `harness.addTrigger(trigger)` validates it, starts it, and keeps it in
-  storage, so it is there again after a restart. One with a function in it is
-  accepted too and lasts for the process.
+  storage, so it is there again after a restart. One with a function or a zod
+  `payload` in it is accepted too and lasts for the process.
 - `harness.removeTrigger(id)` stops it and forgets it.
 - `harness.listTriggers()` gives every trigger: the harness's own and the added.
 
-**Retries.** A turn that fails is tried again, five times in all, with backoff.
-After the last try the trigger gives up on the event: the harness emits
-`{name}:trigger_gave_up` with the connection, the trigger, the event, how many
-tries it had and the last error, the event is marked seen so it is not delivered
-again, and nothing more is kept. Reading an event into a turn can fail before there is a turn to try: the
-trigger's own `filter`, `input` or `thread` throws, or a blob in the payload
-could not be stored. That may be the event or it may be the moment, so the
-event is read three times in all. The first two times its `emit` rejects, the
-cursor does not move, and the stream is read again from where it was. The third
-time the trigger gives up on it as above, with the number of tries. After that,
-trying it again is the sender's business: a
-host that wants another go emits the event again under a new id. An event cut
-off by the process ending, before its tries ran out, stays in the inbox and is delivered again at the next start.
+**Retries and inspection.** A turn that fails gets up to five attempts with backoff.
+After the last attempt the trigger keeps the admitted event and emits
+`{name}:trigger_gave_up`. Pending entries resume at startup and on `wake()`. A
+receipt suppresses later deliveries of a completed event; an event the filter
+turned away leaves no record. `getTriggerOutcomes(triggerId)` lists pending,
+delivered and failed outcomes without event payloads. Delivered means the turn
+completed or parked. `replayTriggerEvent(triggerId, eventId)` delivers again an
+event the trigger still holds and is not delivering, under its original event,
+message and thread ids. It resolves `false` when there is none: the event was
+delivered, or never became a turn.
+
+For a listening trigger, preparing an entry can fail before it exists. The first
+two preparation failures reject acceptance and leave the cursor in place. The
+third records a failure marker and lets the cursor move on. A payload that does
+not fit the trigger's `payload` records the marker the first time. An event
+with only a failure marker shows as `failed` and cannot be replayed.
+
+### Events from an installed connector
+
+A connector that reports events is an MCP server that offers the Events
+extension (§ Events, below): attach it with `mcp(...)` and name its events in
+triggers.
+
+- **Identity and grants are the server's.** The server knows its principal from
+  the session's credentials. It checks the grant when a subscription is made and
+  again as it delivers, and ends the subscription when access is revoked: the
+  trigger's stream ends, and nothing more arrives. An event already stored still
+  starts its turn, and what that turn may do is checked when it calls the server.
+- **Event ids** come from the server (`eventId`), stable across its retries and
+  across delivery modes. The trigger deduplicates on them.
+- **Push, webhook or poll** is the bridge's choice from what the event type
+  offers. A webhook is acknowledged after the trigger has stored the event. A
+  poll page's cursor, and a heartbeat's, is committed after every event before it
+  is stored, so a crash between the two reads the page again and the stored
+  receipts drop the repeats.
+- **Durability** needs `environment.storage`. Keep one harness in charge of each
+  storage scope.
 
 **Sources** are event streams you write in code — a queue consumer, a file
 watcher, a webhook from your own app — registered as connections:
@@ -814,11 +865,45 @@ screen.
 
 ### Events
 
-`mcp()` receives events by push (`events/stream`), webhook (`events/subscribe`,
-when given a webhook receiver) or poll (`events/poll`), preferring them in that
-order; callers never see the difference. Webhook deliveries are verified
-(Standard Webhooks signature, five-minute timestamp window, duplicate ids
-dropped) and their `terminated` and `gap` control messages handled.
+`mcp()` receives events over the Events extension (SEP-3415). Each event type
+in `events/list` names the delivery modes it offers; the bridge uses the first
+of webhook (`events/subscribe`, when given a webhook receiver), push
+(`events/stream`) and poll (`events/poll`) among them, and callers never see
+the difference.
+
+- **Poll.** The bridge polls from the last cursor, at once while the server says
+  `hasMore`, else after `nextPollMs` and never sooner than `pollIntervalMs`. A
+  page has one cursor, for all its events.
+- **Push.** `events/stream` stays open. `notifications/events/active` confirms
+  it, and every notification names its stream by the request's id. A heartbeat
+  carries how far the server has read. A stream silent for three heartbeat
+  intervals is taken as dead and ends, and the listener opens it again from its
+  cursor.
+- **Webhook.** The bridge makes a secret, subscribes with `delivery: { mode:
+  'webhook', url, secret }`, answers the server's verification challenge, and
+  subscribes again halfway to each `refreshBefore` (never sooner than a
+  second), naming the cursor it has read to, so a server that lost the
+  subscription picks up from there, and recording the cursor each answer
+  reports. Deliveries are verified (Standard Webhooks
+  signature, five-minute timestamp window; duplicate delivery ids are dropped
+  for a listener that does not store its events). A delivery
+  that arrives before the server has answered `events/subscribe` is answered
+  503 and taken when it comes again. `events/unsubscribe` names the
+  subscription by event, arguments and url.
+
+A listener that stores its events (`ListenRequest.stores`, as a trigger does)
+gives the stream `checkpoint`, which records a cursor that came on its own:
+the place a subscription starts from when the listener had none, a heartbeat's,
+a poll page's. A cursor is recorded only behind the events before it. When an
+event is not stored the stream ends without recording any later cursor (a
+webhook delivery is answered 503 first), and the listener listens again from
+its cursor, as a trigger does when any source's event is not stored.
+
+A server that started later than the cursor asked (`truncated`, or a webhook
+`gap`) shows as a `gap` on the stream. A subscription the server ended — a
+JSON-RPC error on poll, `notifications/events/terminated` on push, a
+`terminated` webhook body — shows as `terminated` with the server's reason,
+which is how a revoked grant arrives.
 
 An event reaches the harness as:
 
@@ -837,11 +922,11 @@ Two kinds of listening use it:
   life of the step, from the moment the server confirms the subscription.
   They buffer up to 1e4 events; overflow drops the oldest and records a gap,
   which verification reports as a blind spot.
-- **Triggers** listen for the life of the harness. Matching events are written
-  to a durable inbox together with the advanced cursor, delivered as turns with
-  message id `<connection>:<trigger>:<event id>`, and recorded as done when
-  their turn completes. Events are deduplicated per trigger, as SEP-3415
-  scopes deduplication.
+- **Triggers** listen for the life of the harness. The runner writes matching
+  events to its inbox before advancing the cursor, and delivers them as turns
+  with message id `<connection>:<trigger>:<event id>`, which a replay keeps. It
+  keeps a receipt when the turn completes or parks, and deduplicates per trigger
+  and event id, as SEP-3415 scopes deduplication.
 
 ### Durability
 
@@ -917,3 +1002,6 @@ results.
 - Starting work and waiting for it in separate steps.
 - JSON `triggers`, so a document can carry its own standing triggers.
 - Proposing the profile format and catalog upstream as an MCP extension.
+- The `Mcp-Name` and `Mcp-Param-*` HTTP headers the Events extension asks of a
+  Streamable HTTP client, once the MCP SDK speaks the protocol revision that
+  carries them.

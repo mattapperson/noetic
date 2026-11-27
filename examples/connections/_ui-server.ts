@@ -99,8 +99,8 @@ let signedIn = false;
 let actions = 0;
 let epoch = 0;
 const seenKeys = new Map<string, ToolResult>();
-const subscriptions = new Map<string, string>();
-let nextSubscription = 1;
+/** Open `events/stream` requests: request id → event name. */
+const subscriptions = new Map<string | number, string>();
 
 //#endregion
 
@@ -249,7 +249,9 @@ async function changed(server: Server, actionId: string, summary: string): Promi
     await server.notification({
       method: 'notifications/events/event',
       params: {
-        subscriptionId: id,
+        _meta: {
+          'io.modelcontextprotocol/subscriptionId': id,
+        },
         eventId: `ev-${actionId}`,
         name: 'ui.changed',
         timestamp: new Date().toISOString(),
@@ -653,22 +655,37 @@ function build(): Server {
       {
         name: 'ui.changed',
         replay: 'live',
+        delivery: [
+          'push',
+        ],
       },
       {
         name: 'identity.changed',
+        delivery: [
+          'push',
+        ],
       },
     ],
   }));
-  server.setRequestHandler(method('events/stream'), async (request) => {
-    const id = `sub-${nextSubscription++}`;
+  server.setRequestHandler(method('events/stream'), async (request, extra) => {
+    const id = extra.requestId;
     subscriptions.set(id, String(request.params?.name));
-    return {
-      subscriptionId: id,
-      cursor: `c${actions}`,
-    };
-  });
-  server.setRequestHandler(method('events/unsubscribe'), async (request) => {
-    subscriptions.delete(String(request.params?.subscriptionId));
+    await server.notification({
+      method: 'notifications/events/active',
+      params: {
+        _meta: {
+          'io.modelcontextprotocol/subscriptionId': id,
+        },
+        cursor: `c${actions}`,
+      },
+    });
+    // The stream lasts until the client cancels the request.
+    await new Promise<void>((resolve) => {
+      extra.signal.addEventListener('abort', () => resolve(), {
+        once: true,
+      });
+    });
+    subscriptions.delete(id);
     return {};
   });
   return server;

@@ -113,7 +113,10 @@ export interface McpOptions {
   readonly timeoutMs?: number;
   /** Per-request timeout. Default 6e4 ms (the SDK default). */
   readonly requestTimeoutMs?: number;
-  /** Interval between `events/poll` and `tasks/get` requests when the server suggests none. Default 1e3 ms. */
+  /**
+   * Interval between `tasks/get` requests when the server suggests none, and the
+   * shortest wait between `events/poll` requests. Default 1e3 ms.
+   */
   readonly pollIntervalMs?: number;
   /** Sent in `initialize`. */
   readonly clientInfo?: {

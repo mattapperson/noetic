@@ -345,8 +345,11 @@ export interface AgentHarnessOpts<
    * (spec 35). Providers connect in `start()` and live as long as the harness.
    */
   connections?: ConnectionEntries;
-  /** Connection events that start or join a turn (spec 35 § Triggers). */
-  triggers?: ReadonlyArray<ConnectionTrigger>;
+  /**
+   * The connection events that start a turn, and the message each starts it with
+   * (spec 35 § Triggers). Without an entry here a connection's events start nothing.
+   */
+  triggerTurnOn?: ReadonlyArray<ConnectionTrigger>;
   /** The verifier `step.verify` uses (spec 37). */
   verification?: Verifier;
   /** @internal Test-only escape hatch to inject a mock callModel implementation. */

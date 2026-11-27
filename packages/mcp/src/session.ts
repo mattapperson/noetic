@@ -7,7 +7,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { Notification, Request, Result } from '@modelcontextprotocol/sdk/types.js';
-import type { z } from 'zod';
+import { z } from 'zod';
 import type { McpOptions, McpServerTarget } from './config';
 import { DEFAULT_MCP_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS } from './config';
 import type { ServedParts } from './declaration';
@@ -73,6 +73,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 //#endregion
 
 //#region Session
+
+/** The longest timer a runtime keeps: a stream has no deadline. */
+const NEVER_MS = 2 ** 31 - 1;
+
+const StreamResultSchema = z.looseObject({});
 
 /** @public A live MCP session. */
 export class McpSession {
@@ -203,6 +208,59 @@ export class McpSession {
         timeout: opts.timeoutMs ?? this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
       },
     );
+  }
+
+  /**
+   * @public
+   * Sends a request the server answers only when it ends the stream, as
+   * `events/stream` is. `id` is the request's JSON-RPC id, which the stream's
+   * notifications carry; `done` settles when the server closes or refuses it.
+   * Abort `signal` to end it from this side.
+   */
+  stream(
+    method: string,
+    params: Readonly<Record<string, unknown>>,
+    signal: AbortSignal,
+  ): {
+    readonly id: string | number;
+    readonly done: Promise<void>;
+  } {
+    // The SDK picks the id and sends before `request` returns, and tells nobody.
+    const { transport } = this;
+    const send = transport.send;
+    let id: string | number | undefined;
+    transport.send = (message, options) => {
+      if ('method' in message && 'id' in message && message.method === method) {
+        id = message.id;
+      }
+      return send.call(transport, message, options);
+    };
+    let done: Promise<unknown>;
+    try {
+      done = this.client.request(
+        {
+          method,
+          params: {
+            ...params,
+          },
+        },
+        StreamResultSchema,
+        {
+          signal,
+          timeout: NEVER_MS,
+        },
+      );
+    } finally {
+      transport.send = send;
+    }
+    if (id === undefined) {
+      done.catch(() => {});
+      throw new Error(`'${method}' was not sent`);
+    }
+    return {
+      id,
+      done: done.then(() => {}),
+    };
   }
 
   /** @public Subscribes to a notification method; returns the unsubscribe. */

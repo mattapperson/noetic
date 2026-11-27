@@ -15,9 +15,10 @@ export interface WebhookDelivery {
   readonly body: string;
 }
 
-/** @public What a delivery handler answers: the HTTP status to reply with. */
+/** @public What a delivery handler answers: the HTTP status, and a JSON body when it has one. */
 export interface WebhookReply {
   readonly status: number;
+  readonly body?: string;
 }
 
 /** @public One registered endpoint. */

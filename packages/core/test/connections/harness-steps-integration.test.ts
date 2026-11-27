@@ -745,7 +745,7 @@ describe('closing the harness', () => {
       connections: {
         phone: provider,
       },
-      triggers: [],
+      triggerTurnOn: [],
     });
     await harness.start();
     const registry = harnessInternal<{

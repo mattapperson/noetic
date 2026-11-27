@@ -516,6 +516,20 @@ describe('createWebhookReceiver raw endpoints (the mcp({ webhooks }) contract)',
     expect(seen[0]?.headers['webhook-id']).toBe('msg_1');
   });
 
+  it("answers with the raw handler's body, as a verification challenge needs", async () => {
+    const receiver = track(createWebhookReceiver());
+    const endpoint = await receiver.register(async ({ body }) => ({
+      status: 200,
+      body,
+    }));
+    const reply = await fetch(endpoint.url, {
+      method: 'POST',
+      body: '{"challenge":"nonce"}',
+    });
+    expect(reply.status).toBe(200);
+    expect(await reply.text()).toBe('{"challenge":"nonce"}');
+  });
+
   it('still refuses a wrong method, an oversized body and a closed endpoint', async () => {
     const receiver = track(
       createWebhookReceiver({

@@ -1108,6 +1108,8 @@ export { connectionTools } from './connections/model-tools';
 /** @public */
 export { cron, defineSource } from './connections/sources';
 /** @public */
+export type { TriggerOutcome } from './connections/trigger-outcomes';
+/** @public */
 export type { InMemoryArtifactStoreOptions } from './runtime/in-memory-artifact-store';
 /** @public */
 export { createInMemoryArtifactStore } from './runtime/in-memory-artifact-store';

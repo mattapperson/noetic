@@ -314,7 +314,7 @@ await section('triggers: defineSource', async () => {
     connections: {
       deploys,
     },
-    triggers: [
+    triggerTurnOn: [
       {
         id: 'deploy-alerts',
         connection: 'deploys',
@@ -410,7 +410,7 @@ await section('triggers: defineSource', async () => {
         connections: {
           deploys,
         },
-        triggers: [
+        triggerTurnOn: [
           {
             id: 't',
             connection: 'nowhere',
@@ -444,7 +444,7 @@ await section('triggers: a trigger turn reaching a model agent', async () => {
     connections: {
       deploys,
     },
-    triggers: [
+    triggerTurnOn: [
       {
         id: 'deploy-alerts',
         connection: 'deploys',
@@ -501,7 +501,7 @@ await section('triggers: cron delivers the ticks it missed while down', async ()
         timezone: 'America/New_York',
       }),
     },
-    triggers: [
+    triggerTurnOn: [
       {
         id: 'daily',
         connection: 'morning',

@@ -205,7 +205,7 @@ describe('AgentHarness connections', () => {
           new AgentHarness({
             name: 'a',
             params: {},
-            triggers: [
+            triggerTurnOn: [
               {
                 id: 't',
                 connection: 'slack',
@@ -328,7 +328,7 @@ describe('AgentHarness connections', () => {
       connections: {
         deploys,
       },
-      triggers: [
+      triggerTurnOn: [
         {
           id: 'failures',
           connection: 'deploys',

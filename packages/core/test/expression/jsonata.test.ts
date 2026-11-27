@@ -8,6 +8,7 @@ import {
   compileExpression,
   compute,
   passes,
+  pathsOf,
   readInput,
   syntaxError,
 } from '../../src/expression/jsonata';
@@ -187,3 +188,50 @@ describe('readInput', () => {
 });
 
 //#endregion
+
+describe('pathsOf', () => {
+  test('gives each path as the names it starts with', () => {
+    expect(pathsOf('event.payload.from & other')).toEqual([
+      [
+        'event',
+        'payload',
+        'from',
+      ],
+      [
+        'other',
+      ],
+    ]);
+  });
+
+  test('reads through a predicate, and gives the paths inside it', () => {
+    expect(pathsOf('event.payload.labels[name = "x"].colour')).toEqual([
+      [
+        'event',
+        'payload',
+        'labels',
+        'colour',
+      ],
+      [
+        'name',
+      ],
+    ]);
+  });
+
+  test('stops a path at its first step that is not a name', () => {
+    expect(pathsOf('event.payload.$keys().length')).toEqual([
+      [
+        'event',
+        'payload',
+      ],
+    ]);
+    expect(pathsOf('1 + 2')).toEqual([]);
+  });
+
+  test('stops a path at a name bound with @, since the next step reads from its parent', () => {
+    expect(pathsOf('event.payload.lines@$l.orders[id = $l.order].total')[0]).toEqual([
+      'event',
+      'payload',
+      'lines',
+    ]);
+  });
+});

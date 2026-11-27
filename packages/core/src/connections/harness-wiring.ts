@@ -68,7 +68,7 @@ export interface WiredHarness {
 export interface HarnessConnectionsOptions {
   readonly harness: WiredHarness;
   readonly connections?: ConnectionEntries;
-  readonly triggers?: ReadonlyArray<ConnectionTrigger>;
+  readonly triggerTurnOn?: ReadonlyArray<ConnectionTrigger>;
   /** A scheduled trigger moved on (`TriggerRunnerOptions.onSchedule`). */
   readonly onSchedule?: () => Promise<void>;
   readonly storage: StorageAdapter;
@@ -283,7 +283,7 @@ export function createHarnessConnections(options: HarnessConnectionsOptions): Ha
     hooks: gateHooks(options.harness),
     onFrameworkEvent: (event) => broadcast(options, event),
   });
-  const triggers = options.triggers ?? [];
+  const triggers = options.triggerTurnOn ?? [];
   validateTriggers(triggers, registry.names());
   // Always built: a trigger can be added while the harness runs, and ones added on
   // an earlier run are read back from storage at start.

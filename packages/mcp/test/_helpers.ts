@@ -12,6 +12,7 @@ import {
   CallToolRequestSchema,
   ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  McpError,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import type { ConnectOptions } from '@noetic-tools/types';
@@ -21,7 +22,7 @@ import type { McpOptions } from '../src/config';
 import { createMemoryArtifactStore } from '../src/memory-artifacts';
 import type { McpProvider } from '../src/provider';
 import { mcp } from '../src/provider';
-import { EVENTS_EXTENSION, TASKS_EXTENSION } from '../src/wire';
+import { EVENTS_EXTENSION, SUBSCRIPTION_META, TASKS_EXTENSION } from '../src/wire';
 
 //#region Types
 
@@ -53,6 +54,8 @@ export interface TestResource {
 
 export interface TestEventType {
   name: string;
+  inputSchema?: Record<string, unknown>;
+  payloadSchema?: Record<string, unknown>;
   replay?: 'durable' | 'live' | 'none';
   sense?: string;
   thread?: string;
@@ -72,7 +75,12 @@ export interface TestServerOptions {
   tools?: TestTool[];
   resources?: TestResource[];
   events?: TestEventType[];
+  /** The modes every event type offers. Default push and poll. */
   delivery?: Array<'push' | 'webhook' | 'poll'>;
+  /** The heartbeat interval a push stream grants. */
+  heartbeatMs?: number;
+  /** How long a webhook subscription lasts before it must be made again. */
+  refreshMs?: number;
   tasks?: boolean;
   /** Extra capability entries. */
   capabilities?: Record<string, unknown>;
@@ -100,14 +108,20 @@ export interface TaskRecord {
 }
 
 interface Subscription {
-  id: string;
+  /** A push stream's request id, or a webhook subscription's id. */
+  id: string | number;
   name: string;
   server: Server<Request, Notification, Result>;
   delivery: 'push' | 'webhook';
   url?: string;
   secret?: string;
   arguments?: unknown;
+  /** Ends a push stream's request. */
+  close?: () => void;
 }
+
+/** SEP-3415's `Forbidden`. */
+export const FORBIDDEN = -32024;
 
 //#endregion
 
@@ -117,8 +131,10 @@ export class TestServer {
   readonly options: TestServerOptions;
   readonly servers: Server<Request, Notification, Result>[] = [];
   readonly tasks = new Map<string, TaskRecord>();
-  readonly subscriptions = new Map<string, Subscription>();
-  readonly unsubscribed: string[] = [];
+  readonly subscriptions = new Map<string | number, Subscription>();
+  readonly unsubscribed: Array<string | number> = [];
+  /** Every `events/subscribe` request's params. */
+  readonly subscribes: Array<Record<string, unknown>> = [];
   readonly calls: Array<{
     name: string;
     args: Record<string, unknown>;
@@ -130,11 +146,18 @@ export class TestServer {
   }> = [];
   /** Events waiting for the next poll. */
   pollQueue: WireEventInput[] = [];
-  pollTerminated: string | undefined;
+  /** The next poll answers with this error: the subscription has ended. */
+  pollError: string | undefined;
+  /** The next poll for this event says the server skipped ahead. */
+  pollTruncated: string | undefined;
+  nextPollMs: number | undefined;
+  /** The most events one poll answers with; the rest wait behind `hasMore`. */
+  pollPage: number | undefined;
+  /** Runs when a webhook subscription is made, before the server answers. */
+  onSubscribe?: (id: string) => Promise<void>;
   tools: TestTool[];
   /** Webhook deliveries go here when a subscription uses a webhook. */
   webhookSink?: (sub: Subscription, body: Record<string, unknown>) => Promise<void>;
-  private nextSubscription = 1;
 
   constructor(options: TestServerOptions) {
     this.options = options;
@@ -167,27 +190,55 @@ export class TestServer {
       if (sub.name !== event.name) {
         continue;
       }
-      await this.deliver(sub, 'event', wire);
+      await this.deliver(sub, wire);
     }
   }
 
-  async gap(name: string, reason: string): Promise<void> {
-    for (const sub of this.subscriptions.values()) {
-      if (sub.name === name) {
-        await this.deliver(sub, 'gap', {
-          reason,
-        });
-      }
+  /** Tells every subscriber the server skipped ahead to `cursor`. */
+  async gap(name: string, cursor: string): Promise<void> {
+    for (const sub of this.named(name)) {
+      await (sub.delivery === 'webhook'
+        ? this.webhookSink?.(sub, {
+            type: 'gap',
+            cursor,
+          })
+        : this.push(sub, 'active', {
+            cursor,
+            truncated: true,
+          }));
+    }
+  }
+
+  async heartbeat(name: string, cursor: string | null): Promise<void> {
+    for (const sub of this.named(name)) {
+      await this.push(sub, 'heartbeat', {
+        cursor,
+      });
     }
   }
 
   async terminate(name: string, reason: string): Promise<void> {
-    for (const sub of this.subscriptions.values()) {
-      if (sub.name === name) {
-        await this.deliver(sub, 'terminated', {
-          reason,
-        });
-      }
+    const error = {
+      code: FORBIDDEN,
+      message: reason,
+    };
+    for (const sub of this.named(name)) {
+      this.subscriptions.delete(sub.id);
+      await (sub.delivery === 'webhook'
+        ? this.webhookSink?.(sub, {
+            type: 'terminated',
+            error,
+          })
+        : this.push(sub, 'terminated', {
+            error,
+          }));
+    }
+  }
+
+  /** Ends every push stream for `name` with its final result. */
+  closeStreams(name: string): void {
+    for (const sub of this.named(name)) {
+      sub.close?.();
     }
   }
 
@@ -200,24 +251,30 @@ export class TestServer {
     }
   }
 
-  private async deliver(
+  private named(name: string): Subscription[] {
+    return [
+      ...this.subscriptions.values(),
+    ].filter((sub) => sub.name === name);
+  }
+
+  private async deliver(sub: Subscription, event: Record<string, unknown>): Promise<void> {
+    await (sub.delivery === 'webhook'
+      ? this.webhookSink?.(sub, event)
+      : this.push(sub, 'event', event));
+  }
+
+  private async push(
     sub: Subscription,
-    type: 'event' | 'gap' | 'terminated',
-    body: Record<string, unknown>,
+    type: 'active' | 'event' | 'heartbeat' | 'terminated',
+    params: Record<string, unknown>,
   ): Promise<void> {
-    if (sub.delivery === 'webhook') {
-      await this.webhookSink?.(sub, {
-        type,
-        subscriptionId: sub.id,
-        ...body,
-      });
-      return;
-    }
     await sub.server.notification({
       method: `notifications/events/${type}`,
       params: {
-        subscriptionId: sub.id,
-        ...body,
+        ...params,
+        _meta: {
+          [SUBSCRIPTION_META]: sub.id,
+        },
       },
     });
   }
@@ -228,12 +285,7 @@ export class TestServer {
       extensions[PROFILES_CAPABILITY] = this.options.declaration;
     }
     if (this.options.events !== undefined) {
-      extensions[EVENTS_EXTENSION] =
-        this.options.delivery === undefined
-          ? {}
-          : {
-              delivery: this.options.delivery,
-            };
+      extensions[EVENTS_EXTENSION] = {};
     }
     if (this.options.tasks === true) {
       extensions[TASKS_EXTENSION] = {};
@@ -379,46 +431,79 @@ export class TestServer {
     if (events === undefined) {
       return;
     }
+    const delivery = this.options.delivery ?? [
+      'push',
+      'poll',
+    ];
     server.setRequestHandler(method('events/list'), async () => ({
-      events,
+      events: events.map((event) => ({
+        delivery,
+        ...event,
+      })),
     }));
-    server.setRequestHandler(method('events/stream'), async (request) => {
-      const id = `sub-${this.nextSubscription++}`;
-      this.subscriptions.set(id, {
-        id,
+    server.setRequestHandler(method('events/stream'), async (request, extra) => {
+      const ended = Promise.withResolvers<void>();
+      const sub: Subscription = {
+        id: extra.requestId,
         name: String(request.params?.name),
         server,
         delivery: 'push',
         arguments: request.params?.arguments,
-      });
-      return {
-        subscriptionId: id,
-        cursor: 'c0',
+        close: ended.resolve,
       };
+      this.subscriptions.set(sub.id, sub);
+      extra.signal.addEventListener('abort', () => {
+        this.subscriptions.delete(sub.id);
+        this.unsubscribed.push(sub.id);
+        ended.resolve();
+      });
+      await this.push(sub, 'active', {
+        cursor: 'c0',
+        ...(this.options.heartbeatMs === undefined
+          ? {}
+          : {
+              heartbeatMs: this.options.heartbeatMs,
+            }),
+      });
+      await ended.promise;
+      return {};
     });
     server.setRequestHandler(method('events/subscribe'), async (request) => {
-      const id = `sub-${this.nextSubscription++}`;
-      const delivery = z
+      this.subscribes.push(request.params ?? {});
+      const target = z
         .object({
+          mode: z.literal('webhook'),
           url: z.string(),
           secret: z.string(),
         })
         .parse(request.params?.delivery);
+      const name = String(request.params?.name);
+      const id = `sub-${name}-${target.url}`;
       this.subscriptions.set(id, {
         id,
-        name: String(request.params?.name),
+        name,
         server,
         delivery: 'webhook',
-        url: delivery.url,
-        secret: delivery.secret,
+        url: target.url,
+        secret: target.secret,
       });
+      await this.onSubscribe?.(id);
       return {
-        subscriptionId: id,
+        id,
+        refreshBefore:
+          this.options.refreshMs === undefined
+            ? null
+            : new Date(Date.now() + this.options.refreshMs).toISOString(),
         cursor: 'c0',
       };
     });
     server.setRequestHandler(method('events/unsubscribe'), async (request) => {
-      const id = String(request.params?.subscriptionId);
+      const target = z
+        .object({
+          url: z.string(),
+        })
+        .parse(request.params?.delivery);
+      const id = `sub-${String(request.params?.name)}-${target.url}`;
       this.subscriptions.delete(id);
       this.unsubscribed.push(id);
       return {};
@@ -428,22 +513,31 @@ export class TestServer {
         name: String(request.params?.name),
         cursor: request.params?.cursor,
       });
+      if (this.pollError !== undefined) {
+        throw new McpError(FORBIDDEN, this.pollError);
+      }
       const name = String(request.params?.name);
-      const ready = this.pollQueue.filter((e) => e.name === name);
-      this.pollQueue = this.pollQueue.filter((e) => e.name !== name);
+      const waiting = this.pollQueue.filter((e) => e.name === name);
+      const ready = waiting.slice(0, this.pollPage ?? waiting.length);
+      this.pollQueue = this.pollQueue.filter((e) => !ready.includes(e));
+      const truncated = this.pollTruncated === name;
+      if (truncated) {
+        this.pollTruncated = undefined;
+      }
       return {
-        events: ready.map((e) => ({
+        // A page has one cursor; its events carry none.
+        events: ready.map(({ cursor: _cursor, ...e }) => ({
           timestamp: new Date(0).toISOString(),
           ...e,
         })),
         cursor:
           ready.at(-1)?.cursor ?? (request.params?.cursor === null ? 'p0' : request.params?.cursor),
-        ...(this.pollTerminated === undefined
+        truncated,
+        hasMore: ready.length < waiting.length,
+        ...(this.nextPollMs === undefined
           ? {}
           : {
-              terminated: {
-                reason: this.pollTerminated,
-              },
+              nextPollMs: this.nextPollMs,
             }),
       };
     });

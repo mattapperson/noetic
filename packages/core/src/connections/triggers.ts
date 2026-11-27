@@ -1,14 +1,7 @@
 /**
- * Triggers (spec 35 § Triggers, § Events). A trigger starts or joins a turn
- * when a connection reports an event. Triggers listen for the life of the
- * harness. Each matching event is written to a durable inbox together with the
- * advanced cursor, delivered as a turn with message id
- * `<connection>:<trigger>:<event id>` on its thread — `thread(event)`, else
- * the profile's natural thread for the event, else the trigger id — and
- * recorded as done when its turn completes. Events are deduplicated per
- * trigger, so a trigger delivers each event once, even across crashes: on
- * start, undelivered inbox entries are delivered again before listening
- * resumes from the recorded cursor.
+ * Triggers route connection events to workflow turns (spec 35 § Triggers).
+ * The inbox holds work before a cursor moves or delivery begins. Receipts
+ * suppress duplicate events, and any pending entry is delivered on startup.
  */
 
 import type {
@@ -23,6 +16,10 @@ import type { CompiledExpression } from '../expression/jsonata';
 import { compileExpression, compute, computeMaybe, passes } from '../expression/jsonata';
 import { invalidConnectionError, unknownConnectionError } from './errors';
 import type { ConnectionRuntime } from './registry';
+import type { InboxEntry, TriggerOutcome } from './trigger-outcomes';
+import { InboxEntrySchema, inboxOutcome, seenOutcome } from './trigger-outcomes';
+import type { PayloadCheck } from './trigger-shape';
+import { checkTrigger } from './trigger-shape';
 import { isPlainRecord } from './values';
 
 /** How many times an event is read before a trigger gives up on turning it into a turn. */
@@ -30,12 +27,12 @@ const ENTRY_ATTEMPTS = 3;
 
 //#region Types
 
-/** One event a trigger hands to the harness as a turn. */
+/** @public One event a trigger hands to the harness as a turn. */
 export interface TriggerDelivery {
   readonly trigger: string;
   readonly connection: string;
   readonly threadId: string;
-  /** `<connection>:<trigger>:<event id>`. */
+  /** Stable across delivery attempts and replay. */
   readonly messageId: string;
   readonly input: string;
   /** The event as the turn sees it: stamped, refs sealed to `threadId`, secrets scrubbed. */
@@ -61,6 +58,9 @@ export interface TriggerRunnerOptions {
   readonly onSchedule?: () => Promise<void>;
 }
 
+/** An event whose payload is not the shape its trigger takes. It is wrong every time it is read. */
+class Misfit extends Error {}
+
 /** A trigger's expressions, compiled once. A field written as a function has none. */
 interface CompiledTrigger {
   readonly filter?: CompiledExpression;
@@ -72,13 +72,6 @@ interface CompiledTrigger {
 const DUE_WAIT_MS = 1e4;
 const DUE_POLL_MS = 10;
 
-interface InboxEntry {
-  readonly event: ConnectionEvent;
-  readonly threadId: string;
-  readonly input: string;
-  readonly messageId: string;
-}
-
 //#endregion
 
 //#region Constants
@@ -86,12 +79,13 @@ interface InboxEntry {
 /** Deliveries of one event tried before the trigger gives up on it. */
 const MAX_DELIVERY_ATTEMPTS = 5;
 
-/** A trigger as stored: only its data. A trigger with a function in it is not stored. */
+/** A trigger as stored: only its data. A trigger with a function or a zod schema in it is not stored. */
 const StoredTriggerSchema = z.object({
   id: z.string().min(1),
   connection: z.string().min(1),
   event: z.string().min(1),
   arguments: z.record(z.string(), z.unknown()).optional(),
+  payload: z.record(z.string(), z.unknown()).optional(),
   filter: z.string().optional(),
   input: z.string(),
   thread: z.string().optional(),
@@ -99,21 +93,6 @@ const StoredTriggerSchema = z.object({
 
 /** Where triggers added while the harness runs are kept. */
 const STORED_PREFIX = 'noetic/connections/triggers-added/';
-
-const InboxEntrySchema = z.object({
-  event: z.object({
-    id: z.string(),
-    type: z.string(),
-    time: z.string(),
-    payload: z.unknown(),
-    cursor: z.string().nullable(),
-    connection: z.string(),
-    actionId: z.string().optional(),
-  }),
-  threadId: z.string(),
-  input: z.string(),
-  messageId: z.string(),
-});
 
 //#endregion
 
@@ -159,6 +138,7 @@ function compileTrigger(trigger: ConnectionTrigger): CompiledTrigger {
 function isData(trigger: ConnectionTrigger): boolean {
   return (
     typeof trigger.input === 'string' &&
+    !(trigger.payload instanceof z.ZodType) &&
     (trigger.filter === undefined || typeof trigger.filter === 'string') &&
     (trigger.thread === undefined || typeof trigger.thread === 'string')
   );
@@ -236,6 +216,12 @@ export class TriggerRunner {
   private readonly controller = new AbortController();
   private readonly triggers = new Map<string, ConnectionTrigger>();
   private readonly compiled = new Map<string, CompiledTrigger>();
+  /**
+   * Each trigger's payload check, once its connection has said what the event
+   * carries. Kept by the trigger itself, not its id, so one added under a
+   * removed trigger's id never takes that trigger's check.
+   */
+  private readonly shapes = new WeakMap<ConnectionTrigger, PayloadCheck>();
   /** Each trigger's listen loop, and what stops it. */
   private readonly loops = new Map<
     string,
@@ -245,6 +231,14 @@ export class TriggerRunner {
     }
   >();
   private started = false;
+  private readonly removing = new Set<string>();
+  private readonly adding = new Map<string, ConnectionTrigger>();
+  private readonly accepting = new Map<string, Promise<unknown>>();
+  /**
+   * Inbox entries being delivered, by key, each with the trigger delivering it:
+   * a trigger added again under a removed one's id is not held up by its turns.
+   */
+  private readonly active = new Map<string, ConnectionTrigger>();
   /**
    * The last delivery on each thread. A thread's events are delivered one turn
    * at a time, so each matching event starts its own turn instead of joining
@@ -301,6 +295,7 @@ export class TriggerRunner {
         ...this.loops.values(),
       ].map((loop) => loop.done),
     );
+    await Promise.allSettled(this.accepting.values());
   }
 
   /** Every trigger the runner has: the harness's own, and those added while it ran. */
@@ -312,7 +307,7 @@ export class TriggerRunner {
 
   /**
    * Add a trigger while the harness runs. One written with expressions only is kept
-   * in storage and is there again after a restart; one with a function in it lasts
+   * in storage and is there again after a restart; one with a function or a zod `payload` in it lasts
    * for this process.
    *
    * @throws NoeticConfigError `CONNECTION_INVALID` for an id already in use, a
@@ -321,18 +316,30 @@ export class TriggerRunner {
    * @throws ConnectionUnsatisfiedError when the connection does not offer the event.
    */
   async add(trigger: ConnectionTrigger): Promise<void> {
+    if (this.removing.has(trigger.id)) {
+      throw invalidConnectionError(
+        `Trigger '${trigger.id}' is being removed.`,
+        'Wait for removal to finish.',
+      );
+    }
     validateTriggers(
       [
         ...this.triggers.values(),
+        ...this.adding.values(),
         trigger,
       ],
       this.options.runtime.names(),
     );
     this.requireEvent(trigger);
-    this.triggers.set(trigger.id, trigger);
-    this.compiled.set(trigger.id, compileTrigger(trigger));
-    if (isData(trigger)) {
-      await this.options.storage.set(`${STORED_PREFIX}${trigger.id}`, trigger);
+    this.adding.set(trigger.id, trigger);
+    try {
+      if (isData(trigger)) {
+        await this.options.storage.set(`${STORED_PREFIX}${trigger.id}`, trigger);
+      }
+      this.compiled.set(trigger.id, compileTrigger(trigger));
+      this.triggers.set(trigger.id, trigger);
+    } finally {
+      this.adding.delete(trigger.id);
     }
     if (this.started) {
       await this.begin(trigger);
@@ -344,19 +351,133 @@ export class TriggerRunner {
     if (!this.triggers.has(id)) {
       return false;
     }
-    this.triggers.delete(id);
-    this.compiled.delete(id);
-    const loop = this.loops.get(id);
-    this.loops.delete(id);
-    loop?.controller.abort();
-    await loop?.done;
-    await this.options.storage.delete(`${STORED_PREFIX}${id}`);
-    // What it had in hand goes with it: a trigger added later under this id starts
-    // clean, not from this one's cursor and its list of events already seen.
-    for (const key of await this.options.storage.list(`${prefix(id)}/`)) {
-      await this.options.storage.delete(key);
+    this.removing.add(id);
+    try {
+      this.triggers.delete(id);
+      this.compiled.delete(id);
+      const loop = this.loops.get(id);
+      this.loops.delete(id);
+      loop?.controller.abort();
+      await loop?.done;
+      await this.accepting.get(id)?.catch(() => {});
+      await this.options.storage.delete(`${STORED_PREFIX}${id}`);
+      // What it had in hand goes with it: a trigger added later under this id starts
+      // clean, not from this one's cursor and its list of events already seen.
+      for (const key of await this.options.storage.list(`${prefix(id)}/`)) {
+        await this.options.storage.delete(key);
+      }
+    } finally {
+      this.removing.delete(id);
     }
     return true;
+  }
+
+  /** Pick up accepted work after a store failure on a warm runner. */
+  async recover(): Promise<void> {
+    if (!this.started || this.controller.signal.aborted) {
+      return;
+    }
+    for (const trigger of this.triggers.values()) {
+      await this.redeliver(trigger);
+    }
+  }
+
+  /** List outcomes retained for a trigger, without event payloads. */
+  async outcomes(id: string): Promise<TriggerOutcome[]> {
+    const trigger = this.triggers.get(id);
+    if (!trigger) {
+      return [];
+    }
+    const base = prefix(trigger.id);
+    const outcomes = new Map<string, TriggerOutcome>();
+    for (const [path, parse] of [
+      [
+        `${base}/inbox/`,
+        inboxOutcome,
+      ],
+      [
+        `${base}/seen/`,
+        seenOutcome,
+      ],
+    ] as const) {
+      for (const key of await this.options.storage.list(path)) {
+        const eventId = decodeURIComponent(key.slice(path.length));
+        const outcome = parse(eventId, await this.options.storage.get(key));
+        if (outcome) {
+          outcomes.set(eventId, outcome);
+        }
+      }
+    }
+    return [
+      ...outcomes.values(),
+    ];
+  }
+
+  /**
+   * Deliver again an event the trigger still holds, under the same event and
+   * message ids. Resolves false when it holds none with that id to deliver: the
+   * event was delivered, is being delivered now, or never became a turn.
+   */
+  async replay(id: string, eventId: string): Promise<boolean> {
+    const trigger = this.triggers.get(id);
+    if (!trigger || !this.started) {
+      return false;
+    }
+    const { storage } = this.options;
+    const key = `${prefix(trigger.id)}/inbox/${encodeURIComponent(eventId)}`;
+    const seen = `${prefix(trigger.id)}/seen/${encodeURIComponent(eventId)}`;
+    const ran = await this.withTrigger(trigger, async () => {
+      const parsed = InboxEntrySchema.safeParse(await storage.get(key));
+      if (
+        !parsed.success ||
+        this.active.get(key) === trigger ||
+        (await storage.get(seen)) !== null
+      ) {
+        return false;
+      }
+      const { failure: _failure, ...entry } = parsed.data;
+      await storage.set(key, entry);
+      this.deliver(trigger, entry, key);
+      return true;
+    });
+    return ran?.value ?? false;
+  }
+
+  /**
+   * Runs `work` after the trigger's earlier work, so its storage is written by
+   * one thing at a time. Resolves `undefined`, without running it, once the
+   * trigger has stopped: removed, or (unless `afterClose`) the runner closed.
+   */
+  private withTrigger<T>(
+    trigger: ConnectionTrigger,
+    work: () => Promise<T>,
+    afterClose = false,
+  ): Promise<
+    | {
+        value: T;
+      }
+    | undefined
+  > {
+    const prev = this.accepting.get(trigger.id);
+    const next = Promise.resolve(prev)
+      .catch(() => {})
+      .then(async () => {
+        if (
+          (!afterClose && this.controller.signal.aborted) ||
+          this.triggers.get(trigger.id) !== trigger
+        ) {
+          return undefined;
+        }
+        return {
+          value: await work(),
+        };
+      });
+    this.accepting.set(trigger.id, next);
+    return next.finally(() => {
+      if (this.accepting.get(trigger.id) === next) {
+        this.accepting.delete(trigger.id);
+      }
+    });
   }
 
   /**
@@ -395,7 +516,7 @@ export class TriggerRunner {
       ]);
       const due = await this.nextDue();
       const overdue = due !== undefined && due <= now() && Date.now() < giveUpAt;
-      if (!overdue && this.threads.size === 0 && this.handling === 0) {
+      if (!overdue && this.threads.size === 0 && this.handling === 0 && this.accepting.size === 0) {
         return;
       }
       await wait(DUE_POLL_MS, this.controller.signal);
@@ -442,9 +563,21 @@ export class TriggerRunner {
     return added;
   }
 
+  /**
+   * Checks the trigger against its connection, once the connection has said
+   * what it offers.
+   *
+   * @throws ConnectionUnsatisfiedError when the connection does not offer the event.
+   * @throws NoeticConfigError `CONNECTION_INVALID` when the trigger and the
+   *   event disagree on arguments or payload.
+   */
   private requireEvent(trigger: ConnectionTrigger): void {
     const manifest = this.options.runtime.current(trigger.connection)?.manifest;
-    if (manifest && !manifest.events[trigger.event]) {
+    if (!manifest) {
+      return;
+    }
+    const info = manifest.events[trigger.event];
+    if (!info) {
       throw new ConnectionUnsatisfiedError({
         connection: trigger.connection,
         missing: {
@@ -453,12 +586,19 @@ export class TriggerRunner {
         },
       });
     }
+    this.shapes.set(trigger, checkTrigger(trigger, info));
   }
 
   /** Redeliver what the trigger left in its inbox, then listen. */
   private async begin(trigger: ConnectionTrigger): Promise<void> {
-    await this.redeliver(trigger);
-    await this.anchor(trigger);
+    await this.withTrigger(trigger, async () => {
+      await this.redeliver(trigger);
+      await this.anchor(trigger);
+    });
+    // Removed while it was starting: `remove` found no loop to stop, so none starts.
+    if (this.triggers.get(trigger.id) !== trigger) {
+      return;
+    }
     const controller = new AbortController();
     const stop = (): void => controller.abort();
     this.controller.signal.addEventListener('abort', stop, {
@@ -505,11 +645,13 @@ export class TriggerRunner {
     const keys = await this.options.storage.list(`${prefix(trigger.id)}/inbox/`);
     for (const key of keys) {
       const parsed = InboxEntrySchema.safeParse(await this.options.storage.get(key));
-      if (!parsed.success) {
+      if (!parsed.success && this.triggers.get(trigger.id) === trigger) {
         await this.options.storage.delete(key);
         continue;
       }
-      this.deliver(trigger, parsed.data, key);
+      if (parsed.success && this.triggers.get(trigger.id) === trigger) {
+        this.deliver(trigger, parsed.data, key);
+      }
     }
   }
 
@@ -541,41 +683,56 @@ export class TriggerRunner {
       signal,
       // A source's `emit` waits to hear the event is in the inbox.
       stores: true,
-    });
-    await stream.ready;
-    for await (const message of stream) {
-      if (signal.aborted) {
-        break;
-      }
-      if (message.type === 'event') {
-        // In hand from here: storing the event and saying when the next is due come
-        // before its turn exists, and `idle()` must not take that gap for rest.
-        this.handling += 1;
-        try {
-          await this.handle(trigger, message.event);
-        } catch (e) {
-          message.stored?.(e);
-          throw e;
-        } finally {
-          this.handling -= 1;
+      checkpoint: async (cursor) => {
+        const moved = await this.withTrigger(trigger, () => this.advance(trigger, cursor));
+        if (!moved) {
+          throw new Error(`Trigger '${trigger.id}' is stopped.`);
         }
-        message.stored?.();
-        continue;
+      },
+    });
+    try {
+      // A connection that was not connected when the trigger was first checked
+      // is by now. A trigger that does not fit it reads no event: the fault is
+      // the trigger's, and no event should be marked failed for it.
+      if (!this.shapes.has(trigger)) {
+        this.requireEvent(trigger);
       }
-      this.options.runtime.emit({
-        type: 'stream_changed',
-        data: {
-          connection: trigger.connection,
-          event: trigger.event,
-          change: message.type === 'gap' ? 'gap' : 'ended',
-          reason: message.reason,
-        },
-      });
-      if (message.type === 'terminated') {
-        break;
+      await stream.ready;
+      for await (const message of stream) {
+        if (signal.aborted) {
+          break;
+        }
+        if (message.type === 'event') {
+          // In hand from here: storing the event and saying when the next is due come
+          // before its turn exists, and `idle()` must not take that gap for rest.
+          this.handling += 1;
+          try {
+            await this.handle(trigger, message.event);
+          } catch (e) {
+            message.stored?.(e);
+            throw e;
+          } finally {
+            this.handling -= 1;
+          }
+          message.stored?.();
+          continue;
+        }
+        this.options.runtime.emit({
+          type: 'stream_changed',
+          data: {
+            connection: trigger.connection,
+            event: trigger.event,
+            change: message.type === 'gap' ? 'gap' : 'ended',
+            reason: message.reason,
+          },
+        });
+        if (message.type === 'terminated') {
+          break;
+        }
       }
+    } finally {
+      await stream.close();
     }
-    await stream.close();
     return true;
   }
 
@@ -584,9 +741,13 @@ export class TriggerRunner {
     const base = prefix(trigger.id);
     const inboxKey = `${base}/inbox/${encodeURIComponent(init.id)}`;
     const seenKey = `${base}/seen/${encodeURIComponent(init.id)}`;
-    const duplicate =
-      (await storage.get(seenKey)) !== null || (await storage.get(inboxKey)) !== null;
-    if (duplicate) {
+    if ((await storage.get(seenKey)) !== null) {
+      await this.advance(trigger, init.cursor);
+      return;
+    }
+    const held = InboxEntrySchema.safeParse(await storage.get(inboxKey));
+    if (held.success) {
+      this.deliver(trigger, held.data, inboxKey);
       await this.advance(trigger, init.cursor);
       return;
     }
@@ -598,9 +759,10 @@ export class TriggerRunner {
       // that could not be stored just now). So it is tried again: the cursor is not
       // moved, the sender is told the event was not stored, and the stream is read
       // again from where it was. After a few tries it is given up on, rather than
-      // re-read from the same cursor forever.
+      // re-read from the same cursor forever. A payload of the wrong shape is
+      // wrong every time, so it is given up on at once.
       const tries = (this.entryTries.get(inboxKey) ?? 0) + 1;
-      if (tries < ENTRY_ATTEMPTS) {
+      if (!(e instanceof Misfit) && tries < ENTRY_ATTEMPTS) {
         this.entryTries.set(inboxKey, tries);
         throw e;
       }
@@ -623,6 +785,7 @@ export class TriggerRunner {
       return;
     }
     await storage.set<InboxEntry>(inboxKey, entry);
+    this.deliver(trigger, entry, inboxKey);
     await this.advance(trigger, init.cursor);
     this.options.runtime.emit({
       type: 'connection_event',
@@ -632,7 +795,6 @@ export class TriggerRunner {
         event: entry.event,
       },
     });
-    this.deliver(trigger, entry, inboxKey);
   }
 
   /** The inbox entry for an event, or `undefined` when the trigger's filter rejects it. */
@@ -642,6 +804,10 @@ export class TriggerRunner {
   ): Promise<InboxEntry | undefined> {
     const runtime = this.options.runtime;
     const compiled = this.compiled.get(trigger.id) ?? {};
+    const misfit = this.shapes.get(trigger)?.(init.payload);
+    if (misfit) {
+      throw new Misfit(`Event '${init.id}' is not what trigger '${trigger.id}' takes: ${misfit}`);
+    }
     const stamped: ConnectionEvent = {
       ...init,
       connection: trigger.connection,
@@ -679,76 +845,126 @@ export class TriggerRunner {
   }
 
   private deliver(trigger: ConnectionTrigger, entry: InboxEntry, inboxKey: string): void {
+    if (entry.failure || this.active.get(inboxKey) === trigger) {
+      return;
+    }
+    this.active.set(inboxKey, trigger);
     const previous = this.threads.get(entry.threadId) ?? Promise.resolve();
-    const next = previous.then(() =>
-      this.deliverWithRetry(trigger, {
-        entry,
-        inboxKey,
-      }),
-    );
-    this.threads.set(entry.threadId, next);
-    void next.finally(() => {
-      if (this.threads.get(entry.threadId) === next) {
-        this.threads.delete(entry.threadId);
+    const next = previous.then(async () => {
+      try {
+        await this.deliverWithRetry(trigger, entry, inboxKey);
+      } catch (e) {
+        this.report(trigger.id, e);
+      } finally {
+        if (this.active.get(inboxKey) === trigger) {
+          this.active.delete(inboxKey);
+        }
+        if (this.threads.get(entry.threadId) === next) {
+          this.threads.delete(entry.threadId);
+        }
       }
     });
+    this.threads.set(entry.threadId, next);
+  }
+
+  /** Keep the inbox entry until a receipt lands, or mark it failed for replay. */
+  private async deliverWithRetry(
+    trigger: ConnectionTrigger,
+    entry: InboxEntry,
+    inboxKey: string,
+  ): Promise<void> {
+    const { storage } = this.options;
+    const seenKey = `${prefix(trigger.id)}/seen/${encodeURIComponent(entry.event.id)}`;
+    if ((await storage.get(seenKey)) !== null) {
+      await this.keepOutcome(trigger, () => storage.delete(inboxKey));
+      return;
+    }
+    const signal = this.controller.signal;
+    const stopped = (): boolean => signal.aborted || this.triggers.get(trigger.id) !== trigger;
+    let error = '';
+    for (let attempt = 1; attempt <= MAX_DELIVERY_ATTEMPTS && !stopped(); attempt++) {
+      const failed = await this.tryDeliver(trigger, entry);
+      // A turn that finished during shutdown still gets its receipt.
+      if (stopped() && failed) {
+        return;
+      }
+      if (!failed) {
+        await this.keepOutcome(trigger, async () => {
+          await storage.set(seenKey, {
+            status: 'delivered',
+            messageId: entry.messageId,
+            threadId: entry.threadId,
+          });
+          await storage.delete(inboxKey);
+        });
+        return;
+      }
+      error = failed.error instanceof Error ? failed.error.message : String(failed.error);
+      this.report(trigger.id, failed.error);
+      if (attempt === MAX_DELIVERY_ATTEMPTS) {
+        const saved = await this.keepOutcome(trigger, () =>
+          storage.set(inboxKey, {
+            ...entry,
+            failure: {
+              status: 'failed',
+              attempts: attempt,
+              error,
+            },
+          }),
+        );
+        if (saved) {
+          this.gaveUp(trigger, entry.event, {
+            attempts: attempt,
+            error,
+          });
+        }
+        return;
+      }
+      await wait((this.options.redeliverDelayMs ?? defaultDelay)(attempt - 1), signal);
+    }
+  }
+
+  /** One delivery. Resolves with what went wrong, or nothing when the turn finished. */
+  private async tryDeliver(
+    trigger: ConnectionTrigger,
+    entry: InboxEntry,
+  ): Promise<
+    | {
+        error: unknown;
+      }
+    | undefined
+  > {
+    try {
+      await this.options.deliver({
+        trigger: trigger.id,
+        connection: trigger.connection,
+        threadId: entry.threadId,
+        messageId: entry.messageId,
+        input: entry.input,
+        event: entry.event,
+      });
+      return undefined;
+    } catch (error) {
+      return {
+        error,
+      };
+    }
   }
 
   /**
-   * Delivers one inbox entry, retrying a failed turn with backoff. On success the
-   * event is marked done. After the last try the trigger gives up: the failure is
-   * reported, the event is marked seen so it is not delivered again, and nothing
-   * more is kept. A host that wants another try emits the event again itself.
+   * Writes an outcome behind the trigger's other work, which removal waits on.
+   * Resolves whether it was written.
    */
-  private async deliverWithRetry(
+  private async keepOutcome(
     trigger: ConnectionTrigger,
-    at: {
-      entry: InboxEntry;
-      inboxKey: string;
-    },
-  ): Promise<void> {
-    const { entry, inboxKey } = at;
-    const storage = this.options.storage;
-    const base = prefix(trigger.id);
-    const eventKey = encodeURIComponent(entry.event.id);
-    const seenKey = `${base}/seen/${eventKey}`;
-    const signal = this.controller.signal;
-    // Stopped: the runner closed, or this trigger was removed while it retried.
-    const stopped = (): boolean => signal.aborted || !this.triggers.has(trigger.id);
-    let lastError = '';
-    let attempts = 0;
-    for (; attempts < MAX_DELIVERY_ATTEMPTS && !stopped(); attempts++) {
-      try {
-        await this.options.deliver({
-          trigger: trigger.id,
-          connection: trigger.connection,
-          threadId: entry.threadId,
-          messageId: entry.messageId,
-          input: entry.input,
-          event: entry.event,
-        });
-        await storage.set(seenKey, true);
-        await storage.delete(inboxKey);
-        return;
-      } catch (e) {
-        lastError = e instanceof Error ? e.message : String(e);
-        this.report(trigger.id, e);
-      }
-      await wait((this.options.redeliverDelayMs ?? defaultDelay)(attempts), signal);
+    write: () => Promise<void>,
+  ): Promise<boolean> {
+    try {
+      return (await this.withTrigger(trigger, write, true)) !== undefined;
+    } catch (e) {
+      this.report(trigger.id, e);
+      return false;
     }
-    // Stopped part way, on the last try included: the inbox entry stays and is
-    // delivered again on the next start.
-    if (attempts < MAX_DELIVERY_ATTEMPTS || stopped()) {
-      return;
-    }
-    await storage.set(seenKey, {
-      failed: lastError,
-    });
-    await storage.delete(inboxKey);
-    this.gaveUp(trigger, entry.event, {
-      attempts,
-      error: lastError,
-    });
   }
 }
 

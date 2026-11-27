@@ -33,7 +33,7 @@ function everyMinute(storage: StorageAdapter, ticks: string[]): AgentHarness {
     connections: {
       clock: cron('* * * * *'),
     },
-    triggers: [
+    triggerTurnOn: [
       {
         id: 'every-minute',
         connection: 'clock',
@@ -128,7 +128,7 @@ describe('harness.getNextWakeTime() with a cron trigger', () => {
       connections: {
         batches,
       },
-      triggers: [
+      triggerTurnOn: [
         {
           id: 'on-batch',
           connection: 'batches',
@@ -277,7 +277,7 @@ describe('two triggers on one cron()', () => {
       connections: {
         clock: cron('* * * * *'),
       },
-      triggers: [
+      triggerTurnOn: [
         'recent',
         'behind',
       ].map((id) => ({

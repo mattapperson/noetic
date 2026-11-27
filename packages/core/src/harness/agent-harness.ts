@@ -4,6 +4,7 @@ import type {
   ContextStreamEvent,
   ContextWindow,
 } from '@noetic-tools/types';
+import type { TriggerOutcome } from '../connections/trigger-outcomes';
 import type { HeldAnswerRequest } from '../runtime/held-calls';
 import { heldCallsOf, toHeldCall } from '../runtime/held-calls';
 import { ConnectionGate } from './connection-gate';
@@ -498,7 +499,7 @@ export class AgentHarness<
     this.#connections = new ConnectionGate({
       harness: this,
       connections: opts.connections,
-      triggers: opts.triggers,
+      triggerTurnOn: opts.triggerTurnOn,
       onSchedule: () => this.announceWakeTimeQuietly(),
       storage: this.config.storage ?? createInMemoryStorage(),
       artifacts: this.artifacts,
@@ -1164,6 +1165,7 @@ export class AgentHarness<
    * @public
    */
   async wake(scope?: { threadId?: string; options?: ExecuteOptions }): Promise<string[]> {
+    await this.#connections.triggers.recover();
     return this.storedSessions.wake(scope, {
       forgetting: (threadId) => this.forgetting.has(threadId),
       current: (threadId) => this.sessions.get(threadId),
@@ -1654,7 +1656,7 @@ export class AgentHarness<
   /**
    * Add a trigger while the harness runs (spec 35 § Triggers). A trigger written
    * with expressions only is kept in storage, so it is there again after a restart;
-   * one with a function in it lasts for this process.
+   * one with a function or a zod `payload` in it lasts for this process.
    *
    * @throws NoeticConfigError `CONNECTION_INVALID` for an id already in use, a
    *   missing event or an expression that does not parse; `CONNECTION_UNKNOWN` for
@@ -1685,6 +1687,27 @@ export class AgentHarness<
    */
   listTriggers(): ConnectionTrigger[] {
     return this.#connections.triggers.list();
+  }
+
+  /**
+   * What became of each event a trigger still keeps a record of: `pending`,
+   * `delivered`, or `failed`. Payloads are not included.
+   * @public
+   */
+  async getTriggerOutcomes(id: string): Promise<TriggerOutcome[]> {
+    await this.start();
+    return this.#connections.triggers.outcomes(id);
+  }
+
+  /**
+   * Deliver again an event whose turn failed, under the same event and message
+   * ids. Resolves false when the trigger holds no such event: it was delivered,
+   * is being delivered now, or never became a turn.
+   * @public
+   */
+  async replayTriggerEvent(id: string, eventId: string): Promise<boolean> {
+    await this.start();
+    return this.#connections.triggers.replay(id, eventId);
   }
 
   //#endregion

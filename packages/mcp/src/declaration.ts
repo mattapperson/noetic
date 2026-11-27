@@ -788,7 +788,7 @@ function eventInfo(
   const sense = part?.def.sense ?? senseOf(event.sense);
   const thread = part?.def.thread ?? event.thread;
   const payloadSchema = event.payloadSchema ?? toJsonSchema(part?.def.payload);
-  const argumentsSchema = event.argumentsSchema ?? toJsonSchema(part?.def.arguments);
+  const argumentsSchema = event.inputSchema ?? toJsonSchema(part?.def.arguments);
   return {
     name: event.name,
     replay: part?.def.replay ?? event.replay ?? 'none',

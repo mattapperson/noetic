@@ -247,7 +247,7 @@ function buildExecutor(opts: ExecutorOptions) {
       tracker,
     },
     // An email becomes a turn on its own thread. The same email twice is one turn.
-    triggers: [
+    triggerTurnOn: [
       {
         id: 'vendor-mail',
         connection: 'mail',

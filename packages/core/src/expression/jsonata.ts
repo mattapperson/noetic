@@ -151,6 +151,32 @@ export function syntaxError(source: string): string | undefined {
 }
 
 /**
+ * The paths `source` reads, each as the plain names it starts with:
+ * `a.b[c = 1].d` gives `['a', 'b', 'd']` and, for the predicate, `['c']`.
+ * A path's names stop at its first step that is not a name, and at a name
+ * bound with `@$v`, after which the path reads on from that name's parent.
+ * `source` must parse (`syntaxError`).
+ */
+export function pathsOf(source: string): string[][] {
+  const paths: string[][] = [];
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (!isNode(node)) {
+      return;
+    }
+    if (node.type === 'path' && Array.isArray(node.steps)) {
+      paths.push(leadingNames(node.steps));
+    }
+    Object.values(node).forEach(visit);
+  };
+  visit(jsonata(source).ast());
+  return paths;
+}
+
+/**
  * Evaluates a `compute` expression. JSONata's "no value" (`undefined`) and a
  * result holding a function, at any depth, have no JSON form, so both fail
  * rather than turn silently into empty or garbled output.
@@ -226,6 +252,25 @@ export function readInput(value: unknown): unknown {
 //#endregion
 
 //#region Helpers
+
+/** A node of JSONata's syntax tree. They have a prototype, so they are not plain records. */
+function isNode(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function leadingNames(steps: ReadonlyArray<unknown>): string[] {
+  const names: string[] = [];
+  for (const step of steps) {
+    if (!isNode(step) || step.type !== 'name' || typeof step.value !== 'string') {
+      break;
+    }
+    names.push(step.value);
+    if (step.focus !== undefined) {
+      break;
+    }
+  }
+  return names;
+}
 
 /**
  * `$refId(x)`: the id inside a connection ref, since JSONata paths cannot step

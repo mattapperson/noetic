@@ -353,6 +353,13 @@ export interface ListenRequest {
    * whoever emitted knows the event will not be lost. Triggers set it.
    */
   readonly stores?: boolean;
+  /**
+   * Records how far the provider has read. The stream calls it with a cursor
+   * that came on its own, not on an event (the place a subscription starts
+   * from or is made again at, a heartbeat, a gap, a page of a poll), once every
+   * event before it is stored, and never after one that was not.
+   */
+  readonly checkpoint?: (cursor: string) => Promise<void>;
 }
 
 /** @public One message on an event stream: an event, a gap, or the end of the stream. */
@@ -609,6 +616,12 @@ export interface ConnectionTrigger<P = unknown> {
   readonly event: string;
   /** Filter on the server. */
   readonly arguments?: Readonly<Record<string, unknown>>;
+  /**
+   * The payload the turn expects: a zod schema, or a JSON Schema. When the
+   * harness starts it is checked against what the connection declares for the
+   * event, and each event is checked against it before a turn starts.
+   */
+  readonly payload?: z.ZodType<P> | JsonSchemaObject;
   /** Filter here: a predicate, or an expression that gives `true` to let the event through. */
   readonly filter?: ((event: ConnectionEvent<P>) => boolean) | Expression;
   /** The message the turn starts with: a function, or an expression that gives it. */

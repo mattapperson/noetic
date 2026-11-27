@@ -1653,7 +1653,7 @@ const harness = new AgentHarness({
   params: {},
   agentGraph: triageLoop,
   connections: { deploys, morning: cron('0 8 * * 1-5', { timezone: 'Europe/London' }) },
-  triggers: [
+  triggerTurnOn: [
     { id: 'failures', connection: 'deploys', event: 'deploy.failed',
       input: (e) => `Deploy failed: ${JSON.stringify(e.payload)}`, thread: (e) => `deploy-${e.id}` },
     { id: 'standup', connection: 'morning', event: 'tick', input: () => 'Summarize overnight incidents' },
@@ -1664,7 +1664,17 @@ await harness.start();                       // a trigger-only harness must star
 await deploys.emit({ type: 'deploy.failed', id: 'run-42', payload: { service: 'api' } });  // push from host code
 ```
 
-Each event is delivered once (durable inbox + cursor), as a turn whose message id is `<connection>:<trigger>:<event id>`; the event is on the turn as a `noetic:connection_event` item.
+Each event is delivered once (written to a durable inbox before the cursor moves past it), as a turn whose message id is `<connection>:<trigger>:<event id>`; the event is on the turn as a `noetic:connection_event` item.
+
+### Events from an installed connector
+
+A connector that reports events is an MCP server offering the Events extension
+(SEP-3415). Attach it with `mcp(...)` and name its events in `triggerTurnOn`, with
+the server-side filter in `arguments`. The server owns identity and grants: it
+ends the subscription when access is revoked. Give the harness
+`environment.storage` so accepted events survive a crash. Use
+`getTriggerOutcomes` to inspect a trigger's events and `replayTriggerEvent` to
+run again one whose turn failed, under the same ids.
 
 ## Pattern: Connection Workflow as JSON
 
