@@ -42,6 +42,7 @@ const UNTIL_KINDS = [
   'outputContains',
   'outputEquals',
   'expr',
+  'param',
   'converged',
   'any',
   'all',

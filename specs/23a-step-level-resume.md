@@ -34,6 +34,7 @@ interface StepLedgerEntry {
   items?: Item[];        // items the step appended to its context's item log
   completedAt: string;   // ISO-8601
   streamed?: number[];   // indices into `items` that `step.emitItems` emitted — streamed again on replay under `emitItemsOnReplay`
+  runs?: number;         // a JSON workflow `loop` node's body runs, so a replayed loop still answers `$runs` (`33-expressions`)
 }
 ```
 

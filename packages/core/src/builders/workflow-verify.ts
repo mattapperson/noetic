@@ -18,13 +18,14 @@ import { frameworkCast, NoeticConfigError, verifyMatcherFromJson } from '@noetic
 import type { RunOutcome, VerifyMatcher, VerifyOutput } from '@noetic-tools/types/verify';
 import { VerifyConfigErrorCode } from '@noetic-tools/types/verify';
 import { compileExpression, compute, readInput } from '../expression/jsonata';
-import { stepOutputsOf } from '../expression/step-outputs';
-import type { WorkflowConnectionRef, WorkflowNode } from '../schemas/workflow';
+import type { WorkflowNode } from '../schemas/workflow';
 import { getDefaultRegistrar } from '../types/step-registrar';
 import type { VerifyEachOutput } from './verify-builder';
 import { documentHandle } from './workflow-connections';
-import type { HydrationContext } from './workflow-hydrator';
-import { documentScopeOf, hydrateStepList } from './workflow-hydrator';
+import type { ConnectionRef, HydrationContext } from './workflow-hydrator';
+import { bindingsFor, hydrateStepList } from './workflow-hydrator';
+import type { ParamUse } from './workflow-params';
+import { fromParam, isParamUse, paramFor } from './workflow-params';
 
 //#region Types
 
@@ -95,6 +96,21 @@ function documentTarget(name: string, where: string, ctx: HydrationContext): Tar
   });
 }
 
+/** The connection a verify checks: a name, or one a param or an expression gives per run. */
+function subjectTarget(
+  subject: ConnectionRef,
+  where: string,
+  ctx: HydrationContext,
+): StepVerify<ContextData, string, string>['subject'] {
+  if (typeof subject === 'string') {
+    return documentTarget(subject, where, ctx);
+  }
+  if (isParamUse(subject)) {
+    return paramTarget(subject, where, ctx);
+  }
+  return expressionTarget(subject.$expr, where, ctx);
+}
+
 /** A subject expression, evaluated per run against the node's input. */
 function expressionTarget(
   expr: string,
@@ -103,29 +119,48 @@ function expressionTarget(
 ): (input: string, execCtx: Context) => Promise<Target> {
   const compiled = compileExpression(expr, `subject of ${where}`, ctx.expressionLimits);
   return async (input, execCtx) => {
-    const name = await compute(compiled, readInput(input), {
-      steps: stepOutputsOf(execCtx, documentScopeOf(ctx)),
-      ...(ctx.fanOutItem === undefined
-        ? {}
-        : {
-            item: ctx.fanOutItem,
-          }),
-    });
-    if (typeof name !== 'string' || name.length === 0) {
-      throw new NoeticConfigError({
-        code: 'CONNECTION_INVALID',
-        message: `The subject expression of ${where} gave ${JSON.stringify(name)}, not a connection name.`,
-        hint: 'Write an expression that gives a declared connection name, e.g. { "$expr": "$item" } inside a fan-out.',
-      });
-    }
-    return documentTarget(name, where, ctx);
+    const name = await compute(compiled, readInput(input), bindingsFor(execCtx, ctx));
+    return namedSubject(name, where, ctx);
   };
+}
+
+/** A subject a harness param gives, read per run. */
+function paramTarget(
+  param: ParamUse,
+  where: string,
+  ctx: HydrationContext,
+): (input: string, execCtx: Context) => Promise<Target> {
+  return async (input, execCtx) =>
+    namedSubject(
+      await fromParam(execCtx, param, [
+        input,
+        execCtx,
+      ]),
+      where,
+      ctx,
+    );
+}
+
+/**
+ * The subject a name computed at run time stands for.
+ *
+ * @throws `NoeticConfigError` `CONNECTION_INVALID` when `name` is not a connection name.
+ */
+function namedSubject(name: unknown, where: string, ctx: HydrationContext): Target {
+  if (typeof name !== 'string' || name.length === 0) {
+    throw new NoeticConfigError({
+      code: 'CONNECTION_INVALID',
+      message: `The subject of ${where} was computed as ${JSON.stringify(name)}, not a connection name.`,
+      hint: 'Give a declared connection name, e.g. { "$expr": "$item" } inside a fan-out.',
+    });
+  }
+  return documentTarget(name, where, ctx);
 }
 
 function hydrateOne(opts: {
   node: VerifyWorkflowNode;
   id: string;
-  subject: WorkflowConnectionRef;
+  subject: ConnectionRef;
   ctx: HydrationContext;
 }): StepVerify<ContextData, string, string> {
   const { node, id, subject, ctx } = opts;
@@ -133,10 +168,7 @@ function hydrateOne(opts: {
   const built: StepVerify<ContextData, string, string> = {
     kind: 'verify',
     id,
-    subject:
-      typeof subject === 'string'
-        ? documentTarget(subject, where, ctx)
-        : expressionTarget(subject.$expr, where, ctx),
+    subject: subjectTarget(subject, where, ctx),
     act: frameworkCast<ReadonlyArray<Step<ContextData, string, unknown>>>(
       hydrateStepList({
         list: node.act,
@@ -196,7 +228,11 @@ function hydrateEach(
       node,
       id: `${node.id}.${name}`,
       subject: name,
-      ctx,
+      // Each subject's `act` reads its connection's name as `$item`.
+      ctx: {
+        ...ctx,
+        fanOutItem: name,
+      },
     }),
   }));
   const built: Step<ContextData, string, string> = {
@@ -249,10 +285,12 @@ export function hydrateVerifyNode(
   if (Array.isArray(node.subject)) {
     return hydrateEach(node, node.subject, ctx);
   }
+  // The schema gives a node its subject one way or the other.
+  const subject = paramFor(node, 'subject') ?? node.subject ?? '';
   return hydrateOne({
     node,
     id: node.id,
-    subject: node.subject,
+    subject,
     ctx,
   });
 }

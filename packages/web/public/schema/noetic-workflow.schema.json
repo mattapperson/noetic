@@ -243,6 +243,26 @@
               "type": "string",
               "minLength": 1
             },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "model",
+                  "instructions",
+                  "tools",
+                  "emit",
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
             "durable": {
               "type": "boolean"
             },
@@ -337,6 +357,42 @@
             },
             "instructions": {
               "type": "string"
+            },
+            "projection": {
+              "type": "object",
+              "properties": {
+                "tokenBudget": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "responseReserve": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "overflow": {
+                  "type": "string",
+                  "enum": [
+                    "truncate",
+                    "summarize",
+                    "sliding_window"
+                  ]
+                },
+                "overflowModel": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "windowSize": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "tokenBudget",
+                "responseReserve",
+                "overflow"
+              ],
+              "additionalProperties": false
             },
             "tools": {
               "type": "array",
@@ -580,28 +636,50 @@
               "additionalProperties": false
             },
             "output": {
-              "type": "object",
-              "properties": {
-                "codec": {
-                  "type": "string",
-                  "const": "openui"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "schema": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "schema"
+                  ],
+                  "additionalProperties": false
                 },
-                "library": {
-                  "type": "string",
-                  "minLength": 1
+                {
+                  "type": "object",
+                  "properties": {
+                    "codec": {
+                      "type": "string",
+                      "const": "openui"
+                    },
+                    "library": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "codec",
+                    "library"
+                  ],
+                  "additionalProperties": false
                 }
-              },
-              "required": [
-                "codec",
-                "library"
-              ],
-              "additionalProperties": false
+              ]
+            },
+            "emit": {
+              "type": "boolean"
             }
           },
           "required": [
             "kind",
-            "id",
-            "instructions"
+            "id"
           ],
           "additionalProperties": false
         },
@@ -615,6 +693,23 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "args",
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "durable": {
               "type": "boolean"
@@ -734,6 +829,23 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "execute",
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "durable": {
               "type": "boolean"
@@ -867,8 +979,7 @@
           },
           "required": [
             "kind",
-            "id",
-            "execute"
+            "id"
           ],
           "additionalProperties": false
         },
@@ -882,6 +993,22 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "durable": {
               "type": "boolean"
@@ -993,6 +1120,23 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "route",
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "durable": {
               "type": "boolean"
@@ -1128,6 +1272,26 @@
               "type": "string",
               "minLength": 1
             },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "model",
+                  "instructions",
+                  "context",
+                  "emit",
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
             "durable": {
               "type": "boolean"
             },
@@ -1216,6 +1380,45 @@
                 ],
                 "additionalProperties": false
               }
+            },
+            "projection": {
+              "type": "object",
+              "properties": {
+                "tokenBudget": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "responseReserve": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "overflow": {
+                  "type": "string",
+                  "enum": [
+                    "truncate",
+                    "summarize",
+                    "sliding_window"
+                  ]
+                },
+                "overflowModel": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "windowSize": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "tokenBudget",
+                "responseReserve",
+                "overflow"
+              ],
+              "additionalProperties": false
+            },
+            "emit": {
+              "type": "boolean"
             },
             "model": {
               "type": "string",
@@ -1402,6 +1605,23 @@
               "type": "string",
               "minLength": 1
             },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "on",
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
             "durable": {
               "type": "boolean"
             },
@@ -1502,6 +1722,26 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "fromParams": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "enum": [
+                      "model",
+                      "instructions",
+                      "context",
+                      "emit",
+                      "replayKey",
+                      "emitItems",
+                      "onStart",
+                      "onDone"
+                    ]
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
                 "durable": {
                   "type": "boolean"
                 },
@@ -1590,6 +1830,45 @@
                     ],
                     "additionalProperties": false
                   }
+                },
+                "projection": {
+                  "type": "object",
+                  "properties": {
+                    "tokenBudget": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "responseReserve": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "enum": [
+                        "truncate",
+                        "summarize",
+                        "sliding_window"
+                      ]
+                    },
+                    "overflowModel": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "windowSize": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "tokenBudget",
+                    "responseReserve",
+                    "overflow"
+                  ],
+                  "additionalProperties": false
+                },
+                "emit": {
+                  "type": "boolean"
                 },
                 "model": {
                   "type": "string",
@@ -1784,6 +2063,9 @@
               "minimum": 0,
               "maximum": 1
             },
+            "default": {
+              "$ref": "#/$defs/WorkflowNode"
+            },
             "uncertain": {
               "$ref": "#/$defs/WorkflowNode"
             }
@@ -1792,9 +2074,7 @@
             "kind",
             "id",
             "decide",
-            "on",
-            "cases",
-            "uncertain"
+            "cases"
           ],
           "additionalProperties": false
         },
@@ -1808,6 +2088,23 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "merge",
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "durable": {
               "type": "boolean"
@@ -1964,6 +2261,22 @@
               "type": "string",
               "minLength": 1
             },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
             "durable": {
               "type": "boolean"
             },
@@ -2060,6 +2373,10 @@
               "type": "number",
               "exclusiveMinimum": 0
             },
+            "subprocess": {
+              "type": "string",
+              "minLength": 1
+            },
             "layers": {
               "minItems": 1,
               "type": "array",
@@ -2093,6 +2410,22 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "durable": {
               "type": "boolean"
@@ -2214,6 +2547,24 @@
               "type": "string",
               "minLength": 1
             },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "prepareNext",
+                  "onError",
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
             "durable": {
               "type": "boolean"
             },
@@ -2303,6 +2654,52 @@
                 "additionalProperties": false
               }
             },
+            "inbox": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "value",
+                    "queue",
+                    "topic"
+                  ]
+                },
+                "capacity": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "external": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "onError": {
+              "type": "string",
+              "enum": [
+                "retry",
+                "skip",
+                "abort"
+              ]
+            },
+            "maxHistorySize": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "parkTimeout": {
+              "type": "number",
+              "minimum": 0
+            },
             "body": {
               "$ref": "#/$defs/WorkflowNode"
             },
@@ -2341,6 +2738,22 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "durable": {
               "type": "boolean"
@@ -2487,6 +2900,22 @@
               "type": "string",
               "minLength": 1
             },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
             "durable": {
               "type": "boolean"
             },
@@ -2583,6 +3012,39 @@
               "type": "number",
               "minimum": 0
             },
+            "jitter": {
+              "type": "number",
+              "minimum": 0
+            },
+            "inbox": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "value",
+                    "queue",
+                    "topic"
+                  ]
+                },
+                "capacity": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "external": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            },
             "onError": {
               "type": "string",
               "enum": [
@@ -2609,6 +3071,22 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "durable": {
               "type": "boolean"
@@ -2782,6 +3260,31 @@
               "type": "string",
               "minLength": 1
             },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "prompt",
+                  "content",
+                  "instructions",
+                  "cwd",
+                  "mode",
+                  "model",
+                  "tools",
+                  "onPermissionRequest",
+                  "emit",
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
             "durable": {
               "type": "boolean"
             },
@@ -2874,6 +3377,29 @@
             "agent": {
               "type": "string",
               "minLength": 1
+            },
+            "content": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "text",
+                      "image",
+                      "audio",
+                      "resource_link",
+                      "resource"
+                    ]
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "additionalProperties": {}
+              }
             },
             "prompt": {
               "type": "string",
@@ -3107,6 +3633,13 @@
                       "title": {
                         "type": "string",
                         "minLength": 1
+                      },
+                      "titlePattern": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "titleFlags": {
+                        "type": "string"
                       }
                     },
                     "additionalProperties": false
@@ -3135,6 +3668,13 @@
                       "title": {
                         "type": "string",
                         "minLength": 1
+                      },
+                      "titlePattern": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "titleFlags": {
+                        "type": "string"
                       }
                     },
                     "additionalProperties": false
@@ -3159,6 +3699,16 @@
                   "type": "boolean"
                 },
                 "elicitation": {
+                  "type": "boolean"
+                },
+                "additionalDirectories": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "allowAnyPath": {
                   "type": "boolean"
                 }
               },
@@ -3197,13 +3747,31 @@
             "shell": {
               "type": "string",
               "minLength": 1
+            },
+            "output": {
+              "type": "object",
+              "properties": {
+                "schema": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "schema"
+              ],
+              "additionalProperties": false
+            },
+            "emit": {
+              "type": "boolean"
             }
           },
           "required": [
             "kind",
             "id",
-            "agent",
-            "prompt"
+            "agent"
           ],
           "additionalProperties": false
         },
@@ -3217,6 +3785,24 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "args",
+                  "connection",
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "durable": {
               "type": "boolean"
@@ -3368,6 +3954,24 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "filter",
+                  "connection",
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "durable": {
               "type": "boolean"
@@ -3582,6 +4186,23 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "subject",
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "durable": {
               "type": "boolean"
@@ -4034,7 +4655,6 @@
           "required": [
             "kind",
             "id",
-            "subject",
             "act"
           ],
           "additionalProperties": false
@@ -4207,6 +4827,24 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "param"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "any"
             },
             "predicates": {
@@ -4254,6 +4892,26 @@
             "id": {
               "type": "string",
               "minLength": 1
+            },
+            "fromParams": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "enum": [
+                  "model",
+                  "instructions",
+                  "context",
+                  "emit",
+                  "replayKey",
+                  "emitItems",
+                  "onStart",
+                  "onDone"
+                ]
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
             },
             "durable": {
               "type": "boolean"
@@ -4343,6 +5001,45 @@
                 ],
                 "additionalProperties": false
               }
+            },
+            "projection": {
+              "type": "object",
+              "properties": {
+                "tokenBudget": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "responseReserve": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "overflow": {
+                  "type": "string",
+                  "enum": [
+                    "truncate",
+                    "summarize",
+                    "sliding_window"
+                  ]
+                },
+                "overflowModel": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "windowSize": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "tokenBudget",
+                "responseReserve",
+                "overflow"
+              ],
+              "additionalProperties": false
+            },
+            "emit": {
+              "type": "boolean"
             },
             "model": {
               "type": "string",

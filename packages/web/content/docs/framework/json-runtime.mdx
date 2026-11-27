@@ -173,11 +173,44 @@ Call an LLM with instructions and optional tools. Every `tools` entry is an obje
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `id` | `string` | required | Unique step identifier. |
-| `model` | `string` | `'openai/gpt-4o'` | Model identifier (OpenRouter format). |
-| `instructions` | `string` | required | System/user prompt for the LLM. |
+| `model` | `string` | harness `model` | Model identifier (OpenRouter format). Left out, the node runs on the harness's `model`, read when the node runs, or on `'openai/gpt-4o'` when the harness sets none. |
+| `instructions` | `string` | `undefined` | System/user prompt for the LLM. |
 | `tools` | `object[]` | `undefined` | Tool entries. **Connection**: `{ "connection": "<name>", "ops"?: [...] }` or `{ "mcp": { "name", "type": "http" \| "sse", "url", "headers"? } }` (see [Connection tools](#connection-tools)). **Client tool**: `{ "type": "<registered-tool-name>" }` — `type` is resolved against the registry; any `parameters` is ignored (the model supplies call args at runtime). **Server tool**: `{ "type": "openrouter:web_search" \| "openrouter:web_fetch", "parameters"?: {...} }` — run by the provider; `parameters` keys are camelCase (e.g. `maxResults`, `searchContextSize`), unknown keys dropped. Client vs server is decided by the `type` value. |
 | `toolChoice` | `"auto" \| "required" \| "none" \| { tool: string }` | `"auto"` | How the model may use its tools (see [Tool Choice](/docs/framework/steps/call-model#tool-choice)). `{ "tool": "<registered-tool-name>" }` must name a client tool in `tools`, or hydration throws `UNKNOWN_TOOL_CHOICE`. |
 | `params` | `object` | `undefined` | Model parameters: `temperature`, `topP`, `maxTokens`, `serviceTier` (`auto`, `default`, `fast`, `flex`, `priority`, `scale`, `ultrafast`). `stopSequences` is accepted but deprecated and never sent. |
+| `output` | `{ schema } \| { codec, library }` | `undefined` | [Structured output](#structured-output) as an inline JSON Schema, or a streaming codec reference resolved from `HydrationContext.uiLibraries`. |
+| `emit` | `boolean` | `true` | `false` keeps the step's framework events out of the stream. |
+| `projection` | `{ tokenBudget, responseReserve, overflow, overflowModel?, windowSize? }` | harness default | How this call's context window is fitted. |
+| `fromParams` | `{ model?, instructions?, tools?, emit? }` | `undefined` | Options read from the harness params. See [Options from params](#options-from-params). |
+
+#### Structured output
+
+`output: { "schema": <JSON Schema> }` holds the model to a JSON Schema written in the document. The node then behaves like a TypeScript `callModel` with an `output` schema: the model is sent the document's own schema as its response format, and its answer is parsed and checked against it. The node's output is the parsed value, which later nodes read from their input or from [`$steps`](/docs/framework/expressions#the-input).
+
+```json
+{
+  "kind": "sequence",
+  "id": "main",
+  "steps": [
+    {
+      "kind": "callModel",
+      "id": "triage",
+      "instructions": "Read the ticket.",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": { "title": { "type": "string" }, "urgent": { "type": "boolean" } },
+          "required": ["title", "urgent"],
+          "additionalProperties": false
+        }
+      }
+    },
+    { "kind": "compute", "id": "label", "expr": "$steps.triage.urgent ? 'now: ' & title : 'later'" }
+  ]
+}
+```
+
+An answer that is not JSON, or that breaks the schema, fails the node with `model_parse_error`. A schema that does not load fails hydration with [`INVALID_OUTPUT_SCHEMA`](/docs/framework/errors#invalid_output_schema). The schema is part of the document, so editing it is a new [flow version](/docs/framework/durability).
 
 ### Connection tools
 
@@ -224,7 +257,7 @@ An `acp-agent` node takes the same two entries in `tools`. A name the harness or
 
 ### runCode
 
-Run a serialised code body. Unlike the programmatic `runCode` (which carries a closure), the JSON form carries `execute` as a code **string**. The code is never `eval`'d in-process (Cloudflare Workers forbid `eval`); it is dispatched through a [subprocess adapter](/docs/framework/runtime) which runs the code and returns its stdout as the step output. The step input is passed to the subprocess on stdin.
+Run a serialised code body. Unlike the programmatic `runCode` (which carries a closure), the JSON form carries `execute` as a code **string**. To run a function of your own in process instead, leave `execute` out and name it in [`fromParams.execute`](#options-from-params). The code is never `eval`'d in-process (Cloudflare Workers forbid `eval`); it is dispatched through a [subprocess adapter](/docs/framework/runtime) which runs the code and returns its stdout as the step output. The step input is passed to the subprocess on stdin.
 
 ```json
 {
@@ -262,7 +295,50 @@ Invoke a registered tool directly.
 |---|---|---|---|
 | `id` | `string` | required | Unique step identifier. |
 | `toolName` | `string` | required | Name of a tool in the tool registry. |
-| `args` | `Record<string, unknown>` | `{}` | Arguments passed to the tool's `execute` function. |
+| `args` | `Record<string, unknown>` | `{}` | Arguments passed to the tool's `execute` function: JSON, with `{ "$expr" }` wherever a value is computed. |
+
+The node runs as the [`invokeTool` step](/docs/framework/steps/invoke-tool) does: the tool's `input` schema checks the args, steering layers and the approver of a tool that declares `needsApproval` can refuse the call, and the node's output is the tool's result.
+
+In `args`, `{ "$expr": "<JSONata>" }` computes a value from the node's input and from [`$steps`](/docs/framework/expressions#the-input), `{ "$literal": … }` passes data through untouched, and one `{ "$expr" }` in place of the whole object computes every argument. Any other object, `$`-prefixed keys included, is data. The args are what the node writes: unlike `invokeTool()`, a node does not lay them over its input. Write `{ "$expr": "$" }` to pass the input along.
+
+```json
+{
+  "kind": "invokeTool",
+  "id": "file",
+  "toolName": "file-ticket",
+  "args": {
+    "title": { "$expr": "$steps.triage.title" },
+    "urgent": { "$expr": "urgent" },
+    "source": "chat"
+  }
+}
+```
+
+A registered tool is also how a document runs host code in process, with no subprocess adapter, and how it fails the flow. A tool that throws fails its node with `step_failed`: `stepId` names the node and `cause` is the error the tool threw. Each enclosing `sequence` wraps that in its own `step_failed`, so walk `cause` to the innermost one. This document stops with the host's own error once a loop has used up its tries:
+
+```json
+{
+  "kind": "sequence",
+  "id": "main",
+  "steps": [
+    {
+      "kind": "loop",
+      "id": "tries",
+      "body": { "kind": "callModel", "id": "attempt", "instructions": "Try the task. Answer {\"ok\": true} when it worked.",
+                "output": { "schema": { "type": "object", "properties": { "ok": { "type": "boolean" } }, "required": ["ok"] } } },
+      "until": { "kind": "any", "predicates": [{ "kind": "expr", "expr": "ok" }, { "kind": "maxSteps", "n": 3 }] }
+    },
+    {
+      "kind": "conditional",
+      "id": "check",
+      "routes": [
+        { "expr": "ok = false and $runs.tries = 3",
+          "target": { "kind": "invokeTool", "id": "give-up", "toolName": "fail", "args": { "node": "tries" } } }
+      ]
+    }
+  ]
+}
+```
 
 ### compute
 
@@ -360,6 +436,27 @@ Dynamic fan-out — one child per array item (data-dependent N):
 | `over` | `string \| string[]` | `undefined` | With `each`: selector key into the input JSON object locating the array. When omitted, the input string is parsed as a JSON array directly. A list of connection names instead fans `each` out over those connections, binding each name to `$item` (see [Fan-out over connections](#fan-out-over-connections)). |
 | `merge` | `'last' \| 'first' \| 'concat'` | `'last'` | How to combine results. `concat` writes object results (such as a `decide` node's answers) as JSON. Ignored in `race` mode. |
 | `concurrency` | `number` | `undefined` | Maximum concurrent paths. |
+
+To key the results by path, follow the fork with a `compute` that reads each path's output from [`$steps`](/docs/framework/expressions#the-input):
+
+```json
+{
+  "kind": "sequence",
+  "id": "main",
+  "steps": [
+    {
+      "kind": "inParallel",
+      "id": "fan",
+      "mode": "all",
+      "paths": [
+        { "kind": "callModel", "id": "fast", "instructions": "Answer briefly." },
+        { "kind": "callModel", "id": "careful", "instructions": "Answer in depth." }
+      ]
+    },
+    { "kind": "compute", "id": "keyed", "expr": "{ \"fast\": $steps.fast, \"careful\": $steps.careful }" }
+  ]
+}
+```
 
 ### conditional
 
@@ -460,8 +557,11 @@ Ask a model typed questions about the context. Hydrates into [`decide`](/docs/fr
 | `view` | `'full' \| 'layers' \| 'none'` | `'full'` | How much of the assembled view the model sees. |
 | `samples` | `number` | `1` | Positive integer. Runs to average on the estimated path. |
 | `headers` | `Record<string, string>` | `undefined` | Extra HTTP headers for the native request. Ignored on the estimated path. Do not put credentials in a workflow document. |
+| `projection` | `{ tokenBudget, responseReserve, overflow, overflowModel?, windowSize? }` | harness default | How this call's context window is fitted. |
+| `emit` | `boolean` | `true` | `false` keeps the step's framework events out of the stream. |
+| `fromParams` | `{ model?, instructions?, context?, emit? }` | `undefined` | Options read from the harness params: `context` is the step's `context` selector. See [Options from params](#options-from-params). |
 
-A `decide` node outputs the answers object. Inside a `sequence`, the next node receives it as JSON, so a `callModel` node can read it. A `conditional` matches against the answers' string values, and a `inParallel` with `merge: "concat"` writes them as JSON. The `context` selector is a closure and has no JSON form.
+A `decide` node outputs the answers object. Inside a `sequence`, the next node receives it as JSON, so a `callModel` node can read it. A `conditional` matches against the answers' string values, and a `inParallel` with `merge: "concat"` writes them as JSON. The `context` selector is a function: name the harness param that holds it in `fromParams.context`.
 
 ### routeSwitch
 
@@ -493,12 +593,13 @@ Run a `decide` node and route the original input to the case its answer picks. H
 |---|---|---|---|
 | `id` | `string` | required | Unique step identifier. |
 | `decide` | `DecideWorkflowNode` | required | The decision to route by. |
-| `on` | `string` | required | Id of the question to route by. |
+| `on` | `string` | required | Id of the question to route by. To route by a function of the answers instead, leave it out and name the function in [`fromParams.on`](#options-from-params). |
 | `cases` | `Record<string, WorkflowNode>` | required | One node per outcome of `on`: each choice, `"true"` and `"false"` for a boolean, or each level label for a score. |
 | `minConfidence` | `number` | `undefined` | In `[0, 1]`. Below this confidence, take `uncertain`. |
 | `uncertain` | `WorkflowNode` | required | Taken on refusal or low confidence. |
+| `default` | `WorkflowNode` | `undefined` | With `fromParams.on` only, and then required: taken when the function gives a key with no case. `uncertain` is optional there and `minConfidence` is not taken. |
 
-Schema validation checks that `on` names a question of the `decide` node, that `cases` covers every outcome of that question, and that `uncertain` is present. Only the key form has a JSON node; the function form of `on` is a closure.
+In the key form, schema validation checks that `on` names a question of the `decide` node, that `cases` covers every outcome of that question, and that `uncertain` is present. The function form of `on` is a closure: name the harness param that holds it in `fromParams.on`.
 
 ### loop
 
@@ -520,6 +621,10 @@ Repeat a body node until a predicate is satisfied.
 | `body` | `WorkflowNode` | required | The node to repeat. |
 | `until` | `UntilPredicate` | required | Termination condition. See [Until Predicates](#until-predicates). |
 | `maxIterations` | `number \| "infinity"` | `1000` | Hard cap on iterations: a positive integer, or exactly `"infinity"` for none. |
+| `onError` | `'retry' \| 'skip' \| 'abort'` | `'abort'` | What a failed body does: run it again, keep the last output, or fail the loop. [`fromParams.onError`](#options-from-params) decides per error. |
+| `maxHistorySize` | `number` | builder default | The most outputs kept for `until`. |
+| `inbox` | `{ name, mode?, capacity?, external? }` | `undefined` | A channel of text read before the loop stops; a message runs it again. `mode` defaults to `'queue'`. |
+| `parkTimeout` | `number` | `undefined` | How long, in ms, the loop waits on `inbox` before it stops. |
 
 JSON cannot encode `Infinity`, so an uncapped loop spells it `"infinity"`; the hydrator maps it to `Number.POSITIVE_INFINITY`. An uncapped loop ends only through its `until` predicate, an error, or an aborted context, so pair it with a predicate the body's output can satisfy:
 
@@ -557,6 +662,7 @@ Run a child node in an isolated child context.
 | `id` | `string` | required | Unique step identifier. |
 | `child` | `WorkflowNode` | required | The node to execute in a child context. |
 | `timeout` | `number` | `undefined` | Timeout in milliseconds. |
+| `subprocess` | `string` | `undefined` | Named subprocess adapter the child runs through: a name `HydrationContext.resolveSubprocess` knows, resolved when the document hydrates. Omit for the harness adapter. |
 | `layers` | `string[]` | `undefined` | Context layer names for the child, resolved from the hydration context registry (same resolution as `withContext`). Omit to inherit the parent's layers; naming layers **replaces** them for the child. |
 | `steers` | `'forward' \| 'hold'` | `'hold'` | `'forward'` lets the child apply [steers](/docs/framework/runtime#steering-a-running-turn) sent to the session while it runs. `'hold'` keeps them queued until the child returns. |
 
@@ -608,6 +714,8 @@ Execute a step on a fixed interval (periodic scheduling).
 | `step` | `WorkflowNode` | required | The node to execute each interval. |
 | `interval` | `number` | required | Interval in milliseconds. |
 | `onError` | `'continue' \| 'fail'` | `undefined` | Whether to keep running or abort on error. |
+| `jitter` | `number` | `undefined` | The most, in ms, added at random to each interval. |
+| `inbox` | `{ name, mode?, capacity?, external? }` | `undefined` | A channel whose messages run the step at once. |
 
 ### subflow
 
@@ -767,7 +875,7 @@ Checks claims about what a connection shows. See [Verification](/docs/framework/
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `id` | `string` | required | Unique step identifier. |
-| `subject` | `string \| string[] \| { "$expr" }` | required | The connection checked, or a list (one verify per connection, ids `<id>.<name>`, the worst outcome). |
+| `subject` | `string \| string[] \| { "$expr" }` | required | The connection checked, or a list (one verify per connection, ids `<id>.<name>`, the worst outcome). With a list, `act` runs once per subject with its name bound to `$item`. Left out when `fromParams.subject` names a function that gives it. |
 | `expect` | `Matcher[]` | XOR | What must become true. A matcher names one sense (`ui`, `net`, `log`, `route`, `state`, `signal`, `storage`, `time`, `visual`, `x-…`) or `event`, plus optional `count`, `atLeast`, `atMost`, `equals`, `tolerance`. Supply exactly one of `expect` / `claims`. |
 | `never` | `Matcher[]` | `undefined` | What must not happen while the action runs. |
 | `claims` / `constraints` | OVP documents | — | The full OVP form, instead of `expect` / `never`. |
@@ -775,6 +883,64 @@ Checks claims about what a connection shows. See [Verification](/docs/framework/
 | `witnesses` | `string[]` | `undefined` | Connections that confirm from outside the subject. |
 | `close` | `{ until?, event?, quietMs?, timeoutMs? }` | quiet 500 ms, at most 15 s | When the window closes. `event` is required with `until: 'event'`, and only then. |
 | `intent` | `string` | `undefined` | Why, kept in the run record. |
+
+## Options from params
+
+Where a TypeScript step takes a function, such as a `model` getter, a `merge`, or a loop's `onError`, a JSON node names one. The function lives in the harness `params`, and the node's `fromParams` maps an option to the param that holds it:
+
+```json
+{
+  "kind": "sequence",
+  "id": "main",
+  "steps": [
+    { "kind": "runCode", "id": "load", "fromParams": { "execute": "loadOrder" } },
+    { "kind": "callModel", "id": "ask", "instructions": "Summarize the order.", "fromParams": { "model": "pickModel" } }
+  ]
+}
+```
+
+```ts
+import { AgentHarness, type Context } from '@noetic-tools/core';
+
+const harness = new AgentHarness({
+  name: 'orders',
+  params: {
+    loadOrder: async (input: string) => JSON.stringify({ id: input, total: 42 }),
+    pickModel: (ctx: Context) => (ctx.depth > 0 ? 'openai/gpt-4o-mini' : 'openai/gpt-4o'),
+  },
+});
+```
+
+A param is looked up every time its option is read, and a function is called then, with the arguments the option's TypeScript function takes. Nothing is cached: swap a param and the next read sees it. A param that is not a function is the option's value, so `"fromParams": { "instructions": "systemPrompt" }` reads a string. An option goes on the node or in `fromParams`, never both.
+
+| Node | Option | Called with | Gives |
+|---|---|---|---|
+| every node | `replayKey` | `(input, ctx)` | The node's replay key. |
+| every node | `emitItems` | `(output, ctx)` | What the node emits: text, an item, or items. Must be a function. |
+| every node | `onStart`, `onDone` | `(input, ctx)`, `(output, ctx)` | The hooks of the node's `emitItems` config, in place of its expressions. Each may be a generator that yields the item's events. |
+| `callModel` | `model`, `instructions`, `tools` | `(ctx)` | The model id, the instructions, the tool entries. |
+| `callModel`, `decide`, `acp-agent` | `emit` | `(eventType, data, ctx)` | `false` to drop a framework event. |
+| `runCode` | `execute` | `(input, ctx)` | The node's output. Runs in process: the node carries no code and needs no subprocess adapter. A generator's yields are events of the item `emitItems` names. |
+| `invokeTool`, `call` | `args` | `(input, ctx)` | The args. |
+| `call`, `wait` | `connection` | `(input, ctx)` | The name of the connection to run on. |
+| `wait` | `filter` | `(event, input, ctx)` | `true` for the awaited event. |
+| `verify` | `subject` | `(input, ctx)` | The name of the connection checked; the node then carries no `subject`. |
+| `decide` | `model`, `instructions`, `context` | `(ctx)` | The model id, the instructions, extra state for the decision. |
+| `routeSwitch` | `on` | `(answers, ctx)` | The case to take. The node needs `default`; `uncertain` is optional. |
+| `conditional` | `route` | `(input, ctx, run)` | The `id` of the target to take, or nothing for `default`. The routes then carry no test. |
+| `inParallel` | `merge` | `(results, ctx)` | The node's output. In `settle` mode the results are the settled ones, failures included. |
+| `loop` | `prepareNext` | `(output, verdict, ctx)` | The next iteration's input. |
+| `loop` | `onError` | `(error, ctx)` | `'retry'`, `'skip'` or `'abort'`. |
+| `acp-agent` | `prompt`, `content`, `instructions`, `cwd`, `mode`, `model`, `tools` | `(ctx)` | As the [step's options](/docs/framework/acp-agents). |
+| `acp-agent` | `onPermissionRequest` | `(request, ctx, info)` | The permission outcome. Must be a function. |
+
+A loop's `until` takes a function as `{ "kind": "param", "name": "<param>" }`.
+
+`input` is what a JSON node receives: inside a `sequence`, the text of the node before it, so an object arrives as JSON text. A function may return a promise wherever its TypeScript option may. A loop's `prepareNext` and `onError`, `routeSwitch`'s `on`, an `emit` filter and `replayKey` are synchronous; a function that gives a promise there fails with [`PARAM_MUST_BE_SYNC`](/docs/framework/errors#param_must_be_sync) (for `replayKey`, the node runs without replay instead). An until function gives a verdict, `{ stop: boolean }`. A `route` function names its target by the id the document wrote, also inside a subflow or an `each` template.
+
+Param names are static, so they are checked before anything runs: a run or turn of a document that reads a param the harness does not have fails at its start with [`UNKNOWN_PARAM_REFERENCE`](/docs/framework/errors#unknown_param_reference).
+
+A param can hold anything, a secret included. `parseAndRunWorkflow` and `dynamicWorkflow` therefore let a document read only the params their `params` option names; with none named, a document that reads any fails with [`PARAM_NOT_ALLOWED`](/docs/framework/errors#param_not_allowed). Such a document cannot turn `emit` off on a `callModel`, `decide` or `acp-agent` node, so what it does stays in the stream. A granted function may be named at any option, with one group left out: such a document may never read from a param an option that decides what a node may reach, because the connection and ACP grants cannot check what a function gives later. Those are `tools` on `callModel`; `tools`, `cwd`, `mode`, `model` and `onPermissionRequest` on `acp-agent`; `connection` on `call` and `wait`; `subject` on `verify`. `hydrateWorkflow` and `workflow()`, for documents you wrote, apply neither limit.
 
 ## Until Predicates
 
@@ -793,6 +959,7 @@ Loop termination conditions are expressed as named predicates. Each predicate is
 | `converged` | `threshold?: number` | Stop when output similarity between rounds exceeds `threshold` (0-1, defaults to the builder default). |
 | `never` | -- | Never stop; the loop ends on its `maxIterations` cap, an error, or an aborted context. |
 | `expr` | `expr: string` | Stop when a [JSONata expression](/docs/framework/expressions) over the iteration's output gives `true`. |
+| `param` | `name: string` | Ask the `Until` function the harness param `name` holds. See [Options from params](#options-from-params). |
 | `decide` | a [decide node](#decide) | A model answers one boolean question about the iteration's output: yes stops, no or a refusal continues. |
 
 ### Decide as a predicate
@@ -898,6 +1065,7 @@ const response = await harness.getAgentResponse();
 | `acp` | `AcpAllowlist` | `undefined` | Per agent id, the most a generated `acp-agent` node may ask in `permissions`, `mode`, `model`, `subprocess`, `fs`, `shell`, `cwd`, `clientCapabilities` and `session`. An agent without an entry gets the narrowest defaults; the planner is shown each agent's limits. See [What a document may ask of an agent](#what-a-document-may-ask-of-an-agent). |
 | `runCode` | `RunCodeGrant` | `undefined` | The harness subprocess adapters a generated `runCode` node may name in `subprocess`. Without it a node may name none; the planner is shown the granted names. See [Where a document's code may run](#where-a-documents-code-may-run). |
 | `mcp` | `McpAllowlist` | `undefined` | The MCP servers a generated document may attach, with their secrets, policy and `provider`. Without it, every server is refused; the planner is shown only the granted servers. See [MCP servers](#mcp-servers). |
+| `params` | `string[]` | `[]` | The harness params the document may read through [`fromParams`](#options-from-params). A document that reads any other fails with `PARAM_NOT_ALLOWED`. |
 
 Throws `NoeticConfigError` with code `WORKFLOW_VALIDATION_FAILED` if the planner cannot produce a valid workflow within the revision limit, `CONNECTION_UNKNOWN` if the allowlist names a connection the harness does not have, and `CONNECTION_NOT_ALLOWED` if the last revision still asks for more than `connections`, `acp`, `runCode` or `mcp` grants.
 
@@ -942,6 +1110,7 @@ const result = await parseAndRunWorkflow({
 | `acp` | `AcpAllowlist` | `undefined` | Per agent id, the most the document's `acp-agent` nodes may ask in `permissions`, `mode`, `model`, `subprocess`, `fs`, `shell`, `cwd`, `clientCapabilities` and `session`. An agent without an entry gets the narrowest defaults. See [What a document may ask of an agent](#what-a-document-may-ask-of-an-agent). |
 | `runCode` | `RunCodeGrant` | `undefined` | The harness subprocess adapters the document's `runCode` nodes may name in `subprocess`. Without it a node may name none. See [Where a document's code may run](#where-a-documents-code-may-run). |
 | `mcp` | `McpAllowlist` | `undefined` | The MCP servers the document may attach, with their secrets, policy and `provider`. Absence refuses every server. See [MCP servers](#mcp-servers). |
+| `params` | `string[]` | `[]` | The harness params the document may read through [`fromParams`](#options-from-params). A document that reads any other fails with `PARAM_NOT_ALLOWED`. |
 
 Returns `Promise<string>` -- the string output of the executed workflow.
 
@@ -1167,7 +1336,7 @@ Give a harness the hydrated root, or a `workflow()` step, as its `agentGraph` an
 | `layers` | `ReadonlyMap<string, ContextLayer>` | Optional. Named context layers that `withContext`/`spawn` nodes reference; an unknown name raises `UNKNOWN_LAYER_REFERENCE`. Without a registry, those nodes run with the harness-default layers. |
 | `acpAgents` | `ReadonlyMap<string, AcpAgent>` | Optional. ACP agent adapters keyed by `agentId`, resolving an `acp-agent` node's `agent` field. |
 | `uiLibraries` | `ReadonlyMap<string, OutputCodec>` | Optional. Output codecs for `callModel` nodes' `output` codec references. |
-| `resolveSubprocess` | `(ref: string) => SubprocessAdapter \| undefined` | Optional. Resolves the name a `runCode` node's `subprocess` gives. A name it does not know is looked up among the harness's subprocess adapters, which a document held to a `runCode` grant may name only when the grant lists it. When a `runCode` node omits the name, the harness default (`ctx.subprocess`) is used at execution time. |
+| `resolveSubprocess` | `(ref: string) => SubprocessAdapter \| undefined` | Optional. Resolves the name a `runCode` or `spawn` node's `subprocess` gives. For a `runCode` node that carries code, a name it does not know is looked up among the harness's subprocess adapters, which a document held to a `runCode` grant may name only when the grant lists it. A `spawn` node, and a `runCode` node whose `execute` is a function, resolve their `subprocess` through `resolveSubprocess` alone, when the document hydrates. When a `runCode` node omits the name, the harness default (`ctx.subprocess`) is used at execution time. |
 | `workflows` | `ReadonlyMap<string, WorkflowDocument>` | Optional. Named sub-workflow documents that `subflow` nodes resolve via `ref` — lazily, so a live map may gain entries after hydration. The entries present at hydration are part of the flow's version and are stored with each turn; later ones are not. |
 | `maxRecursionDepth` | `number` | Optional. Deepest chain of named-ref resolutions on one path; default `100`, `Infinity` for none. |
 | `expressionLimits` | `ExpressionLimits` | Optional. Bounds on each expression evaluation; unset fields use `DEFAULT_EXPRESSION_LIMITS`. |
@@ -1180,11 +1349,11 @@ Throws `NoeticConfigError` with code `UNKNOWN_NODE_KIND` if a node kind is unrec
 
 ## Limitations
 
-- **`runCode` nodes need a subprocess adapter** -- the JSON `runCode` node carries its body as a code string and dispatches it through a subprocess adapter (it is never `eval`'d in-process). A host that uses `runCode` nodes must supply an adapter capable of running the code and capturing its stdout.
+- **`runCode` code strings need a subprocess adapter** -- a `runCode` node that carries its body as a code string dispatches it through a subprocess adapter (it is never `eval`'d in-process). A host that uses such nodes must supply an adapter capable of running the code and capturing its stdout. A node that names a function in `fromParams.execute` runs in process and needs none.
 - **Tools resolved by name** -- every tool referenced in the workflow must be passed in the `tools` array. The hydrator looks them up by `tool.name`.
 - **Subflow refs resolve at execution time** -- a `subflow` node's `ref` is looked up on first execution, not during hydration, so an unregistered name surfaces as `UNKNOWN_WORKFLOW_REFERENCE` when the node runs. Depth limits do not see through refs; `maxRecursionDepth` bounds the depth of any one recursive path, but not total fan-out — hosts should keep it finite and cap registry size and breadth for untrusted documents.
 - **Unbounded control flow is opt-in** -- `"maxIterations": "infinity"` and `maxRecursionDepth: Infinity` remove the runtime's bounds. A host that runs untrusted documents and must bound every loop should reject `"infinity"` before hydrating.
-- **Conditional routes test, they do not compute** -- a `conditional` route is a substring `match` or a JSONata `expr` test. Routing that needs to run a step or call a function requires a programmatic `conditional()` step.
+- **Functions are named, not written** -- a document cannot hold a function. Where a step takes one, the node names a harness param that holds it. See [Options from params](#options-from-params). The functions with no JSON form are those that return steps, since a document's steps are its nodes: `inParallel`'s `paths` (`each` and `over` cover a fan-out sized by the data), `verify`'s `act` as a function of the subject (a list `subject` runs `act` once per subject, with `$item` bound to it), and a `conditional` `route` that builds its step (the route function names one of the node's targets).
 
 ## Plans as Workflows
 

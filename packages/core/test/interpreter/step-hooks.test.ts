@@ -7,8 +7,12 @@ import type { StorageAdapter } from '@noetic-tools/context';
 import type { AgentHooks, Context, ContextData, Step } from '@noetic-tools/types';
 import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
 import { runCode } from '../../src/builders/step-builders';
+import { hydrateWorkflow } from '../../src/builders/workflow-source';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import { execute } from '../../src/interpreter/execute';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
+import type { WorkflowNode } from '../../src/schemas/workflow';
+import { makeLLMResponse, sleep } from '../_helpers';
 
 //#region Fixtures
 
@@ -321,6 +325,143 @@ describe('step hooks', () => {
     ).toBe('x');
     expect(log).toEqual([
       'run:plain',
+    ]);
+  });
+});
+
+describe('a beforeStep that refuses model calls', () => {
+  /** A harness running `root` as its flow, whose hook refuses `callModel` and `decide` steps once `gate.shut`. */
+  function gated(root: WorkflowNode): {
+    harness: AgentHarness;
+    gate: {
+      shut: boolean;
+    };
+    asked: string[];
+    modelCalls: AbortSignal[];
+  } {
+    const gate = {
+      shut: false,
+    };
+    const asked: string[] = [];
+    const modelCalls: AbortSignal[] = [];
+    const harness = new AgentHarness({
+      name: 'gated',
+      params: {},
+      model: 'test/model',
+      decisionModel: 'test/decider',
+      agentGraph: hydrateWorkflow(
+        {
+          version: 1,
+          root,
+        },
+        {
+          tools: new Map(),
+          executeStep: execute,
+        },
+      ),
+      hooks: {
+        beforeStep: async (step: Step) => {
+          if (step.kind !== 'callModel' && step.kind !== 'decide') {
+            return;
+          }
+          asked.push(`${step.kind}:${step.id}`);
+          if (gate.shut) {
+            throw new NoeticErrorImpl({
+              kind: 'cancelled',
+              reason: 'the turn was stopped',
+            });
+          }
+        },
+      },
+      _testCallModel: async (request) => {
+        assert(request.signal);
+        modelCalls.push(request.signal);
+        // The first call hangs until its turn is aborted.
+        if (modelCalls.length === 1) {
+          await new Promise((resolve) => request.signal?.addEventListener('abort', resolve));
+        }
+        return makeLLMResponse('answer');
+      },
+      _testDecide: async () => {
+        expect.unreachable('the decider was refused');
+      },
+    });
+    return {
+      harness,
+      gate,
+      asked,
+      modelCalls,
+    };
+  }
+
+  async function settled(condition: () => boolean): Promise<void> {
+    for (let i = 0; i < 200 && !condition(); i++) {
+      await sleep(5);
+    }
+    assert(condition());
+  }
+
+  const ASK: WorkflowNode = {
+    kind: 'callModel',
+    id: 'ask',
+    instructions: 'Answer.',
+  };
+
+  it('runs for the root step of an execute() turn', async () => {
+    const { harness, gate, asked, modelCalls } = gated(ASK);
+    gate.shut = true;
+    await harness.execute('one');
+    const error = await caught(harness.getAgentResponse());
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('cancelled');
+    expect(asked).toEqual([
+      'callModel:ask',
+    ]);
+    expect(modelCalls).toHaveLength(0);
+  });
+
+  it('runs for the queued turn core starts after an abort', async () => {
+    const { harness, gate, asked, modelCalls } = gated(ASK);
+    await harness.execute('one');
+    await harness.execute('two');
+    await settled(() => modelCalls.length === 1);
+    gate.shut = true;
+    await harness.abort();
+    await settled(() => asked.length === 2);
+    const error = await caught(harness.getAgentResponse());
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('cancelled');
+    // One call, made before the gate shut; the queued turn was refused its own.
+    expect(modelCalls).toHaveLength(1);
+  });
+
+  it("runs for a loop's decider", async () => {
+    const { harness, gate, asked } = gated({
+      kind: 'loop',
+      id: 'tries',
+      body: {
+        kind: 'compute',
+        id: 'try',
+        expr: '$',
+      },
+      until: {
+        kind: 'decide',
+        id: 'done',
+        questions: {
+          done: {
+            type: 'boolean',
+            instructions: 'Is it done?',
+          },
+        },
+      },
+    });
+    gate.shut = true;
+    await harness.execute('one');
+    const error = await caught(harness.getAgentResponse());
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('cancelled');
+    expect(asked).toEqual([
+      'decide:done',
     ]);
   });
 });

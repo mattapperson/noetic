@@ -507,7 +507,7 @@ Every connection call — from the model, a step, or a document — passes the s
 5. `beforeToolCall` layers and the harness approver, as for any tool.
 6. Secrets are filled in, and the call is sent.
 
-A refusal fails a step with `steering_denied` and returns a tool error to the model. Author-written steps are gated like everything else.
+A refusal fails a step with `steering_denied` and returns a tool error to the model. Author-written steps are gated like everything else. On a harness with no approver, a step's call that needs approval is held for a person, whether a `step.call` or a JSON `call` node makes it.
 
 ## Errors
 

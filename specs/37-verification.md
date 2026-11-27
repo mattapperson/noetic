@@ -41,7 +41,7 @@ verification run is an OVP `VerificationRun` any OVP tool can read and check.
 
 | Field | Meaning |
 |---|---|
-| `subject` | The connection being checked — or a list (`[ios, android]`), which runs one verify per connection in parallel, with ids `<id>.<name>` and the worst outcome. |
+| `subject` | The connection being checked — or a list (`[ios, android]`), which runs one verify per connection in parallel, with ids `<id>.<name>` and the worst outcome. In a JSON node, each one's `act` reads its connection's name as `$item`. |
 | `expect` | What must become true. Each entry is a sense and a matcher (spec 36 § Senses), optionally a count. |
 | `never` | What must not happen at any point while the action runs. |
 | `act` | The action: a step, or an array of steps run in sequence. Must contain at least one operation with effects, or a model call. With a list subject, `act` is a function of each subject's name — `(subject) => step.call({ connection: subject, … })` — so each verify acts on its own subject; a fixed `act` that names one of the subjects is `VERIFY_INVALID`. |

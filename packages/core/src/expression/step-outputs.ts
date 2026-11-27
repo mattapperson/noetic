@@ -1,6 +1,7 @@
 /**
- * The `$steps` binding's store (spec 33 § The Input): the outputs of workflow
- * nodes that have completed in the enclosing workflow, by node id.
+ * The store behind the `$steps` and `$runs` bindings (spec 33 § The Input): the
+ * outputs of workflow nodes that have completed in the enclosing workflow, and
+ * how many times each loop's body has run, by node id.
  *
  * One store per run and per hydrated document: keyed on the run's root context,
  * so concurrent runs of the same document never read each other's outputs, and
@@ -15,8 +16,14 @@ import { readInput } from './jsonata';
 
 //#region State
 
-/** Run → document scope → node id → output. */
-const stores = new WeakMap<object, WeakMap<object, Map<string, unknown>>>();
+/** What one document has recorded in one run, each by node id. */
+interface Store {
+  readonly outputs: Map<string, unknown>;
+  readonly runs: Map<string, number>;
+}
+
+/** Run → document scope → what it recorded. */
+const stores = new WeakMap<object, WeakMap<object, Store>>();
 
 /** Steps whose outputs are recorded — those hydrated from a JSON workflow — and the document each belongs to. */
 const recorded = new WeakMap<object, object>();
@@ -48,15 +55,18 @@ function runKey(ctx: Context): object {
   );
 }
 
-function storeOf(ctx: Context, scope: object): Map<string, unknown> {
+function storeOf(ctx: Context, scope: object): Store {
   const key = runKey(ctx);
-  const byScope = stores.get(key) ?? new WeakMap<object, Map<string, unknown>>();
+  const byScope = stores.get(key) ?? new WeakMap<object, Store>();
   stores.set(key, byScope);
   const existing = byScope.get(scope);
   if (existing) {
     return existing;
   }
-  const created = new Map<string, unknown>();
+  const created: Store = {
+    outputs: new Map(),
+    runs: new Map(),
+  };
   byScope.set(scope, created);
   return created;
 }
@@ -87,7 +97,24 @@ export function recordStepOutput(
   },
   output: unknown,
 ): void {
-  storeOf(ctx, node.scope).set(node.id, output);
+  storeOf(ctx, node.scope).outputs.set(node.id, output);
+}
+
+/**
+ * Records how many times the body of a workflow `loop` node has run in its
+ * current run, for `$runs`. A step that no JSON workflow hydrated records nothing.
+ */
+export function recordLoopRuns(
+  ctx: Context,
+  loop: {
+    readonly id: string;
+  },
+  runs: number,
+): void {
+  const scope = recorded.get(loop);
+  if (scope) {
+    storeOf(ctx, scope).runs.set(loop.id, runs);
+  }
 }
 
 /** The `$steps` value for an expression of document `scope` evaluated in `ctx`: its recorded outputs, read by `readInput`. */
@@ -97,10 +124,26 @@ export function stepOutputsOf(ctx: Context, scope: object): Readonly<Record<stri
     return {};
   }
   const out: Record<string, unknown> = {};
-  for (const [id, output] of store) {
+  for (const [id, output] of store.outputs) {
     out[id] = readInput(output);
   }
   return out;
+}
+
+/** How many times the body of workflow `loop` node `loop` has run, when it is one and has started. */
+export function loopRuns(
+  ctx: Context,
+  loop: {
+    readonly id: string;
+  },
+): number | undefined {
+  const scope = recorded.get(loop);
+  return scope ? stores.get(runKey(ctx))?.get(scope)?.runs.get(loop.id) : undefined;
+}
+
+/** The `$runs` value for an expression of document `scope` evaluated in `ctx`: body runs by loop node id. */
+export function loopRunsOf(ctx: Context, scope: object): Readonly<Record<string, number>> {
+  return Object.fromEntries(stores.get(runKey(ctx))?.get(scope)?.runs ?? []);
 }
 
 //#endregion

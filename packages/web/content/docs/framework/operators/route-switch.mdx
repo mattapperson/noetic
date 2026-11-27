@@ -206,7 +206,7 @@ The function never sees a refusal. If any answer is refused, the switch takes `u
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
 | `decide` | `DecideStep` | Yes | The decide step to run |
-| `on` | `(answers) => string` | Yes | Picks a case key from the answers, refusals removed |
+| `on` | `(answers, ctx) => string` | Yes | Picks a case key from the answers, refusals removed |
 | `cases` | `Partial<Record<C, Step>>` | Yes | Steps by case key; keys must be ones `on` can return |
 | `default` | `Step` | Yes | Taken when `on` returns a key with no case, and on refusal when `uncertain` is unset |
 | `uncertain` | `Step` | No | Taken when any answer is refused |

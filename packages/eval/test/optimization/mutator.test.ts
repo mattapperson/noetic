@@ -31,8 +31,8 @@ function getCallModelModel(s: Step): string {
     throw new Error(`Expected callModel step, got ${s.kind}`);
   }
   const { model } = s;
-  if (typeof model === 'function') {
-    throw new Error('Expected eager string model on callModel step, got function-form Lazy getter');
+  if (typeof model !== 'string') {
+    throw new Error('Expected eager string model on callModel step');
   }
   return model;
 }

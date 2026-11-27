@@ -80,6 +80,9 @@ function kindExpressionsOf(node: WorkflowNode): Found[] {
       },
     ];
   }
+  if (node.kind === 'invokeTool') {
+    return valueExpressions(node.args, `args of invokeTool node '${node.id}'`);
+  }
   if (node.kind === 'conditional') {
     return node.routes.flatMap((route, i) =>
       route.expr === undefined

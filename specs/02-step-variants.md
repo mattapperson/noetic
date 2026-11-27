@@ -63,7 +63,7 @@ type Lazy<T, TContext = ContextData> =
 
 interface CallModelOpts<TContext, O, I = unknown> extends StepReplay<TContext, I> {
   id: string;
-  model: Lazy<string, TContext>;                    // e.g. 'anthropic/claude-sonnet-4-20250514' — or a (ctx) => string getter
+  model?: Lazy<string | undefined, TContext>;       // e.g. 'anthropic/claude-sonnet-4-20250514' — or a (ctx) => string getter; falls back to the harness `model`
   instructions?: Lazy<string | undefined, TContext>;
   // Allowed tool subset (undefined = all, [] = none). A `ServerToolSpec` is an
   // OpenRouter server tool the provider executes itself (e.g. web search).
@@ -72,7 +72,8 @@ interface CallModelOpts<TContext, O, I = unknown> extends StepReplay<TContext, I
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;        // structured output schema or streaming codec (see 28-generative-ui)
   outputJsonSchema?: Record<string, unknown>;     // explicit JSON Schema override for non-Zod `output`
   params?: ModelParams;                            // temperature, topP, etc.
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
+  projection?: ProjectionPolicy;                   // how this call's context window is fitted; overrides the harness default
 }
 
 interface ModelParams {
@@ -103,6 +104,7 @@ type ToolChoice = ToolChoiceMode | { tool: string };  // { tool } forces one cli
 
 - **Eager vs lazy — semantics are identical** after resolution. An eager `model: 'gpt-4'` behaves the same as `model: () => 'gpt-4'`.
 - **Model validation moves to runtime for getters.** `callModel()` validates eager `model` strings at build time; function-form models are validated after resolution inside `executeLLM` with the same `MISSING_MODEL` `NoeticConfigError`.
+- **The harness `model` is the default.** A step with no `model`, or whose getter returns `undefined`, runs on `harness.config.model` (`08-runtime`). With neither, the step fails with `MISSING_MODEL` when it runs. A JSON `callModel` node has one more fallback, `openai/gpt-4o` (spec 26).
 - **Function-form `tools` do NOT contribute to `ctx.unifiedTools`.** `collectAllTools` skips them since they can't be inspected without a live context. Tools needed in the harness-wide pool should be registered via `AgentHarness.tools` (see spec 08).
 
 ```typescript
@@ -278,7 +280,7 @@ May have side effects, may need human approval before execution (preventive gati
 interface InvokeToolOpts<I, O, TContext = ContextData> extends StepReplay<TContext, I> {
   id: string;
   tool: Tool<I, O>;
-  args?: Partial<I>;  // can override LLM-provided args
+  args?: Partial<I> | ((input: I, ctx: Context) => unknown);  // preset args laid over the input, or a function giving them all
 }
 ```
 

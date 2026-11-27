@@ -73,6 +73,11 @@ export type UntilPredicate =
       kind: 'expr';
       expr: Expression;
     }
+  | {
+      /** A harness param holding an `Until` function, read each time the loop asks. */
+      kind: 'param';
+      name: string;
+    }
   | UntilAnyPredicate
   | UntilAllPredicate
   | DecideWorkflowNode;
@@ -124,6 +129,11 @@ const ExprPredicateSchema = z.object({
   expr: ExpressionSchema,
 });
 
+const ParamPredicateSchema = z.object({
+  kind: z.literal('param'),
+  name: z.string().min(1),
+});
+
 const UntilPredicateRef: z.ZodType<UntilPredicate> = z.lazy(() => UntilPredicateSchema);
 
 const AnyPredicateSchema = z.object({
@@ -151,6 +161,7 @@ export const UntilPredicateSchema: z.ZodType<UntilPredicate> = z
     OutputEqualsPredicateSchema,
     ConvergedPredicateSchema,
     ExprPredicateSchema,
+    ParamPredicateSchema,
     AnyPredicateSchema,
     AllPredicateSchema,
     UntilDeciderRef,
@@ -264,14 +275,52 @@ const AcpPermissionDecisionSchema = z.enum([
 ]);
 
 /**
- * A permission rule. Both fields are optional matchers; an omitted field
- * matches anything. `title` is a case-insensitive substring match here — the
- * programmatic API additionally accepts a `RegExp`, which JSON cannot express.
+ * A permission rule. Every field is an optional matcher; an omitted one
+ * matches anything. `title` is a case-insensitive substring; `titlePattern` is
+ * a regular expression's source, with `titleFlags`, for what the programmatic
+ * API writes as a `RegExp` title.
  */
-const AcpPermissionRuleSchema = z.object({
-  kind: AcpToolKindSchema.optional(),
-  title: z.string().min(1).optional(),
-});
+const AcpPermissionRuleSchema = z
+  .object({
+    kind: AcpToolKindSchema.optional(),
+    title: z.string().min(1).optional(),
+    titlePattern: z.string().min(1).optional(),
+    titleFlags: z.string().optional(),
+  })
+  .superRefine((rule, issue) => {
+    if (rule.title !== undefined && rule.titlePattern !== undefined) {
+      issue.addIssue({
+        code: 'custom',
+        message:
+          "A permission rule takes 'title' (substring) or 'titlePattern' (regular expression), not both.",
+      });
+    }
+    if (rule.titlePattern === undefined && rule.titleFlags !== undefined) {
+      issue.addIssue({
+        code: 'custom',
+        message: "'titleFlags' belongs to a 'titlePattern'.",
+      });
+    }
+    if (rule.titlePattern !== undefined && !isRegExp(rule.titlePattern, rule.titleFlags)) {
+      issue.addIssue({
+        code: 'custom',
+        path: [
+          'titlePattern',
+        ],
+        message: "'titlePattern' with its 'titleFlags' is not a regular expression.",
+      });
+    }
+  });
+
+/** Whether `source` and `flags` make a regular expression. */
+function isRegExp(source: string, flags: string | undefined): boolean {
+  try {
+    new RegExp(source, flags);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const AcpPermissionPolicySchema = z.object({
   default: AcpPermissionDecisionSchema.optional(),
@@ -286,6 +335,10 @@ const AcpClientCapabilityConfigSchema = z.object({
   terminal: z.boolean().optional(),
   /** Whether the agent may ask a person questions (spec 27 § Questions the agent asks). */
   elicitation: z.boolean().optional(),
+  /** Directories the agent may reach besides the session's working directory. */
+  additionalDirectories: z.array(z.string().min(1)).optional(),
+  /** Lifts filesystem confinement: the agent may reach any path the host can. */
+  allowAnyPath: z.boolean().optional(),
 });
 
 const SecretValueSchema: z.ZodType<WorkflowSecretValue> = z
@@ -355,8 +408,35 @@ export interface WorkflowCustomItem {
   output: Record<string, unknown>;
 }
 
+/**
+ * @public
+ * Options of a node read from the harness `params` (spec 26 § Options from
+ * params): option name → param name. A param that is a function is called with
+ * the arguments the TypeScript option's function takes, every time the option
+ * is read; any other param is the option's value. Every node has `replayKey`,
+ * `emitItems` (a function of the output), and `onStart` and `onDone` (the
+ * hooks of its `emitItems`).
+ */
+export type WorkflowFromParams<K extends string = never> = Partial<
+  Record<K | 'replayKey' | 'emitItems' | 'onStart' | 'onDone', string>
+>;
+
+/** @public A channel a node reads, by name. `mode` defaults to `queue`. */
+export interface WorkflowChannel {
+  name: string;
+  mode?: 'value' | 'queue' | 'topic';
+  capacity?: number;
+  /** Whether a host may send to it from outside the run. */
+  external?: boolean;
+}
+
+/** @public A projection policy written in a document: how a model call's context window is fitted. */
+export type WorkflowProjection = z.infer<typeof ProjectionSchema>;
+
 interface WorkflowNodeBase {
   id: string;
+  /** Options read from the harness `params` when the node runs. */
+  fromParams?: WorkflowFromParams;
   /**
    * Whether a resumed run replays this node's recorded output. Defaults to `true`;
    * `false` makes the node run again on every resume. See spec 23a § Identity.
@@ -382,6 +462,16 @@ export interface OutputCodecRef {
   codec: 'openui';
   /** Registry key resolved from `HydrationContext.uiLibraries`. */
   library: string;
+}
+
+/**
+ * @public
+ * A node's structured output, as a JSON Schema written in the document. The
+ * answer is JSON-parsed and checked against it, as a step's `output` schema
+ * is; a `callModel` node also sends it to the model as the response format.
+ */
+export interface WorkflowOutputSchema {
+  schema: Record<string, unknown>;
 }
 
 /** @public A `{ type }` tool entry: a registered client tool, or an `openrouter:*` server tool. */
@@ -439,8 +529,9 @@ export type WorkflowToolEntry = WorkflowTypedToolEntry | WorkflowStepConnectionE
 
 export interface CallModelWorkflowNode extends WorkflowNodeBase {
   kind: 'callModel';
+  fromParams?: WorkflowFromParams<'model' | 'instructions' | 'tools' | 'emit'>;
   model?: string;
-  instructions: string;
+  instructions?: string;
   /**
    * Tool entries, each an object. A CLIENT tool is `{ type:
    * "<registered-tool-name>" }` (resolved from the registry); a SERVER tool is
@@ -456,13 +547,22 @@ export interface CallModelWorkflowNode extends WorkflowNodeBase {
    */
   toolChoice?: ToolChoice;
   params?: z.infer<typeof ModelParamsSchema>;
-  /** Streaming output-codec reference, resolved from `HydrationContext.uiLibraries`. */
-  output?: OutputCodecRef;
+  /** Structured output: an inline JSON Schema, or a streaming codec resolved from `HydrationContext.uiLibraries`. */
+  output?: WorkflowOutputSchema | OutputCodecRef;
+  /** `false` keeps the step's framework events out of the stream. Default `true`. */
+  emit?: boolean;
+  /** How this call's context window is fitted; overrides the harness default. */
+  projection?: WorkflowProjection;
 }
 
 export interface InvokeToolWorkflowNode extends WorkflowNodeBase {
   kind: 'invokeTool';
+  fromParams?: WorkflowFromParams<'args'>;
   toolName: string;
+  /**
+   * The tool's arguments: JSON, with `{ "$expr": "<JSONata>" }` wherever a value
+   * is computed and `{ "$literal": … }` around data to pass through untouched.
+   */
   args?: Record<string, unknown>;
 }
 
@@ -477,8 +577,12 @@ export interface InvokeToolWorkflowNode extends WorkflowNodeBase {
  */
 export interface RunCodeWorkflowNode extends WorkflowNodeBase {
   kind: 'runCode';
-  /** Source code executed in the subprocess. Receives the step input on stdin. */
-  execute: string;
+  fromParams?: WorkflowFromParams<'execute'>;
+  /**
+   * Source code executed in the subprocess. Receives the step input on stdin.
+   * Left out when `fromParams.execute` names a function to run in process.
+   */
+  execute?: string;
   /** Optional retry policy applied to the step. */
   retry?: z.infer<typeof RetryPolicySchema>;
   /**
@@ -507,6 +611,11 @@ export interface ConditionalRoute {
 
 export interface ConditionalWorkflowNode extends WorkflowNodeBase {
   kind: 'conditional';
+  /**
+   * `route` names a function `(input, ctx)` that gives the id of the target to
+   * take, or nothing for `default`. The routes then carry no test.
+   */
+  fromParams?: WorkflowFromParams<'route'>;
   routes: ConditionalRoute[];
   default?: WorkflowNode;
 }
@@ -514,6 +623,11 @@ export interface ConditionalWorkflowNode extends WorkflowNodeBase {
 /** A node that asks typed questions of a decision model. See spec 32. */
 export interface DecideWorkflowNode extends WorkflowNodeBase {
   kind: 'decide';
+  fromParams?: WorkflowFromParams<'model' | 'instructions' | 'context' | 'emit'>;
+  /** How this call's context window is fitted; overrides the harness default. */
+  projection?: WorkflowProjection;
+  /** `false` keeps the step's framework events out of the stream. Default `true`. */
+  emit?: boolean;
   model?: string;
   instructions?: string;
   questions: Record<string, DecideQuestion>;
@@ -526,17 +640,26 @@ export interface DecideWorkflowNode extends WorkflowNodeBase {
 export interface RouteSwitchWorkflowNode extends WorkflowNodeBase {
   kind: 'routeSwitch';
   decide: DecideWorkflowNode;
-  /** Question id to route by. */
-  on: string;
-  /** One case per outcome of the `on` question. */
+  /**
+   * `on` names a function `(answers)` that gives the case to take. The node
+   * then needs `default`, and `uncertain` is optional.
+   */
+  fromParams?: WorkflowFromParams<'on'>;
+  /** Question id to route by. Left out when `fromParams.on` routes. */
+  on?: string;
+  /** One case per outcome of the `on` question, or per key the `on` function gives. */
   cases: Record<string, WorkflowNode>;
   minConfidence?: number;
+  /** Taken when the `on` function gives a key with no case. */
+  default?: WorkflowNode;
   /** Taken on refusal, or when confidence is below `minConfidence`. */
-  uncertain: WorkflowNode;
+  uncertain?: WorkflowNode;
 }
 
 export interface InParallelWorkflowNode extends WorkflowNodeBase {
   kind: 'inParallel';
+  /** `merge` names a function `(results, ctx)` that gives the node's output. */
+  fromParams?: WorkflowFromParams<'merge'>;
   mode: 'race' | 'all' | 'settle';
   /**
    * Static fan-out: one child per entry. Mutually exclusive with `each` —
@@ -564,6 +687,8 @@ export interface SpawnWorkflowNode extends WorkflowNodeBase {
   kind: 'spawn';
   child: WorkflowNode;
   timeout?: number;
+  /** Named subprocess adapter ref the child runs through; the harness adapter when omitted. */
+  subprocess?: string;
   /**
    * Memory layers the child runs with, by registered name (resolved from
    * `HydrationContext.layers`, like `withContext`). Omit to inherit the
@@ -583,6 +708,20 @@ export interface WithContextWorkflowNode extends WorkflowNodeBase {
 
 export interface LoopWorkflowNode extends WorkflowNodeBase {
   kind: 'loop';
+  /**
+   * `prepareNext` names a function `(output, verdict, ctx)` giving the next
+   * iteration's input, `onError` one `(error, ctx)` giving what `onError`
+   * takes.
+   */
+  fromParams?: WorkflowFromParams<'prepareNext' | 'onError'>;
+  /** A channel of text the loop reads before it stops; a message runs it again. */
+  inbox?: WorkflowChannel;
+  /** What a failed body does: run it again, keep the last output, or fail the loop (the default). */
+  onError?: 'retry' | 'skip' | 'abort';
+  /** The most outputs the loop keeps for its `until`. */
+  maxHistorySize?: number;
+  /** How long, in ms, the loop waits on its `inbox` before it stops. */
+  parkTimeout?: number;
   body: WorkflowNode;
   until: UntilPredicate;
   /**
@@ -603,6 +742,10 @@ export interface ScheduleWorkflowNode extends WorkflowNodeBase {
   step: WorkflowNode;
   interval: number;
   onError?: 'continue' | 'fail';
+  /** The most, in ms, added at random to each interval. */
+  jitter?: number;
+  /** A channel whose messages run the step at once. */
+  inbox?: WorkflowChannel;
 }
 
 /**
@@ -613,9 +756,26 @@ export interface ScheduleWorkflowNode extends WorkflowNodeBase {
  */
 export interface AcpAgentWorkflowNode extends WorkflowNodeBase {
   kind: 'acp-agent';
+  fromParams?: WorkflowFromParams<
+    | 'prompt'
+    | 'content'
+    | 'instructions'
+    | 'cwd'
+    | 'mode'
+    | 'model'
+    | 'tools'
+    | 'onPermissionRequest'
+    | 'emit'
+  >;
+  /** ACP content blocks sent after the prompt: images, audio, resource links. */
+  content?: Array<{
+    type: 'text' | 'image' | 'audio' | 'resource_link' | 'resource';
+    [field: string]: unknown;
+  }>;
   /** Registry key for the ACP agent adapter (e.g. `claude-code`). */
   agent: string;
-  prompt: string;
+  /** The turn's prompt. Left out, the node's input is the prompt. */
+  prompt?: string;
   /**
    * Trusted instructions for the session the node opens, added to the agent's
    * own system prompt, as a `callModel` node's `instructions`.
@@ -643,6 +803,10 @@ export interface AcpAgentWorkflowNode extends WorkflowNodeBase {
   fs?: string;
   /** The harness shell adapter that serves the agent's `terminal/*` calls, by name. Default: the harness's default. */
   shell?: string;
+  /** Structured output: the agent's final text is JSON-parsed and checked against the schema. */
+  output?: WorkflowOutputSchema;
+  /** `false` keeps the turn's framework events out of the stream. Default `true`. */
+  emit?: boolean;
 }
 
 /**
@@ -736,6 +900,8 @@ export type WorkflowStepList = WorkflowStepEntry | WorkflowStepEntry[];
 /** @public Runs one connection operation and returns its result (spec 35). */
 export interface CallWorkflowNode extends WorkflowNodeBase {
   kind: 'call';
+  /** `connection` names a function `(input, ctx)` that gives the connection's name. */
+  fromParams?: WorkflowFromParams<'args' | 'connection'>;
   /** Defaults to the enclosing connection (a `verify` subject, or the document's only connection). */
   connection?: WorkflowConnectionRef;
   op: string;
@@ -745,6 +911,11 @@ export interface CallWorkflowNode extends WorkflowNodeBase {
 /** @public Waits for a connection event; with `around`, listens first, runs `around`, then waits. Output `{ event, around }`. */
 export interface WaitWorkflowNode extends WorkflowNodeBase {
   kind: 'wait';
+  /**
+   * `filter` names a function `(event, input, ctx)` that says whether an event
+   * is the one, `connection` one `(input, ctx)` that gives the connection's name.
+   */
+  fromParams?: WorkflowFromParams<'filter' | 'connection'>;
   connection?: WorkflowConnectionRef;
   event: string;
   /** Evaluated against `{ "event": <the event>, "input": <the node's input> }`; the event matches on `true`. */
@@ -779,8 +950,13 @@ export interface WorkflowVerifyClose {
 /** @public Checks claims about what a connection shows (spec 37). */
 export interface VerifyWorkflowNode extends WorkflowNodeBase {
   kind: 'verify';
-  /** The connection checked, or a list (one verify per connection, ids `<id>.<name>`). */
-  subject: string | string[] | WorkflowExprValue;
+  /** `subject` names a function `(input, ctx)` that gives the subject connection's name. */
+  fromParams?: WorkflowFromParams<'subject'>;
+  /**
+   * The connection checked, or a list (one verify per connection, ids
+   * `<id>.<name>`). Left out when `fromParams.subject` gives it.
+   */
+  subject?: string | string[] | WorkflowExprValue;
   expect?: WorkflowVerifyMatcher[];
   never?: WorkflowVerifyMatcher[];
   /** OVP claims given directly, instead of `expect`. */
@@ -948,8 +1124,58 @@ const StepConnectionEntrySchema = z.union([
 
 //#endregion
 
+const SHARED_PARAM_OPTIONS = [
+  'replayKey',
+  'emitItems',
+  'onStart',
+  'onDone',
+] as const;
+
+/** A node's `fromParams`: its own options, and those every node has, each naming a harness param. */
+function fromParams<const K extends string>(options: ReadonlyArray<K>) {
+  return z
+    .partialRecord(
+      z.enum([
+        ...options,
+        ...SHARED_PARAM_OPTIONS,
+      ]),
+      z.string().min(1),
+    )
+    .optional();
+}
+
+const ProjectionSchema = z
+  .object({
+    tokenBudget: z.number().positive(),
+    responseReserve: z.number().nonnegative(),
+    overflow: z.enum([
+      'truncate',
+      'summarize',
+      'sliding_window',
+    ]),
+    overflowModel: z.string().min(1).optional(),
+    windowSize: z.number().int().positive().optional(),
+  })
+  .strict();
+
+const ChannelSchema: z.ZodType<WorkflowChannel> = z
+  .object({
+    name: z.string().min(1),
+    mode: z
+      .enum([
+        'value',
+        'queue',
+        'topic',
+      ])
+      .optional(),
+    capacity: z.number().int().positive().optional(),
+    external: z.boolean().optional(),
+  })
+  .strict();
+
 const SHARED_FIELDS = {
   id: z.string().min(1),
+  fromParams: fromParams([]),
   durable: z.boolean().optional(),
   replayKey: WorkflowReplayKeySchema.optional(),
   emitItems: WorkflowEmitItemsSchema.optional(),
@@ -961,11 +1187,24 @@ const OutputCodecRefSchema = z.object({
   library: z.string().min(1),
 });
 
+const OutputSchemaSchema = z
+  .object({
+    schema: JsonSchemaObjectSchema,
+  })
+  .strict();
+
 const CallModelNodeSchema = z.object({
   kind: z.literal('callModel'),
   ...SHARED_FIELDS,
+  fromParams: fromParams([
+    'model',
+    'instructions',
+    'tools',
+    'emit',
+  ]),
   model: z.string().optional(),
-  instructions: z.string(),
+  instructions: z.string().optional(),
+  projection: ProjectionSchema.optional(),
   tools: z
     .array(
       z.union([
@@ -976,12 +1215,21 @@ const CallModelNodeSchema = z.object({
     .optional(),
   toolChoice: ToolChoiceSchema.optional(),
   params: ModelParamsSchema.optional(),
-  output: OutputCodecRefSchema.optional(),
+  output: z
+    .union([
+      OutputSchemaSchema,
+      OutputCodecRefSchema,
+    ])
+    .optional(),
+  emit: z.boolean().optional(),
 });
 
 const InvokeToolNodeSchema = z.object({
   kind: z.literal('invokeTool'),
   ...SHARED_FIELDS,
+  fromParams: fromParams([
+    'args',
+  ]),
   toolName: z.string().min(1),
   args: z.record(z.string(), z.unknown()).optional(),
 });
@@ -989,7 +1237,10 @@ const InvokeToolNodeSchema = z.object({
 const RunCodeNodeSchema = z.object({
   kind: z.literal('runCode'),
   ...SHARED_FIELDS,
-  execute: z.string().min(1),
+  fromParams: fromParams([
+    'execute',
+  ]),
+  execute: z.string().min(1).optional(),
   retry: RetryPolicySchema.optional(),
   subprocess: z.string().min(1).optional(),
 });
@@ -1000,20 +1251,18 @@ const ComputeNodeSchema = z.object({
   expr: ExpressionSchema,
 });
 
-const ConditionalRouteSchema = z
-  .object({
-    match: z.string().min(1).optional(),
-    expr: ExpressionSchema.optional(),
-    target: WorkflowNodeRef,
-  })
-  .refine((route) => (route.match === undefined) !== (route.expr === undefined), {
-    message:
-      "conditional route requires exactly one of 'match' (substring) or 'expr' (expression).",
-  });
+const ConditionalRouteSchema = z.object({
+  match: z.string().min(1).optional(),
+  expr: ExpressionSchema.optional(),
+  target: WorkflowNodeRef,
+});
 
 const ConditionalNodeSchema = z.object({
   kind: z.literal('conditional'),
   ...SHARED_FIELDS,
+  fromParams: fromParams([
+    'route',
+  ]),
   routes: z.array(ConditionalRouteSchema).min(1),
   default: WorkflowNodeRef.optional(),
 });
@@ -1021,6 +1270,14 @@ const ConditionalNodeSchema = z.object({
 const DecideNodeSchema = z.object({
   kind: z.literal('decide'),
   ...SHARED_FIELDS,
+  fromParams: fromParams([
+    'model',
+    'instructions',
+    'context',
+    'emit',
+  ]),
+  projection: ProjectionSchema.optional(),
+  emit: z.boolean().optional(),
   model: z.string().min(1).optional(),
   instructions: z.string().min(1).optional(),
   questions: DecideQuestionsSchema,
@@ -1037,6 +1294,7 @@ const DecideNodeSchema = z.object({
 
 /** A decide node that ends a loop: exactly one question, and a boolean one. */
 const UntilDeciderSchema = DecideNodeSchema.superRefine((node, issue) => {
+  checkFromParams(node, issue);
   const questions = Object.values(node.questions);
   if (questions.length === 1 && questions[0]?.type === 'boolean') {
     return;
@@ -1054,15 +1312,33 @@ const RouteSwitchNodeSchema = z
   .object({
     kind: z.literal('routeSwitch'),
     ...SHARED_FIELDS,
+    fromParams: fromParams([
+      'on',
+    ]),
     decide: DecideNodeSchema,
-    on: z.string().min(1),
+    on: z.string().min(1).optional(),
     cases: z.record(z.string().min(1), WorkflowNodeRef),
     minConfidence: z.number().min(0).max(1).optional(),
-    uncertain: WorkflowNodeRef,
+    default: WorkflowNodeRef.optional(),
+    uncertain: WorkflowNodeRef.optional(),
   })
   .superRefine((node, issue) => {
-    const question = Object.hasOwn(node.decide.questions, node.on)
-      ? node.decide.questions[node.on]
+    // A function picks the case, so the cases cannot be checked against a question.
+    if (node.fromParams?.on !== undefined) {
+      checkRouteByFunction(node, issue);
+      return;
+    }
+    if (node.on === undefined || node.uncertain === undefined || node.default !== undefined) {
+      issue.addIssue({
+        code: 'custom',
+        message:
+          "routeSwitch routes by a question: give 'on' and 'uncertain', and no 'default'. To route by a function, name it in fromParams.on.",
+      });
+      return;
+    }
+    const on = node.on;
+    const question = Object.hasOwn(node.decide.questions, on)
+      ? node.decide.questions[on]
       : undefined;
     if (!question) {
       issue.addIssue({
@@ -1070,7 +1346,7 @@ const RouteSwitchNodeSchema = z
         path: [
           'on',
         ],
-        message: `routeSwitch 'on' names no question of its decide node: '${node.on}'.`,
+        message: `routeSwitch 'on' names no question of its decide node: '${on}'.`,
       });
       return;
     }
@@ -1081,10 +1357,28 @@ const RouteSwitchNodeSchema = z
         path: [
           'cases',
         ],
-        message: `routeSwitch cases miss outcomes of '${node.on}': ${missing.join(', ')}.`,
+        message: `routeSwitch cases miss outcomes of '${on}': ${missing.join(', ')}.`,
       });
     }
   });
+
+function checkRouteByFunction(
+  node: {
+    on?: string;
+    default?: unknown;
+    minConfidence?: number;
+  },
+  issue: z.RefinementCtx,
+): void {
+  if (node.on === undefined && node.default !== undefined && node.minConfidence === undefined) {
+    return;
+  }
+  issue.addIssue({
+    code: 'custom',
+    message:
+      "routeSwitch with fromParams.on routes by a function: give 'default', and neither 'on' nor 'minConfidence'.",
+  });
+}
 
 const InParallelNodeSchema = z
   .object({
@@ -1105,6 +1399,9 @@ const InParallelNodeSchema = z
       .optional(),
     merge: MergeStrategySchema.optional(),
     concurrency: z.number().int().positive().optional(),
+    fromParams: fromParams([
+      'merge',
+    ]),
   })
   .refine((node) => (node.paths === undefined) !== (node.each === undefined), {
     message: "inParallel node requires exactly one of 'paths' (static) or 'each' (dynamic).",
@@ -1115,6 +1412,7 @@ const SpawnNodeSchema = z.object({
   ...SHARED_FIELDS,
   child: WorkflowNodeRef,
   timeout: z.number().positive().optional(),
+  subprocess: z.string().min(1).optional(),
   layers: z.array(z.string().min(1)).min(1).optional(),
   steers: z
     .enum([
@@ -1134,6 +1432,20 @@ const WithContextNodeSchema = z.object({
 const LoopNodeSchema = z.object({
   kind: z.literal('loop'),
   ...SHARED_FIELDS,
+  fromParams: fromParams([
+    'prepareNext',
+    'onError',
+  ]),
+  inbox: ChannelSchema.optional(),
+  onError: z
+    .enum([
+      'retry',
+      'skip',
+      'abort',
+    ])
+    .optional(),
+  maxHistorySize: z.number().int().positive().optional(),
+  parkTimeout: z.number().nonnegative().optional(),
   body: WorkflowNodeRef,
   until: UntilPredicateSchema,
   maxIterations: z
@@ -1162,6 +1474,8 @@ const ScheduleNodeSchema = z.object({
   ...SHARED_FIELDS,
   step: WorkflowNodeRef,
   interval: z.number().nonnegative(),
+  jitter: z.number().nonnegative().optional(),
+  inbox: ChannelSchema.optional(),
   onError: z
     .enum([
       'continue',
@@ -1196,11 +1510,34 @@ const SubflowNodeSchema = z
     message: "subflow node requires exactly one of 'document' (inline) or 'ref' (named).",
   });
 
+/** An ACP content block: its `type` is checked here, its fields by the agent. */
+const AcpContentBlockSchema = z.looseObject({
+  type: z.enum([
+    'text',
+    'image',
+    'audio',
+    'resource_link',
+    'resource',
+  ]),
+});
+
 const AcpAgentNodeSchema = z.object({
   kind: z.literal('acp-agent'),
   ...SHARED_FIELDS,
+  fromParams: fromParams([
+    'prompt',
+    'content',
+    'instructions',
+    'cwd',
+    'mode',
+    'model',
+    'tools',
+    'onPermissionRequest',
+    'emit',
+  ]),
   agent: z.string().min(1),
-  prompt: z.string().min(1),
+  content: z.array(AcpContentBlockSchema).min(1).optional(),
+  prompt: z.string().min(1).optional(),
   instructions: z.string().min(1).optional(),
   cwd: z.string().min(1).optional(),
   mode: z.string().min(1).optional(),
@@ -1219,6 +1556,8 @@ const AcpAgentNodeSchema = z.object({
   subprocess: z.string().min(1).optional(),
   fs: z.string().min(1).optional(),
   shell: z.string().min(1).optional(),
+  output: z.lazy(() => OutputSchemaSchema).optional(),
+  emit: z.boolean().optional(),
 });
 
 //#region Connection Value and Node Schemas
@@ -1318,6 +1657,10 @@ const WorkflowStepListSchema: z.ZodType<WorkflowStepList> = z.union([
 const CallNodeSchema = z.object({
   kind: z.literal('call'),
   ...SHARED_FIELDS,
+  fromParams: fromParams([
+    'args',
+    'connection',
+  ]),
   connection: ConnectionRefSchema.optional(),
   op: z.string().regex(OP_NAME_RE),
   args: WorkflowArgsSchema.optional(),
@@ -1326,6 +1669,10 @@ const CallNodeSchema = z.object({
 const WaitNodeSchema = z.object({
   kind: z.literal('wait'),
   ...SHARED_FIELDS,
+  fromParams: fromParams([
+    'filter',
+    'connection',
+  ]),
   connection: ConnectionRefSchema.optional(),
   event: z.string().regex(EVENT_NAME_RE),
   filter: ExpressionSchema.optional(),
@@ -1400,11 +1747,16 @@ const VerifyNodeSchema = z
   .object({
     kind: z.literal('verify'),
     ...SHARED_FIELDS,
-    subject: z.union([
-      z.string().min(1),
-      z.array(z.string().min(1)).min(1),
-      ExprValueSchema,
+    fromParams: fromParams([
+      'subject',
     ]),
+    subject: z
+      .union([
+        z.string().min(1),
+        z.array(z.string().min(1)).min(1),
+        ExprValueSchema,
+      ])
+      .optional(),
     expect: z.array(WorkflowVerifyMatcherSchema).min(1).optional(),
     never: z.array(WorkflowVerifyMatcherSchema).optional(),
     claims: z.array(OvpClaimSchema).min(1).optional(),
@@ -1415,6 +1767,16 @@ const VerifyNodeSchema = z
     intent: z.string().optional(),
   })
   .superRefine((node, issue) => {
+    if (node.subject === undefined && !node.fromParams?.subject) {
+      issue.addIssue({
+        code: 'custom',
+        path: [
+          'subject',
+        ],
+        message:
+          "verify needs a 'subject', or fromParams.subject (a function in the harness params).",
+      });
+    }
     if ((node.expect === undefined) === (node.claims === undefined)) {
       issue.addIssue({
         code: 'custom',
@@ -1530,10 +1892,127 @@ export const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z
     WaitNodeSchema,
     VerifyNodeSchema,
   ])
+  .superRefine(checkFromParams)
   .meta({
     id: 'WorkflowNode',
     title: 'WorkflowNode',
   });
+
+/** `onStart` and `onDone` are the hooks of an `emitItems` config: each is an expression there or a param, never both. */
+function checkEmitHooks(node: WorkflowNode, issue: z.RefinementCtx): void {
+  const hooks = (
+    [
+      'onStart',
+      'onDone',
+    ] as const
+  ).filter((hook) => node.fromParams?.[hook] !== undefined);
+  if (hooks.length === 0) {
+    return;
+  }
+  if (typeof node.emitItems === 'boolean' || node.fromParams?.emitItems !== undefined) {
+    issue.addIssue({
+      code: 'custom',
+      path: [
+        'fromParams',
+      ],
+      message:
+        "fromParams 'onStart' and 'onDone' are hooks of an emitItems config: give no boolean 'emitItems' and no fromParams.emitItems with them.",
+    });
+    return;
+  }
+  for (const hook of hooks) {
+    if (node.emitItems?.[hook] !== undefined) {
+      issue.addIssue({
+        code: 'custom',
+        path: [
+          'fromParams',
+          hook,
+        ],
+        message: `emitItems '${hook}' is an expression on the node and read from a param: give one.`,
+      });
+    }
+  }
+}
+
+/**
+ * An option is written on the node or read from a param, never both, and a
+ * node whose work is an option still has that work one way or the other.
+ */
+function checkFromParams(node: WorkflowNode, issue: z.RefinementCtx): void {
+  checkGivenOnce(node, issue);
+  checkEmitHooks(node, issue);
+  checkNodeWork(node, issue);
+  if (node.kind === 'routeSwitch') {
+    checkFromParams(node.decide, issue);
+  }
+  if (node.kind === 'conditional') {
+    checkRouteTests(node, issue);
+  }
+}
+
+function checkGivenOnce(node: WorkflowNode, issue: z.RefinementCtx): void {
+  const fields: Readonly<Record<string, unknown>> = {
+    ...node,
+  };
+  for (const option of Object.keys(node.fromParams ?? {})) {
+    if (fields[option] === undefined) {
+      continue;
+    }
+    issue.addIssue({
+      code: 'custom',
+      path: [
+        'fromParams',
+        option,
+      ],
+      message: `'${option}' is set on the node and read from a param: give one.`,
+    });
+  }
+}
+
+/** A `runCode` node has code or a function; a race has no merge to read. */
+function checkNodeWork(node: WorkflowNode, issue: z.RefinementCtx): void {
+  if (node.kind === 'inParallel' && node.mode === 'race' && node.fromParams?.merge) {
+    issue.addIssue({
+      code: 'custom',
+      path: [
+        'fromParams',
+        'merge',
+      ],
+      message: "A 'race' takes the first result, so it has no merge.",
+    });
+  }
+  if (node.kind === 'runCode' && node.execute === undefined && !node.fromParams?.execute) {
+    issue.addIssue({
+      code: 'custom',
+      path: [
+        'execute',
+      ],
+      message:
+        "runCode needs 'execute' (code) or fromParams.execute (a function in the harness params).",
+    });
+  }
+}
+
+/** Each route has exactly one test, or none when a function routes. */
+function checkRouteTests(node: ConditionalWorkflowNode, issue: z.RefinementCtx): void {
+  const byFunction = node.fromParams?.route !== undefined;
+  node.routes.forEach((route, i) => {
+    const tests = Number(route.match !== undefined) + Number(route.expr !== undefined);
+    if (tests === (byFunction ? 0 : 1)) {
+      return;
+    }
+    issue.addIssue({
+      code: 'custom',
+      path: [
+        'routes',
+        i,
+      ],
+      message: byFunction
+        ? 'A conditional routed by fromParams.route gives its routes no test: the function names the target.'
+        : "conditional route requires exactly one of 'match' (substring) or 'expr' (expression).",
+    });
+  });
+}
 
 //#endregion
 
@@ -1608,7 +2087,16 @@ function childNodes(node: WorkflowNode): WorkflowNode[] {
       return [
         node.decide,
         ...Object.values(node.cases),
-        node.uncertain,
+        ...(node.default
+          ? [
+              node.default,
+            ]
+          : []),
+        ...(node.uncertain
+          ? [
+              node.uncertain,
+            ]
+          : []),
       ];
     case 'subflow':
       // A named ref is a static leaf: the target document is only known at

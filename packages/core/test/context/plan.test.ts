@@ -930,8 +930,8 @@ describe('plan layer', () => {
           document: {
             version: 1,
             root: {
-              kind: 'callModel',
-              id: 'no-instructions',
+              kind: 'invokeTool',
+              id: 'no-tool-name',
             },
           },
         },

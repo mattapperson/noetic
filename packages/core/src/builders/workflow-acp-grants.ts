@@ -259,6 +259,16 @@ function isUnder(path: string, root: string): boolean {
 }
 
 function checkCapabilities(node: AcpAgentNode, ceiling: AcpCapabilityGrant): void {
+  // No grant widens what the agent can reach on disk, so neither may a node.
+  for (const name of [
+    'additionalDirectories',
+    'allowAnyPath',
+  ] as const) {
+    const asked = node.clientCapabilities?.[name];
+    if (asked === true || (Array.isArray(asked) && asked.length > 0)) {
+      throw notAllowed(node, `clientCapabilities.${name}`, `Leave \`${name}\` out.`);
+    }
+  }
   for (const name of CAPABILITIES) {
     if (node.clientCapabilities?.[name] === true && ceiling[name] !== true) {
       throw notAllowed(

@@ -115,6 +115,21 @@ export async function executeInvokeTool<TContext, I, O>(
   );
 }
 
+/** The call's args: what the step's function gives, its fixed args laid over the input, or the input. */
+async function argsOf<TContext, I, O>(
+  step: StepInvokeTool<TContext, I, O>,
+  input: I,
+  ctx: Context<ContextData>,
+): Promise<unknown> {
+  if (typeof step.args === 'function') {
+    return step.args(input, ctx);
+  }
+  if (step.args) {
+    return Object.assign({}, input, step.args);
+  }
+  return input;
+}
+
 /**
  * Gates run in order — input validation, the `beforeToolCall` layers, then the
  * harness approver for a tool that declares `needsApproval` — and a refusal at
@@ -128,7 +143,7 @@ async function runInvokeTool<TContext, I, O>(
   layers: ContextLayer[] | undefined,
   span: Span,
 ): Promise<O> {
-  const args = step.args ? Object.assign({}, input, step.args) : input;
+  const args = await argsOf(step, input, baseCtx);
 
   const parseResult = await validateSchema(step.tool.input, args);
   if (!parseResult.success) {

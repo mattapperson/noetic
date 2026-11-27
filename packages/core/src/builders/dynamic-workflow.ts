@@ -34,7 +34,15 @@ import { globMatches } from './workflow-connections';
 import type { Grants, PlannerConnection } from './workflow-grants';
 import { checkGrants, grantsPrompt } from './workflow-grants';
 import type { HydrationContext } from './workflow-hydrator';
-import { hydrateDocument } from './workflow-hydrator';
+import { FALLBACK_MODEL, hydrateDocument } from './workflow-hydrator';
+import { outputSchemaErrors } from './workflow-output';
+import {
+  checkParamGrants,
+  checkUncheckedOptions,
+  paramOf,
+  paramsPrompt,
+  paramUses,
+} from './workflow-params';
 
 //#region Types
 
@@ -79,6 +87,12 @@ export interface DynamicWorkflowOpts {
    * planner is shown only the granted URLs.
    */
   mcp?: McpAllowlist;
+  /**
+   * The harness params the document's nodes may read through `fromParams`
+   * (spec 26 § Options from params). Absence grants none: a node reading any
+   * param fails validation with `PARAM_NOT_ALLOWED`.
+   */
+  params?: ReadonlyArray<string>;
 }
 
 //#endregion
@@ -87,7 +101,6 @@ export interface DynamicWorkflowOpts {
 
 const DEFAULT_MAX_DEPTH = 5;
 const DEFAULT_MAX_REVISIONS = 3;
-const DEFAULT_MODEL = 'openai/gpt-4o';
 
 const PLANNER_INSTRUCTIONS = `You are a workflow planner. Given a task, generate a JSON workflow document that describes how to accomplish it.
 
@@ -98,8 +111,8 @@ The workflow document must be valid JSON with this structure:
 }
 
 A WorkflowNode is one of:
-- { "kind": "callModel", "id": "<unique>", "instructions": "<prompt>", "model": "<optional>", "tools": [<tool entry>, ...] } (one LLM call)
-- { "kind": "invokeTool", "id": "<unique>", "toolName": "<name>", "args": { ... } } (call one tool directly, no LLM)
+- { "kind": "callModel", "id": "<unique>", "instructions": "<prompt>", "model": "<optional>", "tools": [<tool entry>, ...], "output": { "schema": <optional JSON Schema the answer must match> } } (one LLM call; with "output" its answer is that JSON value)
+- { "kind": "invokeTool", "id": "<unique>", "toolName": "<name>", "args": { ... } } (call one tool directly, no LLM; an arg may be { "$expr": "<JSONata on the input, or $steps.<node id> for an earlier node's output>" })
 - { "kind": "runCode", "id": "<unique>", "execute": "<source code>" } (runs the code in a subprocess with the step input on stdin; only emit if the task needs deterministic computation AND a subprocess adapter is available)
 - { "kind": "compute", "id": "<unique>", "expr": "<JSONata expression>" } (computes a value from the input, read as JSON, with no LLM; e.g. "{ 'n': n - 1, 'sum': sum + n }")
 - { "kind": "sequence", "id": "<unique>", "steps": [<WorkflowNode>, ...] } (run children in order, threading each output into the next)
@@ -111,7 +124,7 @@ A WorkflowNode is one of:
 - { "kind": "schedule", "id": "<unique>", "step": <WorkflowNode>, "interval": <ms>, "onError": "continue"|"fail" } (re-runs the step forever on an interval and never returns — only emit for an explicitly daemon-style task)
 - { "kind": "routeSwitch", "id": "<unique>", "decide": { "kind": "decide", "id": "<unique>", "questions": { "<question-id>": { "type": "choice", "instructions": "<question>", "choices": ["<option>", ...] } } }, "on": "<question-id>", "cases": { "<option>": <WorkflowNode>, ... }, "uncertain": <WorkflowNode>, "minConfidence": <optional 0-1> } (a model decides, then the input goes to the matching case; a "boolean" question has cases "true" and "false"; a "score" question has "levels": ["<low>", ..., "<high>"] and routes by level; every outcome needs a case)
 - { "kind": "subflow", "id": "<unique>", "document": { "version": 1, "root": <WorkflowNode> } } (an inline sub-workflow run as one step; only emit the inline form — named refs require a registry this planner does not provide)
-- { "kind": "acp-agent", "id": "<unique>", "agent": "<an agent id listed below>", "prompt": "<turn prompt>", "mode": "<optional session mode>", "model": "<optional>", "tools": [<optional; connection and MCP server entries only>], "cwd": "<optional absolute dir>", "permissions": { "default": "deny", "allow": [{ "kind": "<tool kind>", "title": "<substring>" }] }, "clientCapabilities": { "readTextFile": <bool>, "writeTextFile": <bool>, "terminal": <bool> }, "session": { "reuse": "<key>", "keepAlive": "step"|"run" }, "subprocess": "<adapter name>", "fs": "<adapter name>", "shell": "<adapter name>" } (every field after "model" is optional and only within the agent's limits listed below)
+- { "kind": "acp-agent", "id": "<unique>", "agent": "<an agent id listed below>", "prompt": "<turn prompt; leave out to prompt with the node's input>", "mode": "<optional session mode>", "model": "<optional>", "tools": [<optional; connection and MCP server entries only>], "cwd": "<optional absolute dir>", "permissions": { "default": "deny", "allow": [{ "kind": "<tool kind>", "title": "<substring>" }] }, "clientCapabilities": { "readTextFile": <bool>, "writeTextFile": <bool>, "terminal": <bool> }, "session": { "reuse": "<key>", "keepAlive": "step"|"run" }, "subprocess": "<adapter name>", "fs": "<adapter name>", "shell": "<adapter name>" } (every field after "model" is optional and only within the agent's limits listed below)
 
 Every entry of a node's "tools" is an OBJECT, never a bare string. Use { "type": "<tool-name>" } to let the model call one of the tools listed below. Two provider-executed tools are also available without being listed: { "type": "openrouter:web_search" } and { "type": "openrouter:web_fetch" }, each accepting an optional "parameters" object. { "connection": "<name>", "ops": ["<operation glob>", ...] } gives the model the tools of a connection listed below ("ops" optional), and { "mcp": { "name": "<name>", "type": "http", "url": "<url>" } } those of an MCP server listed below. The same { "mcp": … } entry under the document's "connections" (keyed by its name) attaches the server for the whole document.
 
@@ -135,7 +148,7 @@ Respond with ONLY the JSON document, no markdown fences or explanation.`;
  * within a single harness run.
  *
  * @public
- * @param opts.model - Model for the planner LLM. Default: `openai/gpt-4o`.
+ * @param opts.model - Model for the planner LLM. Default: the harness `model`, else `openai/gpt-4o`.
  * @param opts.instructions - Additional instructions prepended to the planner prompt.
  * @param opts.tools - Tools the generated workflow may reference by name.
  * @param opts.maxDepth - Maximum workflow tree depth. Default: 5.
@@ -145,9 +158,10 @@ Respond with ONLY the JSON document, no markdown fences or explanation.`;
  * @throws `NoeticConfigError` with code `INVALID_EXPRESSION_LIMITS` (at execution) if `expressionLimits` holds a value that is not a positive integer or `Infinity`.
  * @throws `NoeticConfigError` with code `EXPRESSION_LIMIT_EXCEEDED` (at execution) if an expression in the generated workflow exceeds its limits.
  * @throws `NoeticConfigError` with code `CONNECTION_NOT_ALLOWED` (at execution) if, on the last revision, the document asks for more than `connections`, `acp` or `mcp` grants.
+ * @throws `NoeticConfigError` with code `PARAM_NOT_ALLOWED` (at execution) if, on the last revision, the document reads a harness param `params` does not name, or reads from one an option its grants cannot check.
+ * @throws `NoeticConfigError` with code `UNKNOWN_PARAM_REFERENCE` (at execution) if, on the last revision, the document reads a param the harness does not have.
  */
 export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, string, string> {
-  const model = opts.model ?? DEFAULT_MODEL;
   const maxDepth = opts.maxDepth ?? DEFAULT_MAX_DEPTH;
   const maxRevisions = opts.maxRevisions ?? DEFAULT_MAX_REVISIONS;
   const toolMap = buildToolMap(opts.tools);
@@ -163,6 +177,8 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
           hint: 'Execute this step via AgentHarness.run() or ensure ctx.harness is set.',
         });
       }
+
+      const model = opts.model ?? harness.config.model ?? FALLBACK_MODEL;
 
       checkAllowlistNames(opts.connections, ctx);
       // Read once: the planner is shown, the document checked against, and its
@@ -184,6 +200,7 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
           connections: plannerConnections(grants.connections, ctx),
           acpAgents: opts.acpAgents,
         }),
+        paramsPrompt(opts.params),
         `\nTask: ${input}`,
       ]
         .filter(Boolean)
@@ -213,6 +230,8 @@ export function dynamicWorkflow(opts: DynamicWorkflowOpts): Step<ContextData, st
           grants,
           ranges: profileVersions(ctx),
           secrets: harnessInternal<SecretResolver>(harness, 'secrets'),
+          params: opts.params ?? [],
+          ctx,
         });
         if (!parseResult.ok) {
           lastError = parseResult.error;
@@ -314,6 +333,12 @@ export interface ParseAndRunWorkflowOpts {
    * validation with `CONNECTION_NOT_ALLOWED`.
    */
   mcp?: McpAllowlist;
+  /**
+   * The harness params the document's nodes may read through `fromParams`
+   * (spec 26 § Options from params). Absence grants none: a node reading any
+   * param fails validation with `PARAM_NOT_ALLOWED`.
+   */
+  params?: ReadonlyArray<string>;
 }
 
 /**
@@ -337,6 +362,8 @@ export interface ParseAndRunWorkflowOpts {
  * @throws `NoeticConfigError` with code `CONNECTION_UNKNOWN` if a node uses a connection the document does not declare, or the allowlist names one the harness does not have.
  * @throws `NoeticConfigError` with code `CONNECTION_NOT_ALLOWED` if the document asks for more than `connections` grants (none when absent), an `acp-agent` node asks for more than `acp` grants, a `runCode` node names a subprocess adapter `runCode` does not grant, or the document names an MCP server `mcp` does not grant.
  * @throws `NoeticConfigError` with code `CONNECTION_INVALID` if an MCP server uses a `$secret` and the harness has no `environment.secrets`.
+ * @throws `NoeticConfigError` with code `PARAM_NOT_ALLOWED` if the document reads a harness param `params` does not name, or reads from one an option its grants cannot check.
+ * @throws `NoeticConfigError` with code `UNKNOWN_PARAM_REFERENCE` if the document reads a param the harness does not have.
  */
 export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promise<string> {
   const allowlist = opts.connections ?? {};
@@ -351,6 +378,8 @@ export async function parseAndRunWorkflow(opts: ParseAndRunWorkflowOpts): Promis
       cwd,
     },
     secrets: harnessInternal<SecretResolver>(opts.harness, 'secrets'),
+    params: opts.params ?? [],
+    ctx: opts.ctx,
   });
   if (!parseResult.ok && parseResult.configError) {
     throw parseResult.configError;
@@ -454,6 +483,10 @@ interface DocumentCheck {
   ranges?: ProfileVersions;
   /** The harness's secret resolver, which a `$secret` in an MCP server needs. */
   secrets?: SecretResolver;
+  /** The harness params the document may read; none when absent. */
+  params: ReadonlyArray<string>;
+  /** The context the document will run on, whose harness holds the params it reads. */
+  ctx: Context;
 }
 
 /** Harness connection → profile → the version it serves. */
@@ -534,7 +567,10 @@ function tryParseWorkflow(raw: unknown, maxDepth: number, check: DocumentCheck):
     };
   }
 
-  const errors = expressionErrors(result.data.root);
+  const errors = [
+    ...expressionErrors(result.data.root),
+    ...outputSchemaErrors(result.data.root),
+  ];
   if (errors.length > 0) {
     return {
       ok: false,
@@ -564,6 +600,11 @@ function connectionErrorOf(
 ): NoeticConfigError | undefined {
   try {
     checkGrants(doc, check.grants, check.secrets);
+    checkParamGrants(doc, check.params);
+    checkUncheckedOptions(doc);
+    for (const use of paramUses(doc.root)) {
+      paramOf(check.ctx, use.name, use.where);
+    }
     return undefined;
   } catch (error) {
     if (isNoeticConfigError(error)) {

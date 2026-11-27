@@ -9,7 +9,12 @@ import { frameworkCast, NoeticConfigError, ToolChoiceMode } from '@noetic-tools/
 import type * as OpenRouterAgent from '@openrouter/agent';
 import { serverTool } from '@openrouter/agent';
 import { convertTools, extractSystemInstruction } from '../adapters/openrouter';
-import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
+import {
+  emitFrameworkEvent,
+  emitOn,
+  getBroadcaster,
+  shouldEmit,
+} from '../runtime/broadcaster-utils';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import { resolveWireJsonSchema } from '../runtime/tool-call';
 import { sanitizeToolNameForWire } from '../util/tool-name';
@@ -123,7 +128,7 @@ export function prepareModelRequest(
     }),
     allowedTools,
     emitIfAllowed(eventType, data) {
-      if (!shouldEmit(request.emit, eventType, data)) {
+      if (!shouldEmit(emitOn(request.emit, request.ctx), eventType, data)) {
         return;
       }
       emitFrameworkEvent({

@@ -331,6 +331,7 @@ declare interface AgentConfigShape<
   projection?: ProjectionPolicy;
   forceAtomicRecall?: boolean;
   contextCache?: unknown;
+  model?: string;
   decisionModel?: string;
   emitItemsOnReplay?: boolean;
   approveToolCall?: ToolApprover;
@@ -347,6 +348,7 @@ declare interface AgentConfigShape<
 | `projection` | `ProjectionPolicy` | no | Default projection policy for all callModel steps. Individual steps override it via `step.projection`. |
 | `forceAtomicRecall` | `boolean` | no | Recall every layer atomically regardless of its `recallMode`, disabling cached/eventual recall. |
 | `contextCache` | [`ContextCacheConfig`](/docs/framework/api/context-layer-types#contextcacheconfig) | no | Tuning for prompt-cache anchoring. On by default; pass `{ enabled: false }` to render every layer before history as it did before bands existed. |
+| `model` | `string` | no | Default model for `callModel` steps and JSON `callModel` nodes that set no `model` of their own. |
 | `decisionModel` | `string` | no | Default model for `decide` steps that set no `model` of their own, e.g. `'typesafe/jev-1.14'`. |
 | `emitItemsOnReplay` | `boolean` | no | Defaults to `false`. When `true`, a resumed run streams again, as `item_appended`, the items its replayed steps emitted through `emitItems`. |
 | `approveToolCall` | `ToolApprover` | no | `(params: { toolName, toolArgs, callId?, ctx }) => SteeringDecision \| Promise<SteeringDecision>`. Asked before every call to a tool that declares `needsApproval`, after the `beforeToolCall` layers allow it; `allow` runs the call, anything else refuses it. It may also answer `hold`. Without one, the call is held until a decision passed to `harness.execute()` answers it. See [Human-in-the-Loop Approval](/docs/framework/steps/invoke-tool#human-in-the-loop-approval). |

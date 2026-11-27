@@ -30,6 +30,7 @@ import { hydrateWorkflow } from '../../src/builders/workflow-source';
 import { workflow } from '../../src/builders/workflow-step';
 import { defineSource } from '../../src/connections/sources';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import { execute } from '../../src/interpreter/execute';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import { assistantMessage } from '../_helpers';
 
@@ -1531,5 +1532,112 @@ describe('a JSON workflow', () => {
     );
     expect(everything).toContain('app.password');
     expect(everything).not.toContain('hunter2');
+  });
+});
+
+describe('a stored flow that reads harness params', () => {
+  /** Plans, then answers under instructions read from the harness param `param`. */
+  const reads = (param: string): WorkflowDocument => ({
+    version: 1,
+    root: {
+      kind: 'sequence',
+      id: 'main',
+      steps: [
+        {
+          kind: 'callModel',
+          id: 'plan',
+          model: 'test/model',
+          instructions: 'Plan.',
+        },
+        {
+          kind: 'callModel',
+          id: 'answer',
+          model: 'test/model',
+          fromParams: {
+            instructions: param,
+          },
+        },
+      ],
+    },
+  });
+
+  function deploy(opts: {
+    storage: StorageAdapter;
+    m: Model;
+    document: WorkflowDocument;
+    params: Record<string, unknown>;
+  }): AgentHarness {
+    return new AgentHarness({
+      name: 'flows',
+      params: opts.params,
+      agentGraph: hydrateWorkflow(opts.document, {
+        tools: new Map(),
+        executeStep: execute,
+      }),
+      environment: {
+        storage: {
+          adapter: opts.storage,
+        },
+      },
+      _testCallModel: (request) => opts.m.call(request),
+    });
+  }
+
+  /** Runs the document that reads `rules` until its answer's model call fails. */
+  async function cutOffBeforeAnswer(storage: StorageAdapter): Promise<void> {
+    const first = deploy({
+      storage,
+      m: model(
+        'a',
+        [
+          2,
+        ],
+      ),
+      document: reads('rules'),
+      params: {
+        rules: () => 'first rules',
+      },
+    });
+    await first.execute('go', delivery);
+    await expect(first.getAgentResponse(thread)).rejects.toThrow('ECONNRESET');
+  }
+
+  it('reads them from the harness that resumes it', async () => {
+    const storage = createInMemoryStorage();
+    await cutOffBeforeAnswer(storage);
+    const m = model('b');
+    const second = deploy({
+      storage,
+      m,
+      document: reads('newRules'),
+      params: {
+        rules: () => 'second rules',
+        newRules: () => 'unused by the stored flow',
+      },
+    });
+    await second.execute('go', delivery);
+    expect((await second.getAgentResponse(thread)).text).toBe('b-1');
+    expect(m.instructions).toEqual([
+      'second rules',
+    ]);
+  });
+
+  it('fails at its start when the harness that resumes it lacks one', async () => {
+    const storage = createInMemoryStorage();
+    await cutOffBeforeAnswer(storage);
+    const m = model('b');
+    const second = deploy({
+      storage,
+      m,
+      document: reads('newRules'),
+      params: {
+        newRules: () => 'x',
+      },
+    });
+    await second.execute('go', delivery);
+    await expect(second.getAgentResponse(thread)).rejects.toThrow(
+      "reads harness param 'rules', which the harness does not have",
+    );
+    expect(m.calls).toBe(0);
   });
 });

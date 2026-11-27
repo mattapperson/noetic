@@ -17,26 +17,28 @@ import type {
   McpAllowlist,
   OutputCodec,
   RunCodeGrant,
+  StandardSchemaV1,
   Step,
+  StepEmitItemsResult,
   SubprocessAdapter,
   Tool,
-  ToolContext,
-  ToolExecutionContext,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
 import type { ExpressionBindings, ExpressionLimits } from '../expression/jsonata';
 import { compileExpression, compute, readInput } from '../expression/jsonata';
-import { markRecorded, stepOutputsOf } from '../expression/step-outputs';
+import { loopRunsOf, markRecorded, stepOutputsOf } from '../expression/step-outputs';
 import type {
   OutputCodecRef,
+  WorkflowArgs,
   WorkflowConnectionRef,
   WorkflowDocument,
   WorkflowNode,
+  WorkflowOutputSchema,
   WorkflowStepList,
 } from '../schemas/workflow';
 import { shorthandStepId, stepEntryToNode, stepListEntries } from '../schemas/workflow';
 import { outputText } from './output-text';
-import { callModel, runCode } from './step-builders';
+import { callModel, invokeTool, runCode } from './step-builders';
 import {
   hydrateInParallelNode,
   hydrateSpawnNode,
@@ -50,7 +52,7 @@ import {
   hydrateWaitNode,
 } from './workflow-connection-nodes';
 import type { ConnectionManifestEntries, ConnectionUses } from './workflow-connections';
-import { checkDocumentConnections } from './workflow-connections';
+import { checkDocumentConnections, compileArgs } from './workflow-connections';
 import {
   hydrateConditionalNode,
   hydrateDecideNode,
@@ -64,6 +66,16 @@ import {
   hydrateEmitItems,
   nodeScope,
 } from './workflow-custom-items';
+import { outputSchemaOf } from './workflow-output';
+import type { ParamUse } from './workflow-params';
+import {
+  emitOption,
+  fromParam,
+  fromParamSync,
+  lazyOption,
+  paramFor,
+  paramFunction,
+} from './workflow-params';
 import { workflowReplayKey } from './workflow-replay-key';
 import {
   nodeTools,
@@ -94,10 +106,12 @@ export interface HydrationContext {
    */
   uiLibraries?: ReadonlyMap<string, OutputCodec>;
   /**
-   * Resolves the name a `runCode` node's `subprocess` field gives. A name it
-   * does not know is looked up among the harness's subprocess adapters, when
-   * `runCodeBounds` allows it; a node that names none runs through
-   * `ctx.subprocess`.
+   * Resolves the name a `runCode` or `spawn` node's `subprocess` field gives.
+   * For a `runCode` node that carries code, a name it does not know is looked
+   * up among the harness's subprocess adapters, when `runCodeBounds` allows
+   * it; a `spawn` node, and a `runCode` node whose `execute` is a function,
+   * resolve here alone, when the document hydrates. A node that names none
+   * runs through `ctx.subprocess`.
    */
   resolveSubprocess?: (ref: string) => SubprocessAdapter | undefined;
   /**
@@ -161,7 +175,12 @@ export interface HydrationContext {
    * `connection`, runs on: a `verify` subject or a `wait`'s connection. Without
    * one, the document's only connection.
    */
-  enclosingConnection?: WorkflowConnectionRef;
+  enclosingConnection?: ConnectionRef;
+  /**
+   * What the ids of the nodes being hydrated carry beyond the ids the document
+   * wrote: a subflow's or a fan-out item's suffix. Set internally.
+   */
+  idSuffix?: string;
   /** The connection name `$item` holds on a fan-out path (an `inParallel` whose `over` lists connections). */
   fanOutItem?: string;
   /**
@@ -177,6 +196,9 @@ export interface HydrationContext {
   mcp?: McpAllowlist;
 }
 
+/** The connection a node runs on, as hydration reads it: a name, an expression, or a param that gives the name. */
+export type ConnectionRef = WorkflowConnectionRef | ParamUse;
+
 type NodeHydrator = (
   node: WorkflowNode,
   ctx: HydrationContext,
@@ -185,6 +207,12 @@ type NodeHydrator = (
 //#endregion
 
 //#region Node Hydrators
+
+/**
+ * The model a `callModel` node runs on when neither it nor the harness names
+ * one, and the `dynamicWorkflow` planner's under the same conditions.
+ */
+export const FALLBACK_MODEL = 'openai/gpt-4o';
 
 function hydrateCallModelNode(
   node: WorkflowNode,
@@ -197,12 +225,21 @@ function hydrateCallModelNode(
   return withCeiling(
     callModel({
       id: node.id,
-      model: node.model ?? 'openai/gpt-4o',
-      instructions: node.instructions,
-      tools: nodeTools(node, ctx),
+      model: lazyOption<string | undefined>(
+        node,
+        'model',
+        node.model ?? ((execCtx: Context) => execCtx.harness.config.model ?? FALLBACK_MODEL),
+      ),
+      instructions: lazyOption(node, 'instructions', node.instructions),
+      tools: lazyOption(node, 'tools', nodeTools(node, ctx)),
       toolChoice: node.toolChoice,
       params: node.params,
-      output: resolveOutputCodec(node.output, node.id, ctx),
+      output: resolveOutput(node.output, node.id, ctx),
+      // The model is sent the schema as the document wrote it.
+      outputJsonSchema: node.output && 'schema' in node.output ? node.output.schema : undefined,
+      // A document the host did not write cannot hide its model calls from the stream.
+      emit: ctx.acpBounds ? undefined : emitOption(node),
+      projection: node.projection,
     }),
     node,
     ctx,
@@ -210,21 +247,34 @@ function hydrateCallModelNode(
 }
 
 /**
- * Resolve a `callModel` node's `output` codec reference to a live `OutputCodec`.
+ * Resolve a `callModel` node's `output`: an inline JSON Schema to a validator,
+ * a codec reference to a live `OutputCodec`.
  *
  * Hydrated steps are typed `<string, string>` (the JSON boundary erases output
- * types), so the resolved codec is cast to the step's erased output type — the
- * runtime still returns the codec's real value. This is the same erasure the
+ * types), so the result is cast to the step's erased output type — the
+ * runtime still returns the parsed value. This is the same erasure the
  * rest of the hydrator applies via `frameworkCast`.
+ *
+ * @throws `NoeticConfigError` `INVALID_OUTPUT_SCHEMA` when the JSON Schema does not load, `UNKNOWN_UI_LIBRARY_REFERENCE` when the codec's library is not registered.
  */
-function resolveOutputCodec(
-  ref: OutputCodecRef | undefined,
+function resolveOutput(
+  output: WorkflowOutputSchema | OutputCodecRef | undefined,
   nodeId: string,
   ctx: HydrationContext,
-): OutputCodec<string> | undefined {
-  if (!ref) {
+): StandardSchemaV1<unknown, string> | OutputCodec<string> | undefined {
+  if (!output) {
     return undefined;
   }
+  return 'schema' in output
+    ? frameworkCast(outputSchemaOf(output.schema, nodeId))
+    : resolveOutputCodec(output, nodeId, ctx);
+}
+
+function resolveOutputCodec(
+  ref: OutputCodecRef,
+  nodeId: string,
+  ctx: HydrationContext,
+): OutputCodec<string> {
   const codec = ctx.uiLibraries?.get(ref.library);
   if (codec) {
     return frameworkCast<OutputCodec<string>>(codec);
@@ -253,38 +303,24 @@ function hydrateInvokeToolNode(
     });
   }
 
+  const args = compileArgs(
+    frameworkCast<WorkflowArgs>(node.args),
+    `args of invokeTool node '${node.id}'`,
+    ctx.expressionLimits,
+  );
+  const param = paramFor(node, 'args');
+
   return frameworkCast(
-    runCode({
+    invokeTool({
       id: node.id,
-      execute: async (_input: string, execCtx: Context) => {
-        const args = node.args ?? {};
-        const callId = `call-${node.id}-${Date.now()}`;
-        const callItem = {
-          id: callId,
-          type: 'function_call' as const,
-          status: 'completed' as const,
-          name: node.toolName,
-          callId,
-          arguments: JSON.stringify(args),
-        };
-        execCtx.itemLog.append(callItem);
-        const layerState: ToolContext = {
-          get: <T>(_layerId: string): T | undefined => undefined,
-          set: <T>(_layerId: string, _state: T): void => {},
-        };
-        const toolCtx: ToolExecutionContext = {
-          ctx: execCtx,
-          harness: execCtx.harness,
-          fs: execCtx.fs,
-          shell: execCtx.shell,
-          adapters: execCtx.adapters,
-          context: layerState,
-          assembledView: execCtx.itemLog.items,
-          lastStepMeta: execCtx.lastStepMeta,
-        };
-        const result = await resolved.execute(args, toolCtx);
-        return outputText(result);
-      },
+      tool: resolved,
+      args: (input: unknown, execCtx: Context) =>
+        param
+          ? fromParam(execCtx, param, [
+              input,
+              execCtx,
+            ])
+          : args(readInput(input), bindingsFor(execCtx, ctx)),
     }),
   );
 }
@@ -345,10 +381,11 @@ export function documentScopeOf(ctx: HydrationContext): object {
   return ctx.documentScope ?? BARE_DOCUMENT_SCOPE;
 }
 
-/** The bindings an expression evaluated in `execCtx` sees: `$steps`, and `$item` on a fan-out path. */
+/** The bindings an expression evaluated in `execCtx` sees: `$steps`, `$runs`, and `$item` on a fan-out path. */
 export function bindingsFor(execCtx: Context, ctx: HydrationContext): ExpressionBindings {
   return {
     steps: stepOutputsOf(execCtx, documentScopeOf(ctx)),
+    runs: loopRunsOf(execCtx, documentScopeOf(ctx)),
     ...(ctx.fanOutItem === undefined
       ? {}
       : {
@@ -368,7 +405,7 @@ export function hydrateStepList(opts: {
   list: WorkflowStepList;
   parentId: string;
   ctx: HydrationContext;
-  enclosing?: WorkflowConnectionRef;
+  enclosing?: ConnectionRef;
 }): Step<ContextData, string, unknown>[] {
   const { list, parentId, ctx, enclosing } = opts;
   const childCtx: HydrationContext =
@@ -424,6 +461,7 @@ const NODE_HYDRATORS: Record<string, NodeHydrator> = {
  * @returns A live `Step` ready for execution.
  * @throws `NoeticConfigError` with code `UNKNOWN_NODE_KIND` if the node kind is unrecognised.
  * @throws `NoeticConfigError` with code `UNKNOWN_TOOL_REFERENCE` if a tool name cannot be resolved.
+ * @throws `NoeticConfigError` with code `INVALID_OUTPUT_SCHEMA` if a `callModel` node's `output.schema` is not a JSON Schema that loads.
  * @throws `NoeticConfigError` with code `UNKNOWN_UNTIL_PREDICATE` if an until predicate kind is unrecognised.
  * @throws `NoeticConfigError` with code `INVALID_UNTIL_DECIDER` if a decide until predicate does not ask exactly one boolean question.
  * @throws `NoeticConfigError` with code `UNKNOWN_WORKFLOW_REFERENCE` (at execution time) if a subflow ref names no registered workflow.
@@ -448,26 +486,61 @@ export function hydrateNode(
   const hydrated = hydrator(node, ctx);
   // Its output becomes `$steps.<id>` for later expressions of its document once it completes.
   markRecorded(hydrated, documentScopeOf(ctx));
-  // Set in place rather than copied: builders register the step object itself.
+  setReplay(hydrated, node);
+  setEmitItems(hydrated, node, ctx);
+  return hydrated;
+}
+
+/** Sets a node's replay options on its step, in place: builders register the step object itself. */
+function setReplay(hydrated: Step<ContextData, string, string>, node: WorkflowNode): void {
   if (node.durable !== undefined) {
     hydrated.durable = node.durable;
   }
   if (node.replayKey !== undefined) {
     hydrated.replayKey = workflowReplayKey(node.id, node.replayKey);
   }
+  const replayKey = paramFor(node, 'replayKey');
+  if (replayKey) {
+    hydrated.replayKey = (input, execCtx) =>
+      String(
+        fromParamSync(execCtx, replayKey, [
+          input,
+          execCtx,
+        ]),
+      );
+  }
+}
+
+/** Sets what a node emits, and the custom items it may emit, on its step. */
+function setEmitItems(
+  hydrated: Step<ContextData, string, string>,
+  node: WorkflowNode,
+  ctx: HydrationContext,
+): void {
   const scope = nodeScope(node, ctx.customItems);
   if (Object.keys(scope).length > 0) {
     hydrated.customItems = scope;
   }
-  if (node.emitItems !== undefined) {
-    hydrated.emitItems = hydrateEmitItems({
-      nodeId: node.id,
-      option: node.emitItems,
-      scope,
-      limits: ctx.expressionLimits,
-    });
+  const emitItems = paramFor(node, 'emitItems');
+  if (emitItems) {
+    hydrated.emitItems = (output: unknown, execCtx: Context) =>
+      frameworkCast<StepEmitItemsResult>(paramFunction(execCtx, emitItems)(output, execCtx));
   }
-  return hydrated;
+  const hooks = {
+    onStart: paramFor(node, 'onStart'),
+    onDone: paramFor(node, 'onDone'),
+  };
+  if (node.emitItems === undefined && !hooks.onStart && !hooks.onDone) {
+    return;
+  }
+  hydrated.emitItems = hydrateEmitItems({
+    nodeId: node.id,
+    option: node.emitItems ?? {},
+    scope,
+    limits: ctx.expressionLimits,
+    hooks,
+    bindings: (execCtx) => bindingsFor(execCtx, ctx),
+  });
 }
 
 /**

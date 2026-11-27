@@ -4,25 +4,46 @@
  */
 
 import type { ContextData } from '@noetic-tools/context';
-import type { Context, Step, StepDecide, Until } from '@noetic-tools/types';
+import type {
+  Channel,
+  Context,
+  DecideQuestions,
+  DecideStep,
+  Lazy,
+  Step,
+  StepDecide,
+  Until,
+  Verdict,
+} from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
+import { z } from 'zod';
 import type { ExpressionBindings, ExpressionLimits } from '../expression/jsonata';
 import { compileExpression, passes, readInput } from '../expression/jsonata';
-import { stepOutputsOf } from '../expression/step-outputs';
+import { loopRunsOf, stepOutputsOf } from '../expression/step-outputs';
 import type {
   ConditionalRoute,
   DecideWorkflowNode,
   UntilPredicate,
+  WorkflowChannel,
   WorkflowNode,
 } from '../schemas/workflow';
 import { all, any } from '../until/combinators';
 import { until } from '../until/predicates';
+import { channel } from './channel-builder';
 import { conditional } from './control-flow-builders';
 import { decide, routeSwitch } from './decide-builders';
 import { schedule } from './every';
 import { loop } from './loop-builder';
 import type { HydrationContext } from './workflow-hydrator';
 import { bindingsFor, documentScopeOf, hydrateNode } from './workflow-hydrator';
+import {
+  emitOption,
+  fromParam,
+  fromParamSync,
+  lazyOption,
+  paramFor,
+  paramFunction,
+} from './workflow-params';
 
 //#region Control-Flow Node Hydrators
 
@@ -58,6 +79,8 @@ function hydrateUntilPredicate(
       });
     case 'expr':
       return untilExpr(pred.expr, where, ctx);
+    case 'param':
+      return untilParam(pred.name, where);
     case 'any':
       return any(...pred.predicates.map(hydrate));
     case 'all':
@@ -68,7 +91,7 @@ function hydrateUntilPredicate(
       throw new NoeticConfigError({
         code: 'UNKNOWN_UNTIL_PREDICATE',
         message: `Unknown until predicate kind: '${frameworkCast<UntilPredicate>(pred).kind}'.`,
-        hint: 'Supported kinds: maxSteps, maxCost, maxDuration, noToolCalls, never, outputContains, outputEquals, converged, expr, any, all, decide.',
+        hint: 'Supported kinds: maxSteps, maxCost, maxDuration, noToolCalls, never, outputContains, outputEquals, converged, expr, param, any, all, decide.',
       });
   }
 }
@@ -82,14 +105,56 @@ function untilExpr(expr: string, where: string, ctx: HydrationContext): Until {
   const compiled = compileExpression(expr, where, ctx.expressionLimits);
   const scope = documentScopeOf(ctx);
   return async (snap, run) => {
+    const runCtx = run ? frameworkCast<Context>(run.ctx) : undefined;
     const stop = await passes(compiled, readInput(snap.lastOutput), {
-      steps: run ? stepOutputsOf(frameworkCast<Context>(run.ctx), scope) : {},
+      steps: runCtx ? stepOutputsOf(runCtx, scope) : {},
+      runs: runCtx ? loopRunsOf(runCtx, scope) : {},
     });
     return {
       stop,
       reason: stop ? `expr gave true: ${expr}` : undefined,
     };
   };
+}
+
+/**
+ * Asks the `Until` function a harness param holds, read each time the loop
+ * asks. With no run to read params from, the loop goes on.
+ */
+function untilParam(name: string, where: string): Until {
+  return async (snap, run) => {
+    if (!run) {
+      return {
+        stop: false,
+      };
+    }
+    const ask = paramFunction(frameworkCast<Context>(run.ctx), {
+      name,
+      where,
+    });
+    return checkedVerdict(await ask(snap, run), name, where);
+  };
+}
+
+/**
+ * What an `Until` function from a param gave, as a verdict.
+ *
+ * @throws `NoeticConfigError` `INVALID_UNTIL_VERDICT` when it is not `{ stop: boolean, … }`: a loop cannot guess whether to go on.
+ */
+function checkedVerdict(value: unknown, name: string, where: string): Verdict {
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'stop' in value &&
+    typeof value.stop === 'boolean'
+  ) {
+    return frameworkCast<Verdict>(value);
+  }
+  throw new NoeticConfigError({
+    code: 'INVALID_UNTIL_VERDICT',
+    message: `The ${where} asked harness param '${name}', which gave ${JSON.stringify(value)}, not a verdict.`,
+    hint: `Make params.${name} return { stop: true } or { stop: false }, with an optional reason.`,
+  });
 }
 
 export function hydrateConditionalNode(
@@ -110,10 +175,22 @@ export function hydrateConditionalNode(
   if (defaultTarget) {
     allTargets.push(defaultTarget);
   }
+  const routeParam = paramFor(node, 'route');
 
   return conditional({
     id: node.id,
-    route: async (input: string, execCtx: Context) => {
+    route: async (input: string, execCtx: Context, run) => {
+      if (routeParam) {
+        const id = await fromParam(execCtx, routeParam, [
+          input,
+          execCtx,
+          run,
+        ]);
+        // The function names a target by the id the document wrote.
+        return id === undefined || id === null
+          ? defaultTarget
+          : targetById(allTargets, `${String(id)}${ctx.idSuffix ?? ''}`, routeParam.where);
+      }
       const view: RouteInput = {
         text: routeText(input).trim().toLowerCase(),
         value: readInput(input),
@@ -127,6 +204,27 @@ export function hydrateConditionalNode(
       return defaultTarget;
     },
     _optimizable: frameworkCast(allTargets),
+  });
+}
+
+/**
+ * The target a route function named.
+ *
+ * @throws `NoeticConfigError` `UNKNOWN_ROUTE_TARGET` when no target has that id.
+ */
+function targetById(
+  targets: ReadonlyArray<Step<ContextData, string, string>>,
+  id: string,
+  where: string,
+): Step<ContextData, string, string> {
+  const target = targets.find((step) => step.id === id);
+  if (target) {
+    return target;
+  }
+  throw new NoeticConfigError({
+    code: 'UNKNOWN_ROUTE_TARGET',
+    message: `${where} gave ${JSON.stringify(id)}, which is not the id of one of its targets.`,
+    hint: `Give the id of a target (${targets.map((step) => step.id).join(', ')}), or nothing for the default.`,
   });
 }
 
@@ -146,7 +244,11 @@ function routeTest(
     const compiled = compileExpression(route.expr, where, limits);
     return (input) => passes(compiled, input.value, input.bindings);
   }
-  const needle = (route.match ?? '').toLowerCase();
+  if (route.match === undefined) {
+    // A route with no test is one a route function picks by id.
+    return () => false;
+  }
+  const needle = route.match.toLowerCase();
   return (input) => input.text.includes(needle);
 }
 
@@ -194,23 +296,47 @@ function parseJsonObject(text: string): unknown {
 
 export function hydrateDecideNode(
   node: WorkflowNode,
-  _ctx: HydrationContext,
+  ctx: HydrationContext,
 ): Step<ContextData, string, string> {
   if (node.kind !== 'decide') {
     return frameworkCast(undefined);
   }
-  return frameworkCast(decideFromNode(node));
+  return frameworkCast(decideFromNode(node, ctx));
 }
 
-function decideFromNode(node: DecideWorkflowNode) {
+/** A `routeSwitch`'s decide node as a step, hydrated like any node so its own options apply. */
+function decideStep(
+  node: DecideWorkflowNode,
+  ctx: HydrationContext,
+): DecideStep<ContextData, unknown, DecideQuestions> {
+  return frameworkCast(hydrateNode(node, ctx));
+}
+
+function decideFromNode(
+  node: DecideWorkflowNode,
+  ctx: HydrationContext,
+): DecideStep<ContextData, unknown, DecideQuestions> {
+  const context = paramFor(node, 'context');
   return decide({
     id: node.id,
-    model: node.model,
-    instructions: node.instructions,
+    // A param that gives no model fails the step with MISSING_MODEL, as a getter's would.
+    model: frameworkCast<Lazy<string> | undefined>(lazyOption(node, 'model', node.model)),
+    instructions: lazyOption(node, 'instructions', node.instructions),
     questions: node.questions,
     view: node.view,
     samples: node.samples,
     headers: node.headers,
+    projection: node.projection,
+    // A document the host did not write cannot hide its model calls from the stream.
+    emit: ctx.acpBounds ? undefined : emitOption(node),
+    context: context
+      ? async (execCtx: Context) =>
+          frameworkCast<Record<string, unknown>>(
+            await fromParam(execCtx, context, [
+              execCtx,
+            ]),
+          )
+      : undefined,
   });
 }
 
@@ -225,15 +351,38 @@ export function hydrateRouteSwitchNode(
   for (const [key, target] of Object.entries(node.cases)) {
     cases[key] = hydrateNode(target, ctx);
   }
+  const uncertain = node.uncertain && hydrateNode(node.uncertain, ctx);
+  const on = paramFor(node, 'on');
+  if (on) {
+    return frameworkCast(
+      routeSwitch({
+        id: node.id,
+        decide: decideStep(node.decide, ctx),
+        on: (answers: unknown, execCtx: Context) =>
+          String(
+            fromParamSync(execCtx, on, [
+              answers,
+              execCtx,
+            ]),
+          ),
+        cases: frameworkCast<Record<never, Step<ContextData, string, string>>>(cases),
+        // The schema gives a node routed by a function its default.
+        default: frameworkCast<Step<ContextData, string, string>>(
+          node.default && hydrateNode(node.default, ctx),
+        ),
+        uncertain,
+      }),
+    );
+  }
   // A JSON node's outcomes are only known at runtime; the builder checks them.
   return frameworkCast(
     routeSwitch({
       id: node.id,
-      decide: decideFromNode(node.decide),
-      on: node.on,
+      decide: decideStep(node.decide, ctx),
+      on: node.on ?? '',
       cases: frameworkCast<Record<never, Step<ContextData, string, string>>>(cases),
       minConfidence: node.minConfidence,
-      uncertain: hydrateNode(node.uncertain, ctx),
+      uncertain: frameworkCast<Step<ContextData, string, string>>(uncertain),
     }),
   );
 }
@@ -245,6 +394,9 @@ export function hydrateLoopNode(
   if (node.kind !== 'loop') {
     return frameworkCast(undefined);
   }
+  const prepareNext = paramFor(node, 'prepareNext');
+  const onError = paramFor(node, 'onError');
+  const fixedOnError = node.onError;
   return loop({
     id: node.id,
     steps: [
@@ -253,6 +405,28 @@ export function hydrateLoopNode(
     until: hydrateUntilPredicate(node.until, ctx, `until of loop node '${node.id}'`),
     maxIterations:
       node.maxIterations === 'infinity' ? Number.POSITIVE_INFINITY : node.maxIterations,
+    maxHistorySize: node.maxHistorySize,
+    parkTimeout: node.parkTimeout,
+    inbox: node.inbox && channelOf(node.inbox, z.string()),
+    prepareNext: prepareNext
+      ? (output, verdict, execCtx) =>
+          frameworkCast<string>(
+            fromParamSync(execCtx, prepareNext, [
+              output,
+              verdict,
+              execCtx,
+            ]),
+          )
+      : undefined,
+    onError: onError
+      ? (error, execCtx) =>
+          frameworkCast<'retry' | 'skip' | 'abort'>(
+            fromParamSync(execCtx, onError, [
+              error,
+              execCtx,
+            ]),
+          )
+      : fixedOnError && (() => fixedOnError),
   });
 }
 
@@ -268,6 +442,18 @@ export function hydrateScheduleNode(
     step: hydrateNode(node.step, ctx),
     interval: node.interval,
     onError: node.onError,
+    jitter: node.jitter,
+    inbox: node.inbox && channelOf(node.inbox, z.unknown()),
+  });
+}
+
+/** The channel a node's `inbox` names: a queue unless the node says otherwise. */
+function channelOf<T>(inbox: WorkflowChannel, schema: z.ZodType<T>): Channel<T> {
+  return channel(inbox.name, {
+    schema,
+    mode: inbox.mode ?? 'queue',
+    capacity: inbox.capacity,
+    external: inbox.external,
   });
 }
 

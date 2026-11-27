@@ -9,8 +9,10 @@ import { SteeringAction } from '@noetic-tools/types';
 import { z } from 'zod';
 import { invokeTool, runCode, step } from '../../src/builders/step-builders';
 import { hold, tool } from '../../src/builders/tool-builder';
+import { hydrateWorkflow } from '../../src/builders/workflow-source';
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
 import { AgentHarness } from '../../src/harness/agent-harness';
+import { execute } from '../../src/interpreter/execute';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 
 //#region Fixtures
@@ -109,6 +111,57 @@ describe("a step's connection call that needs approval", () => {
       wiped: true,
     });
     expect(await harness.pending(scope)).toEqual([]);
+    await harness.close();
+  });
+
+  it('is held the same when a JSON call node makes it', async () => {
+    const harness = new AgentHarness({
+      name: 'routes',
+      params: {},
+      connections: {
+        app: appConnection(),
+      },
+    });
+    const ctx = harness.createContext();
+    const scope = {
+      executionId: ctx.id,
+    };
+    const running = harness.run(
+      hydrateWorkflow(
+        {
+          version: 1,
+          connections: {
+            app: {},
+          },
+          root: {
+            kind: 'call',
+            id: 'wipe',
+            connection: 'app',
+            op: 'app.wipe',
+            args: {},
+          },
+        },
+        {
+          tools: new Map(),
+          executeStep: execute,
+        },
+      ),
+      '',
+      ctx,
+    );
+
+    const held = await heldCall(harness, scope);
+    expect(held).toMatchObject({
+      name: 'app_app_wipe',
+      reason: 'approval',
+    });
+    await harness.execute({
+      type: 'noetic:decision',
+      callId: held.callId,
+      executionId: ctx.id,
+      action: 'allow',
+    });
+    expect(JSON.stringify(await running)).toBe('{"wiped":true}');
     await harness.close();
   });
 

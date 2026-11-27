@@ -37,7 +37,7 @@ const addStep = invokeTool({
 
 `invokeTool` invokes a single tool without going through an LLM. This is useful when you know exactly which tool to call -- for example, after a conditional routes to a known action, or as part of a deterministic pipeline.
 
-The optional `args` field lets you preset some or all of the tool's inputs. At runtime, preset args are merged with the step input.
+The optional `args` field lets you preset some or all of the tool's inputs. At runtime, preset args are merged with the step input. `args` may instead be a function, `(input, ctx) => args`, that gives the whole args from the step's input; the tool's `input` schema checks the result either way.
 
 ## The Tool Interface
 
@@ -64,7 +64,7 @@ Every tool in Noetic follows the same interface, whether it is passed to `callMo
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
 | `tool` | `Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>` | Yes | The tool to invoke |
-| `args` | `Partial<I>` | No | Preset arguments merged with step input |
+| `args` | `Partial<I> \| (input, ctx) => unknown` | No | Preset arguments merged with step input, or a function giving the whole args |
 
 ## Defining a Tool
 

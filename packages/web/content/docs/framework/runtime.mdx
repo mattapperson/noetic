@@ -619,6 +619,22 @@ interface AgentHooks {
 
 A parent's `beforeStep` runs before its children's and its `afterStep` after theirs. A step [replayed on resume](/docs/framework/durability#step-level-resume) does not execute, so neither hook runs for it; watch `step_replayed` for those. A hook that throws fails the step it ran for: a Noetic error passes through unchanged, and any other error becomes `step_failed` with the hook's error as its `cause`. A step whose `afterStep` threw is not recorded, so a resume runs it again.
 
+`beforeStep` runs before every `callModel` and `decide` step, so one that throws for those kinds refuses the call before any request is sent. That covers the root step of an `execute()` turn and each queued turn the harness starts after an abort. It does not cover model calls made outside a step: an `aiCondition`, a steering rule's `llmEval`, a context layer that calls the model itself, or the model an ACP agent runs on.
+
+```ts
+import type { AgentHooks } from '@noetic-tools/core';
+
+declare function isStopped(threadId: string): boolean;
+
+const hooks: AgentHooks = {
+  async beforeStep(step, ctx) {
+    if ((step.kind === 'callModel' || step.kind === 'decide') && isStopped(ctx.threadId)) {
+      throw new Error('This turn was stopped.');
+    }
+  },
+};
+```
+
 ```ts
 const harness = new AgentHarness({
   name: 'researcher',

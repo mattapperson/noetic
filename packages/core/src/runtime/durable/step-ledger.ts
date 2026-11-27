@@ -68,6 +68,11 @@ export const StepLedgerEntrySchema = z.object({
    */
   streamed: z.array(z.number().int().nonnegative()).optional(),
   /**
+   * How many times the body of a JSON workflow `loop` node ran, so a replayed
+   * loop still answers `$runs` (spec 33 § The Input).
+   */
+  runs: z.number().int().nonnegative().optional(),
+  /**
    * The connections the step (or anything beneath it) used, each with the identity
    * it had (spec 35 § Durability). A resumed run discards the ledger from the first
    * entry whose connection was replaced since.

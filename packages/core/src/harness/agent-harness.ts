@@ -184,6 +184,7 @@ import {
   NoeticErrorImpl,
   SteeringAction,
 } from './deps/types';
+import { unknownFlowParam } from './flow-version';
 import type { ForgetHost } from './forget';
 import { forgetExecution, forgetThread, listStoredExecutions, listStoredThreads } from './forget';
 import type { AgentHarnessOpts, WakeTimeListener } from './harness-options';
@@ -409,6 +410,7 @@ export class AgentHarness<
       projection: opts.projection,
       forceAtomicRecall: opts.forceAtomicRecall,
       contextCache: opts.contextCache,
+      model: opts.model,
       decisionModel: opts.decisionModel,
       emitItemsOnReplay: opts.emitItemsOnReplay,
       approveToolCall: opts.approveToolCall,
@@ -773,6 +775,10 @@ export class AgentHarness<
     const missingModel = this.llm.missingModelFor(this.agentGraph);
     if (missingModel) {
       return Promise.reject(missingModel);
+    }
+    const unknownParam = unknownFlowParam(frameworkCast<Step>(this.agentGraph), this.config.params);
+    if (unknownParam) {
+      return Promise.reject(unknownParam);
     }
 
     const threadId = options?.threadId ?? DEFAULT_THREAD_ID;
@@ -1954,6 +1960,10 @@ export class AgentHarness<
     if (missingModel) {
       throw missingModel;
     }
+    const unknownParam = unknownFlowParam(frameworkCast<Step>(root), this.config.params);
+    if (unknownParam) {
+      throw unknownParam;
+    }
     // Populate the unified tool pool when an embedder drives a step directly on
     // a bare `createContext()` context (the turn pipeline does this per turn).
     // Without it, steps that resolve tools dynamically from `ctx.unifiedTools`
@@ -2034,6 +2044,11 @@ export class AgentHarness<
   ): Promise<string> {
     if (graph !== this.agentGraph) {
       this.#connections.negotiateRoot(frameworkCast<Step>(graph));
+    }
+    // A turn resumed on its stored flow may read a param this harness no longer has.
+    const unknownParam = unknownFlowParam(frameworkCast<Step>(graph), this.config.params);
+    if (unknownParam) {
+      throw unknownParam;
     }
     return this.initAndRun(graph, '', ctx);
   }

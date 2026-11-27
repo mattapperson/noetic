@@ -29,6 +29,8 @@ import type {
   WorkflowValue,
 } from '../schemas/workflow';
 import { isWorkflowOpShorthand, stepListEntries } from '../schemas/workflow';
+import type { ParamUse } from './workflow-params';
+import { paramFor } from './workflow-params';
 
 //#region Types
 
@@ -240,7 +242,7 @@ export function compileArgs(
  * @throws `NoeticConfigError` `CONNECTION_UNKNOWN` for a name the manifest does not declare; `CONNECTION_INVALID` when no connection is named or implied.
  */
 function namesOf(
-  ref: WorkflowConnectionRef | undefined,
+  ref: WorkflowConnectionRef | ParamUse | undefined,
   where: string,
   scope: WalkScope,
 ): ReadonlyArray<string> {
@@ -253,7 +255,7 @@ function namesOf(
     ];
   }
   if (ref !== undefined) {
-    // An expression picks at run time: within a fan-out, any of its names.
+    // An expression or a param picks at run time: within a fan-out, any of its names.
     return scope.fanOut ?? Object.keys(scope.manifest);
   }
   if (scope.enclosing) {
@@ -389,7 +391,11 @@ function walkWait(
   >,
   scope: WalkScope,
 ): void {
-  const names = namesOf(node.connection, `wait node '${node.id}'`, scope);
+  const names = namesOf(
+    paramFor(node, 'connection') ?? node.connection,
+    `wait node '${node.id}'`,
+    scope,
+  );
   for (const name of names) {
     useOf(scope, name).events.add(node.event);
   }
@@ -414,7 +420,7 @@ function subjectNames(
   if (Array.isArray(node.subject)) {
     return node.subject.flatMap((name) => namesOf(name, where, scope));
   }
-  return namesOf(node.subject, where, scope);
+  return namesOf(paramFor(node, 'subject') ?? node.subject, where, scope);
 }
 
 function walkVerify(
@@ -433,6 +439,12 @@ function walkVerify(
   walkEntries(node.act, node.id, {
     ...scope,
     enclosing: subjects,
+    // A list of subjects binds `$item` to each in its `act`, as a fan-out does.
+    ...(Array.isArray(node.subject)
+      ? {
+          fanOut: subjects,
+        }
+      : {}),
   });
 }
 
@@ -475,7 +487,7 @@ function walkNode(node: WorkflowNode, scope: WalkScope): void {
           op: node.op,
           args: node.args,
         },
-        namesOf(node.connection, `call node '${node.id}'`, scope),
+        namesOf(paramFor(node, 'connection') ?? node.connection, `call node '${node.id}'`, scope),
         scope,
       );
       return;
@@ -513,7 +525,16 @@ function directChildren(node: WorkflowNode): WorkflowNode[] {
     case 'routeSwitch':
       return [
         ...Object.values(node.cases),
-        node.uncertain,
+        ...(node.default
+          ? [
+              node.default,
+            ]
+          : []),
+        ...(node.uncertain
+          ? [
+              node.uncertain,
+            ]
+          : []),
       ];
     case 'spawn':
     case 'withContext':

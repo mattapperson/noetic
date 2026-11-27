@@ -5,20 +5,29 @@
  */
 
 import type {
+  Context,
   CustomItem,
   CustomItemMap,
   CustomItemType,
+  EmitHookResult,
   StepEmitItemsOption,
+  StepEmitItemsResult,
   WorkflowCustomItem,
   WorkflowDocument,
   WorkflowEmitItems,
   WorkflowNode,
 } from '@noetic-tools/types';
 import { frameworkCast, NoeticConfigError, walkWorkflow } from '@noetic-tools/types';
-import type { ExpressionLimits } from '../expression/jsonata';
+import type {
+  CompiledExpression,
+  ExpressionBindings,
+  ExpressionLimits,
+} from '../expression/jsonata';
 import { compileExpression, computeMaybe, readInput } from '../expression/jsonata';
 import { customItem } from './custom-item';
 import { outputText } from './output-text';
+import type { ParamUse } from './workflow-params';
+import { paramFunction } from './workflow-params';
 
 //#region Public API
 
@@ -95,11 +104,20 @@ export function hydrateEmitItems({
   option,
   scope,
   limits,
+  hooks = {},
+  bindings,
 }: {
   nodeId: string;
   option: WorkflowEmitItems;
   scope: CustomItemMap;
   limits: ExpressionLimits | undefined;
+  /** Hooks read from harness params, in place of the option's expressions. */
+  hooks?: {
+    readonly onStart?: ParamUse;
+    readonly onDone?: ParamUse;
+  };
+  /** The `$steps` and `$runs` a hook expression sees. */
+  bindings?: (ctx: Context) => ExpressionBindings;
 }): StepEmitItemsOption {
   if (typeof option === 'boolean') {
     return option;
@@ -109,9 +127,24 @@ export function hydrateEmitItems({
     option.onStart === undefined ? undefined : compileExpression(option.onStart, where, limits);
   const onDone =
     option.onDone === undefined ? undefined : compileExpression(option.onDone, where, limits);
+  const read = (expr: CompiledExpression, value: unknown, ctx: Context): Promise<unknown> =>
+    computeMaybe(expr, readInput(value), bindings?.(ctx));
+  // A hook from a param gets what a TypeScript hook does. An item's hook may be
+  // a generator that yields its events; a plain hook gives what the step emits.
+  const hook =
+    (param: ParamUse) =>
+    (value: unknown, ctx: Context): EmitHookResult<unknown, unknown> =>
+      frameworkCast<EmitHookResult<unknown, unknown>>(paramFunction(ctx, param)(value, ctx));
+  const plainHook =
+    (param: ParamUse) =>
+    (value: unknown, ctx: Context): StepEmitItemsResult | Promise<StepEmitItemsResult> =>
+      frameworkCast<StepEmitItemsResult>(paramFunction(ctx, param)(value, ctx));
   if (option.item === undefined) {
     return {
-      onDone: onDone && (async (output) => textOf(await computeMaybe(onDone, readInput(output)))),
+      onStart: hooks.onStart && plainHook(hooks.onStart),
+      onDone: hooks.onDone
+        ? plainHook(hooks.onDone)
+        : onDone && (async (output, ctx: Context) => textOf(await read(onDone, output, ctx))),
     };
   }
   if (!scope[option.item]) {
@@ -123,16 +156,19 @@ export function hydrateEmitItems({
   }
   return {
     item: option.item,
-    onStart:
-      onStart &&
-      async function* (input) {
-        const event = await computeMaybe(onStart, readInput(input));
-        if (event !== undefined) {
-          yield event;
-        }
-        return undefined;
-      },
-    onDone: onDone && ((output) => computeMaybe(onDone, readInput(output))),
+    onStart: hooks.onStart
+      ? hook(hooks.onStart)
+      : onStart &&
+        async function* (input, ctx: Context) {
+          const event = await read(onStart, input, ctx);
+          if (event !== undefined) {
+            yield event;
+          }
+          return undefined;
+        },
+    onDone: hooks.onDone
+      ? hook(hooks.onDone)
+      : onDone && ((output, ctx: Context) => read(onDone, output, ctx)),
   };
 }
 

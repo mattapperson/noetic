@@ -24,6 +24,7 @@ import type { HydrationContext } from '../../src/builders/workflow-hydrator';
 import { hydrateNode } from '../../src/builders/workflow-hydrator';
 import { hydrateWorkflow } from '../../src/builders/workflow-source';
 import type { WorkflowDocument, WorkflowNode } from '../../src/schemas/workflow';
+import { validateWorkflow } from '../../src/schemas/workflow';
 import { makeMockContext, makeTestTool, noRun } from '../_helpers';
 
 /**
@@ -399,8 +400,9 @@ describe('hydrateNode — tool', () => {
       testTool,
     ]);
     const result = hydrateNode(node, ctx);
-    expect(result.kind).toBe('runCode');
+    assert(result.kind === 'invokeTool');
     expect(result.id).toBe('tool-step');
+    expect(result.tool.name).toBe('test-tool');
   });
 
   test('throws UNKNOWN_TOOL_REFERENCE for missing tool', () => {
@@ -1497,6 +1499,92 @@ describe('hydrateNode — acp-agent', () => {
     expect(plain.subprocess).toBeUndefined();
     expect(plain.fs).toBeUndefined();
     expect(plain.shell).toBeUndefined();
+  });
+
+  test('a node without a prompt validates and hydrates to a step that prompts with its input', () => {
+    const doc = validateWorkflow({
+      version: 1,
+      root: {
+        kind: 'acp-agent',
+        id: 'relay',
+        agent: 'claude-code',
+      },
+    });
+    const result = hydrateNode(doc.root, ctxWithAgent('claude-code'));
+    assert(result.kind === 'acp-agent');
+    expect(result.prompt).toBe('');
+  });
+
+  test('carries emit through to the step', () => {
+    const node: WorkflowNode = {
+      kind: 'acp-agent',
+      id: 'quiet',
+      agent: 'claude-code',
+      prompt: 'go',
+      emit: false,
+    };
+    const result = hydrateNode(node, ctxWithAgent('claude-code'));
+    assert(result.kind === 'acp-agent');
+    expect(result.emit).toBe(false);
+  });
+
+  test('a document the host did not write cannot turn emit off', () => {
+    const node: WorkflowNode = {
+      kind: 'acp-agent',
+      id: 'quiet',
+      agent: 'claude-code',
+      prompt: 'go',
+      emit: false,
+    };
+    const result = hydrateNode(node, {
+      ...ctxWithAgent('claude-code'),
+      acpBounds: {
+        grants: {},
+        sessionScope: 'doc',
+        cwd: '/work',
+      },
+    });
+    assert(result.kind === 'acp-agent');
+    expect(result.emit).toBeUndefined();
+  });
+
+  test('hydrates output.schema to a validator the step parses its answer with', async () => {
+    const node: WorkflowNode = {
+      kind: 'acp-agent',
+      id: 'typed',
+      agent: 'claude-code',
+      prompt: 'go',
+      output: {
+        schema: {
+          type: 'object',
+          properties: {
+            ok: {
+              type: 'boolean',
+            },
+          },
+          required: [
+            'ok',
+          ],
+        },
+      },
+    };
+    const result = hydrateNode(node, ctxWithAgent('claude-code'));
+    assert(result.kind === 'acp-agent');
+    assert(result.output);
+    expect(
+      (
+        await result.output['~standard'].validate({
+          ok: 'yes',
+        })
+      ).issues,
+    ).toBeDefined();
+    expect(
+      (
+        await result.output['~standard'].validate({
+          ok: true,
+        })
+      ).issues,
+    ).toBeUndefined();
   });
 
   test('throws UNKNOWN_ACP_AGENT_REFERENCE when no adapter is registered', () => {

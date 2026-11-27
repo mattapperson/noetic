@@ -48,7 +48,7 @@ interface StepDecideOpts<TContext, Q extends DecideQuestions> {
   samples?: number;
   /** Extra HTTP headers for the native request. Ignored on the estimated path. */
   headers?: Readonly<Record<string, string>>;
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
 }
 
 function decide<const Q extends DecideQuestions, TContext = ContextData, I = unknown>(
@@ -275,7 +275,7 @@ function routeSwitch<TContext, const Q, const K extends keyof Q & string, const 
 function routeSwitch<TContext, const Q, const C extends string, const Cases, D, U = D>(opts: {
   id: string;
   decide: DecideStep<TContext, unknown, Q>;
-  on: (answers: AnsweredAll<Q>) => C;
+  on: (answers: AnsweredAll<Q>, ctx: Context<TContext>) => C;
   cases: Cases;                // keys: a subset of C
   default: D;
   uncertain?: U;
@@ -371,7 +371,7 @@ interface StepDecide<TContext = ContextData, _I = unknown, O = unknown> {
   projection?: ProjectionPolicy;
   samples: number;
   headers?: Readonly<Record<string, string>>;
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
   /** Phantom field carrying the answers type for inference. Never set at runtime. */
   readonly _answers?: O;
 }
@@ -636,22 +636,31 @@ interface DecideWorkflowNode {
   view?: 'full' | 'layers' | 'none';
   samples?: number;
   headers?: Record<string, string>;
+  projection?: ProjectionPolicy;
+  emit?: boolean;
+  fromParams?: { model?: string; instructions?: string; context?: string; emit?: string };
 }
 
 interface RouteSwitchWorkflowNode {
   kind: 'routeSwitch';
   id: string;
   decide: DecideWorkflowNode;
-  on: string;                              // question id; key form only
+  on?: string;                             // question id (key form)
   cases: Record<string, WorkflowNode>;
   minConfidence?: number;
-  uncertain: WorkflowNode;
+  uncertain?: WorkflowNode;
+  default?: WorkflowNode;                  // function form only
+  fromParams?: { on?: string };            // function form: a harness param
 }
 ```
 
-The `context` selector and the function form of `on` are closures and have no
-JSON form. Schema validation checks that `on` names a question, that `cases`
-covers every outcome, and that `uncertain` is present.
+The `context` selector and the function form of `on` are closures. A node
+names the harness param that holds each in `fromParams`
+(`26-json-workflow-runtime` § Options from params): `fromParams.context` on a
+`decide` node, and `fromParams.on` on a `routeSwitch`, which then takes
+`default`, needs no `uncertain`, and takes neither `on` nor `minConfidence`.
+In the key form, schema validation checks that `on` names a question, that
+`cases` covers every outcome, and that `uncertain` is present.
 
 A `decide` node is also a valid until predicate on a `loop` node when it asks
 exactly one boolean question (see Ending a Loop).

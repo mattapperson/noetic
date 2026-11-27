@@ -54,7 +54,7 @@ export interface StepDecideOpts<TContext, Q extends DecideQuestions, I = unknown
    * estimated path. A step may be serialized, so keep credentials out of them.
    */
   headers?: Readonly<Record<string, string>>;
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
 }
 
 /** An empty question map is a type error, not just a build-time one. */
@@ -109,7 +109,7 @@ export interface RouteSwitchByFunctionOpts<
   id: string;
   decide: DecideStep<TContext, unknown, Q>;
   /** Receives answers with refusals already handled. */
-  on: (answers: AnsweredAll<Q>) => C;
+  on: (answers: AnsweredAll<Q>, ctx: Context<TContext>) => C;
   cases: Cases & OnlyKeys<Cases, C>;
   default: D;
   /** Taken when any answer is refused. Defaults to `default`. */
@@ -226,7 +226,7 @@ export function routeSwitch(opts: SwitchPlan): StepConditional<ContextData, unkn
 interface SwitchPlan extends StepReplay {
   id: string;
   decide: DecideStep<ContextData, unknown, DecideQuestions>;
-  on: string | ((answers: AnsweredAll<DecideQuestions>) => string);
+  on: string | ((answers: AnsweredAll<DecideQuestions>, ctx: Context) => string);
   cases: Partial<Record<string, CaseStep>>;
   minConfidence?: number;
   uncertain?: CaseStep;
@@ -268,7 +268,7 @@ function buildSwitch(plan: SwitchPlan): StepConditional<ContextData, unknown, un
       const answers = frameworkCast<Record<string, DecideAnswer>>(
         await run(plan.decide, input, ctx),
       );
-      const picked = pick(answers);
+      const picked = pick(answers, ctx);
       ctx.span.addEvent('route_switch', {
         stepId: plan.id,
         case: picked.label,
@@ -332,8 +332,8 @@ function byKey(plan: SwitchPlan, on: string): (answers: Record<string, DecideAns
 
 function byFunction(
   plan: SwitchPlan,
-  on: (answers: AnsweredAll<DecideQuestions>) => string,
-): (answers: Record<string, DecideAnswer>) => Picked {
+  on: (answers: AnsweredAll<DecideQuestions>, ctx: Context) => string,
+): (answers: Record<string, DecideAnswer>, ctx: Context) => Picked {
   const fallback: Picked = {
     step: frameworkCast<Step | null>(plan.default ?? null),
     label: 'default',
@@ -344,11 +344,11 @@ function byFunction(
         label: 'uncertain',
       }
     : fallback;
-  return (answers) => {
+  return (answers, ctx) => {
     if (Object.values(answers).some((a) => a.type === 'refusal')) {
       return refused;
     }
-    const key = on(frameworkCast<AnsweredAll<DecideQuestions>>(answers));
+    const key = on(frameworkCast<AnsweredAll<DecideQuestions>>(answers), ctx);
     const step = caseFor(plan, key);
     return step
       ? {

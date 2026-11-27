@@ -71,6 +71,8 @@ export interface AgentConfig<TParams extends Record<string, unknown> = Record<st
   forceAtomicRecall?: boolean;
   /** Tuning for prompt-cache anchoring. See `ContextCacheConfig` for the defaults. */
   contextCache?: ContextCacheConfig;
+  /** Default model for `callModel` steps. */
+  model?: string;
   /** Default model for `decide` steps. */
   decisionModel?: string;
   /**
@@ -141,7 +143,7 @@ interface CallModelRequestBase {
    */
   outputJsonSchema?: Record<string, unknown>;
   /** Controls framework event emission. Defaults to `true`. Passed through from `StepLLM.emit`. */
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
   /**
    * @internal
    * Framework-internal carrier for OpenRouter server tools (web search/fetch).

@@ -1360,6 +1360,28 @@ One node kind, with the agent named by a registry key:
 `subprocess`, `fs` and `shell` are optional names of harness adapters, as on a
 TypeScript step (§ The subprocess adapter).
 
+`prompt` may be left out: the node's input is then the prompt, as an empty
+`prompt` on `step.acpAgent` makes the step's input the prompt. `emit: false`
+keeps the turn's framework events out of the stream, as the step's `emit`
+does; the node takes a boolean, not a filter. `parseAndRunWorkflow` and
+`dynamicWorkflow` ignore it: a document the host did not write cannot hide its
+agent's turn. `output: { "schema": <JSON Schema> }` is the step's `output`: the
+agent's final text is JSON-parsed and checked against the schema
+(`26-json-workflow-runtime` § Structured output).
+
+A node's `clientCapabilities` take the step's fields, `additionalDirectories`
+and `allowAnyPath` included; no `acp` grant widens what an agent reaches on
+disk, so a document the host did not write that sets either is refused with
+`CONNECTION_NOT_ALLOWED`. A permission rule's `title` is a case-insensitive
+substring; `titlePattern`, with optional `titleFlags`, is the source of what
+the step writes as a `RegExp` title. A rule takes one or the other.
+
+`content` is the step's `content`: ACP content blocks sent after the prompt.
+Every option the step takes as a function — `prompt`, `content`,
+`instructions`, `cwd`, `mode`, `model`, `tools`, `onPermissionRequest` and an
+`emit` filter — a node reads from a harness param named in `fromParams`
+(`26-json-workflow-runtime` § Options from params).
+
 `instructions` is a string (§ Instructions); a document cannot set the
 adapter's `sessionMeta`. The hydrator resolves `agent` from `HydrationContext.acpAgents`, an **open**
 registry: supporting a new agent needs another entry, not a schema change. An
