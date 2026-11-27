@@ -174,9 +174,10 @@ function gateHooks(harness: WiredHarness): GateHooks {
         });
         return approval.decision;
       }
-      // A step's call has no round to come back to, so it waits where it is until a
-      // person answers, and the turn may park meanwhile.
-      if (request.ctx && request.caller === 'step' && request.callId !== undefined) {
+      // A step's call, written in TypeScript or in a document, has no round to come
+      // back to, so it waits where it is until a person answers, and the turn may
+      // park meanwhile.
+      if (request.ctx && request.caller !== 'model' && request.callId !== undefined) {
         const approval = await awaitApproval({
           harness,
           toolName: request.toolName,

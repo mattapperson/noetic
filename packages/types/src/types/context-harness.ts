@@ -58,7 +58,7 @@ interface ContextCallModelRequestBase {
   outputSchema?: StandardSchemaV1;
   /** Explicit non-Zod override/fallback after StandardJSONSchemaV1 conversion. */
   outputJsonSchema?: Record<string, unknown>;
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
   signal?: AbortSignal;
 }
 
@@ -145,6 +145,8 @@ export interface ContextHarness extends HarnessPlatform {
     readonly projection?: ProjectionPolicy;
     /** Tuning for prompt-cache anchoring. */
     readonly contextCache?: ContextCacheConfig;
+    /** Default model for `callModel` steps. */
+    readonly model?: string;
     /** Default model for `decide` steps. */
     readonly decisionModel?: string;
     /** Whether a resumed run streams again the items its replayed steps emitted. */

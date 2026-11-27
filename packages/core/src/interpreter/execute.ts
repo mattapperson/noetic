@@ -6,8 +6,19 @@ import {
   isNoeticError,
   NoeticErrorImpl,
 } from '@noetic-tools/types';
-import { recordedScopeOf, recordStepOutput } from '../expression/step-outputs';
-import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
+import {
+  loopRuns,
+  recordedScopeOf,
+  recordLoopRuns,
+  recordStepOutput,
+} from '../expression/step-outputs';
+import type { EmitOption } from '../runtime/broadcaster-utils';
+import {
+  emitFrameworkEvent,
+  emitOn,
+  getBroadcaster,
+  shouldEmit,
+} from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
 import { drainsOf } from '../runtime/drain';
 import type { StepLedger } from '../runtime/durable/step-ledger';
@@ -40,9 +51,7 @@ function asContextImpl(ctx: Context): ContextImpl | null {
  * the harness step kinds carry an `emit` field; every other kind defaults to
  * enabled.
  */
-function resolveStepEmit<TContext, I, O>(
-  step: Step<TContext, I, O>,
-): boolean | ((eventType: string, data: Record<string, unknown>) => boolean) | undefined {
+function resolveStepEmit<TContext, I, O>(step: Step<TContext, I, O>): EmitOption | undefined {
   if (step.kind === 'callModel' || step.kind === 'decide' || step.kind === 'acp-agent') {
     return step.emit;
   }
@@ -125,6 +134,7 @@ function replayFromLedger<TContext, I, O>(opts: {
   | {
       hit: true;
       output: O;
+      runs: number | undefined;
     }
   | {
       hit: false;
@@ -164,6 +174,7 @@ function replayFromLedger<TContext, I, O>(opts: {
   return {
     hit: true,
     output: frameworkCast<O>(replayed.output),
+    runs: replayed.runs,
   };
 }
 
@@ -198,8 +209,10 @@ async function recordToLedger<TContext, I, O>(opts: {
   positionalPath: string | undefined;
   step: Step<TContext, I, O>;
   output: O;
+  /** Body runs of a JSON workflow loop, for `$runs` on replay. */
+  runs: number | undefined;
 }): Promise<void> {
-  const { ledger, ledgerKey, inputHash, lane, positionalPath, step, output } = opts;
+  const { ledger, ledgerKey, inputHash, lane, positionalPath, step, output, runs } = opts;
   if (!ledger || ledgerKey === undefined) {
     return;
   }
@@ -221,6 +234,11 @@ async function recordToLedger<TContext, I, O>(opts: {
           streamed,
         }
       : {}),
+    ...(runs === undefined
+      ? {}
+      : {
+          runs,
+        }),
     completedAt: new Date().toISOString(),
   });
   /* A positional record prunes what recorded beneath it. A `key:` record sits at no
@@ -345,7 +363,7 @@ async function executeStep<TContext, I, O>(
     stepId: step.id,
     kind: step.kind,
   };
-  const emit = resolveStepEmit(step);
+  const emit = emitOn(resolveStepEmit(step), baseCtx);
   if (shouldEmit(emit, 'step_started', startedData)) {
     emitFrameworkEvent({
       broadcaster,
@@ -401,6 +419,9 @@ async function executeStep<TContext, I, O>(
         },
         replay.output,
       );
+    }
+    if (replay.runs !== undefined) {
+      recordLoopRuns(baseCtx, step, replay.runs);
     }
     return replay.output;
   }
@@ -479,6 +500,7 @@ async function executeStep<TContext, I, O>(
     positionalPath,
     step,
     output: result,
+    runs: step.kind === 'loop' ? loopRuns(baseCtx, step) : undefined,
   });
 
   /* Durability boundary (spec 23): snapshot after each completed step, so a crash

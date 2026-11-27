@@ -4,8 +4,11 @@
  * an edited document is a new version without the host naming one.
  */
 
-import type { Step } from '@noetic-tools/types';
+import type { Step, WorkflowDocument } from '@noetic-tools/types';
+import { NoeticConfigError, walkWorkflow } from '@noetic-tools/types';
 import { flowSourceOf } from '../builders/flow-source';
+import { paramUses } from '../builders/workflow-params';
+import type { WorkflowSource } from '../builders/workflow-source';
 import { stepChildren } from '../interpreter/step-walk';
 import { hashText } from '../runtime/durable/step-ledger';
 
@@ -37,9 +40,71 @@ function sortKeys(_key: string, value: unknown): unknown {
   return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
+/** Whether a flow's source is a JSON workflow's: its document, or the name of one, and the named workflows. */
+function isWorkflowSource(source: unknown): source is WorkflowSource {
+  return (
+    typeof source === 'object' && source !== null && 'document' in source && 'workflows' in source
+  );
+}
+
+/**
+ * Every document a flow's source can run: its own, or the one its name stands
+ * for, and the named ones their subflow refs reach.
+ */
+function documentsOf(source: unknown): WorkflowDocument[] {
+  if (!isWorkflowSource(source)) {
+    return [];
+  }
+  const named = (ref: string): WorkflowDocument | undefined =>
+    source.workflows && Object.hasOwn(source.workflows, ref) ? source.workflows[ref] : undefined;
+  const found = new Set<WorkflowDocument>();
+  const queue: Array<WorkflowDocument | undefined> = [
+    source.document ?? undefined,
+    source.ref === null ? undefined : named(source.ref),
+  ];
+  while (queue.length > 0) {
+    const next = queue.pop();
+    if (!next || found.has(next)) {
+      continue;
+    }
+    found.add(next);
+    for (const node of walkWorkflow(next.root)) {
+      if (node.kind === 'subflow' && node.ref !== undefined) {
+        queue.push(named(node.ref));
+      }
+    }
+  }
+  return [
+    ...found,
+  ];
+}
+
 //#endregion
 
 //#region Public API
+
+/**
+ * The error to fail with when a JSON workflow in `graph` reads a harness param
+ * (`fromParams`) that `params` does not hold, else undefined. Checked before
+ * any step runs, so a misspelled param fails the run at its start rather than
+ * when its node is reached.
+ */
+export function unknownFlowParam(
+  graph: Step,
+  params: Readonly<Record<string, unknown>>,
+): NoeticConfigError | undefined {
+  const unknown = stepsIn(graph)
+    .flatMap((step) => documentsOf(flowSourceOf(step)?.source))
+    .flatMap((document) => paramUses(document.root))
+    .find((use) => !Object.hasOwn(params, use.name));
+  return unknown
+    ? new NoeticConfigError({
+        code: 'UNKNOWN_PARAM_REFERENCE',
+        message: `${unknown.where} reads harness param '${unknown.name}', which the harness does not have.`,
+        hint: `Pass it in the harness params, e.g. new AgentHarness({ params: { ${unknown.name}: … } }).`,
+      })
+    : undefined;
+}
 
 /**
  * The version of the flows in `graph`: a hash of the source of each step in it

@@ -1571,6 +1571,7 @@ describe('dynamicWorkflow — MCP servers', () => {
     return new AgentHarness({
       name: 'planner',
       params: {},
+      model: 'test/model',
       _testCallModel: async (request) => {
         requests.push(request);
         return makeLLMResponse(JSON.stringify(document));

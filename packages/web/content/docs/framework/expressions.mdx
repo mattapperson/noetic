@@ -64,9 +64,10 @@ A `wait` node's filter is the one exception: it reads `{ "event": <the event>, "
 Two bindings are available in every expression:
 
 - **`$steps`** -- the outputs of nodes that have already completed in the enclosing workflow, by node id, each read the same way as the input. `$steps.watch` is the output of the node with id `watch`, so a node can use any earlier result, not only the one just before it. Before anything has run, `$steps` is an empty object.
+- **`$runs`** -- how many times each `loop` node's body has run, by loop node id. `$runs.tries` is the count for the loop with id `tries`: its final count once the loop has ended, and the count so far while it runs, so the loop's body and its `until` can read it too. Each run of a loop starts again from zero, and a loop that has not started has no entry.
 - **`$refId(x)`** -- the id inside a [connection ref](/docs/framework/connections#values), since JSONata paths cannot step into `$`-prefixed keys. It gives no value for anything that is not a ref.
 
-Inside a [fan-out over connections](/docs/framework/json-runtime#fan-out-over-connections), **`$item`** is the name of the connection the path runs on.
+Inside a [fan-out over connections](/docs/framework/json-runtime#fan-out-over-connections), **`$item`** is the name of the connection the path runs on. Inside the `act` of a `verify` whose `subject` is a list, it is the subject that `act` runs for; that shadows an enclosing fan-out's `$item`.
 
 ```json
 { "kind": "call", "id": "reply", "connection": "team", "op": "chat.reply",

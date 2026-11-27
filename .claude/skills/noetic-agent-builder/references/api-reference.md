@@ -73,14 +73,15 @@ type Lazy<T, TContext = ContextData> =
 
 callModel<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
-  model: Lazy<string, TContext>;                    // eager string or (ctx) => string
+  model?: Lazy<string | undefined, TContext>;       // eager string or (ctx) => string; falls back to harness `model`
   instructions?: Lazy<string | undefined, TContext>;
   tools?: Lazy<Tool[] | undefined, TContext>;       // allowed tool subset (undefined = all, [] = none)
   toolChoice?: ToolChoice;                          // 'auto' (default) | 'required' | 'none' | { tool: name }
   output?: StandardSchemaV1<unknown, O> | OutputCodec<O>;  // any Standard Schema v1 (Zod default) OR a streaming codec (see Generative UI)
   outputJsonSchema?: Record<string, unknown>;            // explicit fallback/override after Zod and StandardJSONSchemaV1
   params?: ModelParams;                             // temperature, topP, maxTokens, serviceTier (stopSequences: deprecated, ignored)
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
+  projection?: ProjectionPolicy;                    // overrides the harness default for this step
 }): StepCallModel<TContext, I, O>
 ```
 
@@ -90,7 +91,7 @@ callModel<TContext = ContextData, I = unknown, O = unknown>({
 
 **Tool choice.** `toolChoice` (a `ToolChoice`: a `ToolChoiceMode` value `'auto' | 'required' | 'none'`, or `{ tool: name }`) works inside the `tools` restriction and always keeps the full tool set on the wire. `'required'` restricted → `allowed_tools` with `mode: "required"`, unrestricted → `"required"`; `'none'` → `"none"`; `{ tool }` → `{ type: "function", name: <wire name> }`. `'required'` and `{ tool }` apply to the first model request only; once the model has called a tool, later rounds revert to `'auto'`. `{ tool }` naming a client tool missing from an eager `tools` array throws `UNKNOWN_TOOL_CHOICE` at build time; with omitted or lazy `tools` it throws at request time if the tool is outside the unified set or restriction. JSON `callModel` nodes take the same `toolChoice` field.
 
-**Lazy params.** `model`, `instructions`, and `tools` each accept either an eager value or a `(ctx) => value` getter resolved at step execution. Getters see the live `Context`, so a step can read `ctx.harness.config.params` or `ctx.unifiedTools` to produce per-run values without baking them in at build time. Function-form `tools` are NOT walked by `collectAllTools`; tools needed in the harness-wide pool should be registered via `AgentHarness.tools`. Eager `model` strings are validated at build time (empty → `MISSING_MODEL`); function-form models are validated after resolution with the same error code.
+**Lazy params.** `model`, `instructions`, and `tools` each accept either an eager value or a `(ctx) => value` getter resolved at step execution. Getters see the live `Context`, so a step can read `ctx.harness.config.params` or `ctx.unifiedTools` to produce per-run values without baking them in at build time. Function-form `tools` are NOT walked by `collectAllTools`; tools needed in the harness-wide pool should be registered via `AgentHarness.tools`. Eager `model` strings are validated at build time (empty → `MISSING_MODEL`); function-form models are validated after resolution with the same error code. A step with no `model` runs on the harness `model` (`new AgentHarness({ model })`, read as `ctx.harness.config.model`); with neither it fails with `MISSING_MODEL` when it runs.
 
 ```typescript
 callModel({
@@ -121,7 +122,7 @@ Direct tool execution (not via LLM selection).
 invokeTool<TContext = ContextData, I = unknown, O = unknown>({
   id: string;
   tool: Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>;
-  args?: Partial<I>;
+  args?: Partial<I> | ((input: I, ctx: Context) => unknown);  // preset args laid over the input, or a function giving them all
 }): StepInvokeTool<TContext, I, O>
 ```
 
@@ -159,7 +160,7 @@ decide<const Q extends DecideQuestions, TContext = ContextData, I = unknown>({
   projection?: ProjectionPolicy;                // default DECISION_PROJECTION
   samples?: number;                             // estimated path only; default 1
   headers?: Readonly<Record<string, string>>;   // native path only: extra HTTP headers, passed through unread
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
 }): DecideStep<TContext, I, Q>                  // StepDecide<TContext, I, DecideAnswers<Q>> & { questions: Q }
 ```
 
@@ -274,7 +275,7 @@ routeSwitch({
 routeSwitch({
   id: string;
   decide: DecideStep<TContext, unknown, Q>;
-  on: (answers: AnsweredAll<Q>) => C;   // answers with refusals removed
+  on: (answers: AnsweredAll<Q>, ctx: Context) => C;   // answers with refusals removed
   cases: Cases;                         // keys: a subset of C
   default: D;                           // taken when `on` returns a key with no case
   uncertain?: U;                        // on any refusal; falls back to `default`
@@ -499,7 +500,7 @@ step.acpAgent<TContext = ContextData, I = unknown, O = unknown>({
   subprocess?: string;                                 // harness subprocess adapter the agent runs through, by name
   fs?: string;                                         // harness fs adapter serving the agent's fs/* calls, by name
   shell?: string;                                      // harness shell adapter serving its terminal/* calls, by name
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
 }): StepAcpAgent<TContext, I, O>
 ```
 
@@ -585,7 +586,7 @@ A connection owns a live agent process, so **keeping one is always an explicit o
 
 **Errors:** `EMPTY_STEP_ID` (empty `id`), `MISSING_ACP_AGENT` (no `agent`), `MISSING_PROMPT` (neither `prompt` nor `content`). Asking for a capability the agent did not advertise — `loadSession`, a mode, a model, image/audio/embedded content, an HTTP/SSE MCP server — throws `AcpCapabilityError` before anything reaches the wire; a failed handshake throws `AcpConnectError`.
 
-**JSON workflow:** one node kind, `acp-agent`, with fields `agent` (registry key), `prompt`, and optional `cwd` / `mode` / `model` / `tools` / `permissions` / `clientCapabilities` / `session` / `subprocess` / `fs` / `shell` (the last three name harness adapters; under an `acp` allowlist a node may name only those its agent's grant lists in `subprocess` / `fs` / `shell`, none by default). Adapters resolve at hydration from `HydrationContext.acpAgents` (a `Map<string, AcpAgent>`); build it with `createAcpAgentRegistry(claudeCode(), codex())`. The registry is an **open** set — a new agent needs an entry, not a schema change. An unregistered key fails with `UNKNOWN_ACP_AGENT_REFERENCE`. `tools` take `{ "type" }`, `{ "connection", "ops"? }` and `{ "mcp": … }` entries in ACP's `McpServer` shape — `{ "name", "type": "http" | "sse", "url", "headers"? }` or `{ "name", "command", "args"?, "env"? }` (a stdio one on an `acp-agent` node starts through the agent's `spawn`) — served through the bridge as in TypeScript. `parseAndRunWorkflow` / `dynamicWorkflow` take the registry as `acpAgents`, cap each agent's `permissions` / `cwd` / `clientCapabilities` / `session` with `acp: AcpAllowlist` (`{ [agentId]: { permissions?: { default?, allow?: [{ kind?, title? }], persist? }, cwd?: dir, clientCapabilities?: { readTextFile?, writeTextFile?, terminal? }, session?: { keepAlive?, load? } } }`; without an entry: deny-only, the harness cwd, `readTextFile` only, `keepAlive` up to `'run'`, no `load`; a document's `session.reuse` keys get a per-run namespace so it never joins host sessions), and accept an MCP server (a `tools` entry, or a document `connections` entry `"linear": { "mcp": { … } }`) only when their `mcp: McpAllowlist` grants it — `urls: McpUrlGrant[]` (`{ url: 'https://*.example.com/path/*', secrets?: { secretName: headerName }, policy? }`, matched scheme/host/port/path separately; the server URL must equal its `new URL(url).href`; header names match case-insensitively, and each header or env name appears once), `commands: McpCommandGrant[]` (`{ command, args?, secrets?: { secretName: envName }, policy? }`, exact match), and `provider: (server: GrantedMcpServer) => ConnectionProvider` (`mcp` itself: a granted server is ACP's shape with secrets resolved). Header and env values must be `{ "$secret" }` bound by the grant, resolved through `environment.secrets` when the server connects; the policy is the grant's. No `mcp` grants nothing; a refusal is `CONNECTION_NOT_ALLOWED` before anything runs.
+**JSON workflow:** one node kind, `acp-agent`, with fields `agent` (registry key) and optional `prompt` (left out, the node's input is the prompt) / `cwd` / `mode` / `model` / `tools` / `permissions` / `clientCapabilities` / `session` / `subprocess` / `fs` / `shell` (the last three name harness adapters; under an `acp` allowlist a node may name only those its agent's grant lists in `subprocess` / `fs` / `shell`, none by default) / `output` (`{ "schema": <JSON Schema> }`, the final text parsed and checked) / `emit` (`false` keeps the turn's framework events out of the stream; ignored for documents run by `parseAndRunWorkflow` / `dynamicWorkflow`). Adapters resolve at hydration from `HydrationContext.acpAgents` (a `Map<string, AcpAgent>`); build it with `createAcpAgentRegistry(claudeCode(), codex())`. The registry is an **open** set — a new agent needs an entry, not a schema change. An unregistered key fails with `UNKNOWN_ACP_AGENT_REFERENCE`. `tools` take `{ "type" }`, `{ "connection", "ops"? }` and `{ "mcp": … }` entries in ACP's `McpServer` shape — `{ "name", "type": "http" | "sse", "url", "headers"? }` or `{ "name", "command", "args"?, "env"? }` (a stdio one on an `acp-agent` node starts through the agent's `spawn`) — served through the bridge as in TypeScript. `parseAndRunWorkflow` / `dynamicWorkflow` take the registry as `acpAgents`, cap each agent's `permissions` / `cwd` / `clientCapabilities` / `session` with `acp: AcpAllowlist` (`{ [agentId]: { permissions?: { default?, allow?: [{ kind?, title? }], persist? }, cwd?: dir, clientCapabilities?: { readTextFile?, writeTextFile?, terminal? }, session?: { keepAlive?, load? } } }`; without an entry: deny-only, the harness cwd, `readTextFile` only, `keepAlive` up to `'run'`, no `load`; a document's `session.reuse` keys get a per-run namespace so it never joins host sessions), and accept an MCP server (a `tools` entry, or a document `connections` entry `"linear": { "mcp": { … } }`) only when their `mcp: McpAllowlist` grants it — `urls: McpUrlGrant[]` (`{ url: 'https://*.example.com/path/*', secrets?: { secretName: headerName }, policy? }`, matched scheme/host/port/path separately; the server URL must equal its `new URL(url).href`; header names match case-insensitively, and each header or env name appears once), `commands: McpCommandGrant[]` (`{ command, args?, secrets?: { secretName: envName }, policy? }`, exact match), and `provider: (server: GrantedMcpServer) => ConnectionProvider` (`mcp` itself: a granted server is ACP's shape with secrets resolved). Header and env values must be `{ "$secret" }` bound by the grant, resolved through `environment.secrets` when the server connects; the policy is the grant's. No `mcp` grants nothing; a refusal is `CONNECTION_NOT_ALLOWED` before anything runs.
 
 **Authoring an agent + testing.** The `AcpAgent` contract lives in `@noetic-tools/types` (next to `ContextLayer`); `@noetic-tools/core` depends only on the *type* and runs adapter *instances* you pass in — it never imports `@noetic-tools/acp` (enforced by `.sentrux/rules.toml`). Build an adapter with `defineAcpAgent({ agentId, transport })`. For tests, `loopbackTransport` stands an in-process agent on the far end of a **real** protocol connection, so the wire format is exercised without spawning anything:
 
@@ -1788,7 +1789,7 @@ new AgentHarness({ /* … */ hooks: {
 } });
 ```
 
-Not run for a step replayed from the ledger; `afterStep` not run for a failed or cancelled step. A hook that throws fails its step (`step_failed` with the hook error as `cause`; Noetic errors pass through); a step whose `afterStep` threw is not recorded.
+Not run for a step replayed from the ledger; `afterStep` not run for a failed or cancelled step. `beforeStep` runs before every `callModel` and `decide` step — the root step of an `execute()` turn and each queued turn started after an abort included — so one that throws for those kinds refuses the call before any request is sent. It does not see model calls made outside a step (`aiCondition`, a steering `llmEval`, a layer calling the model, an ACP agent's own model). A hook that throws fails its step (`step_failed` with the hook error as `cause`; Noetic errors pass through); a step whose `afterStep` threw is not recorded.
 
 ### Sessions and the Message Queue
 
@@ -1883,7 +1884,7 @@ interface ApproveToolCallParams {
 
 ### Decisions (`harness.decide`)
 
-`AgentHarnessOpts.decisionModel?: string` sets the default model for `decide` steps that omit `model`. It is readable as `ctx.harness.config.decisionModel`.
+`AgentHarnessOpts.decisionModel?: string` sets the default model for `decide` steps that omit `model`. It is readable as `ctx.harness.config.decisionModel`. `AgentHarnessOpts.model?: string` does the same for `callModel` steps.
 
 ```typescript
 const harness = new AgentHarness({

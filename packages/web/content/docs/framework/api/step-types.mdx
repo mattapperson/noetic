@@ -84,14 +84,14 @@ Every step interface also extends `StepEmitItems<TContext, I, O, M>`. See [Emitt
 |---|---|---|---|
 | `kind` | `'callModel'` | yes | Discriminant |
 | `id` | `string` | yes | Step identifier |
-| `model` | `string` | yes | Model identifier |
+| `model` | `Lazy<string \| undefined, TContext>` | no | Model identifier. Falls back to `harness.config.model` |
 | `instructions` | `string` | no | System prompt / instructions for the model |
 | `tools` | `Tool[]` | no | Allowed tool subset (`undefined` = all, `[]` = none) |
 | `toolChoice` | `ToolChoice` | no | `'auto'` (default), `'required'`, `'none'`, or `{ tool: name }`; see [Tool Choice](/docs/framework/steps/call-model#tool-choice) |
 | `output` | `StandardSchemaV1<unknown, O> \| OutputCodec<O>` | no | Structured output schema (any Standard Schema v1; Zod is the default) or a streaming codec |
 | `outputJsonSchema` | `Record<string, unknown>` | no | Explicit JSON Schema override/fallback for non-Zod output. Conversion order is Zod → StandardJSONSchemaV1 → this field; validation-only schemas require it |
 | `params` | `ModelParams` | no | Sampling parameters |
-| `emit` | `boolean \| ((eventType, data) => boolean)` | no | Controls framework event emission for this step. Defaults to `true`. Pass `false` to suppress all framework events, or a filter function to allow specific events through. |
+| `emit` | `boolean \| ((eventType, data, ctx?) => boolean)` | no | Controls framework event emission for this step. Defaults to `true`. Pass `false` to suppress all framework events, or a filter function to allow specific events through. |
 
 ## StepInvokeTool
 
@@ -122,7 +122,7 @@ A step that asks a model typed questions and returns typed answers with probabil
 | `projection` | `ProjectionPolicy` | no | Budget for the decision's view. Defaults to `DECISION_PROJECTION` |
 | `samples` | `number` | yes | Runs averaged on the estimated path. `decide()` defaults it to `1` |
 | `headers` | `Readonly<Record<string, string>>` | no | Extra HTTP headers for the native request. Ignored on the estimated path |
-| `emit` | `boolean \| ((eventType, data) => boolean)` | no | Controls framework event emission for this step |
+| `emit` | `boolean \| ((eventType, data, ctx?) => boolean)` | no | Controls framework event emission for this step |
 | `_answers` | `O` | no | Phantom field carrying the answers type for inference. Never set at runtime |
 
 ### DecideStep

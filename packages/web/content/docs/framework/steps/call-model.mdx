@@ -26,14 +26,14 @@ const chat = callModel({
 | Property | Type | Required | Description |
 | --- | --- | --- | --- |
 | `id` | `string` | Yes | Unique step identifier |
-| `model` | `Lazy<string>` | Yes | Model identifier (e.g. `'openai/gpt-4o'`, `'claude-sonnet-4-20250514'`), or a `(ctx) => string` getter resolved per execution |
+| `model` | `Lazy<string>` | No | Model identifier (e.g. `'openai/gpt-4o'`, `'claude-sonnet-4-20250514'`), or a `(ctx) => string` getter resolved per execution. Falls back to `harness.config.model`, set with `new AgentHarness({ model })`; with neither, the step fails with `MISSING_MODEL` when it runs |
 | `instructions` | `Lazy<string \| undefined>` | No | System prompt, sent as the request's `instructions` field rather than as a conversation item. Any `system` messages in the log are appended to it. Accepts a `(ctx) => string \| undefined` getter |
 | `tools` | `Lazy<Tool[] \| undefined>` | No | Allowed tool subset (`undefined` = all, `[]` = none). Accepts a `(ctx) => Tool[] \| undefined` getter; function-form tools are resolved per execution and do not contribute to the pre-computed `ctx.unifiedTools` |
 | `toolChoice` | `ToolChoice` | No | How the model may use its tools: `'auto'` (default), `'required'`, `'none'`, or `{ tool: name }` to force one client tool. See [Tool Choice](#tool-choice) |
 | `output` | `StandardSchemaV1<unknown, O>` | No | Schema for structured output — any [Standard Schema v1](https://standardschema.dev) validator (Zod is the default) |
 | `outputJsonSchema` | `Record<string, unknown>` | No | Explicit JSON Schema override/fallback for non-Zod output. Zod uses its native converter; other validators can implement StandardJSONSchemaV1. A validation-only schema must provide this field or conversion throws `MISSING_JSON_SCHEMA` |
 | `params` | `ModelParams` | No | Generation parameters |
-| `emit` | `boolean \| (eventType, data) => boolean` | No | Controls framework event emission for this step. Defaults to `true`; `false` suppresses all framework events; a filter function decides per event |
+| `emit` | `boolean \| (eventType, data, ctx?) => boolean` | No | Controls framework event emission for this step. Defaults to `true`; `false` suppresses all framework events; a filter function decides per event |
 | `projection` | `ProjectionPolicy` | No | Projection policy for this step's context window, overriding the harness-level default |
 
 `Lazy<T>` means `T | ((ctx: Context) => T | Promise<T>)` — pass a plain value, or a function that the interpreter resolves against the live context each time the step runs (useful for model routing, dynamic prompts, and context-dependent tool sets).

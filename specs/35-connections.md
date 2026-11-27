@@ -625,7 +625,10 @@ same gates, in order:
 6. Secrets are filled in, and the call is sent.
 
 A refusal fails a step with `steering_denied` and returns a tool error to the
-model. Author-written steps are gated like everything else.
+model. Author-written steps are gated like everything else. On a harness with
+no approver, a step's call that needs approval is held for a person
+(`08-runtime` § Held tool calls), whether a `step.call` or a JSON `call` node
+makes it.
 
 ## Errors
 

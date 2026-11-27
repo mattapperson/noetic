@@ -1121,7 +1121,7 @@ callModel({ id: 'selective', model: '...', emit: (type) => type === 'step_starte
 
 - **`true`** (default): all framework events emitted.
 - **`false`**: no framework events (`step_started`, `step_completed`, `tool_round_*`, `tool_call_*`) for this step.
-- **Filter function**: `(eventType: string, data: Record<string, unknown>) => boolean` — called per event, return `true` to emit.
+- **Filter function**: `(eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean` — called per event with the context of the step it filters for, return `true` to emit.
 
 The `emit` option propagates through `CallModelRequest` to `callModel()`, controlling tool round/call events as well.
 
@@ -1440,6 +1440,8 @@ interface AgentHooks {
 - **Replay.** A step replayed from the ledger (`23a-step-level-resume`) does not execute, so neither hook runs for it; `step_replayed` marks it.
 - **Errors.** A hook that throws fails the step it ran for, as an error the step threw would. A `NoeticError` or `NoeticConfigError` passes through unchanged; anything else becomes `step_failed` with the hook's error as `cause` (`09-error-model`). A throwing `beforeStep` means the step never ran; a throwing `afterStep` means the step is not recorded, so a resume runs it again. `afterStep` runs after the step's items were emitted, so a step whose `afterStep` threw has already appended and streamed its final custom items, and a resume that runs it again emits them again.
 
+- **Refusing model calls.** `beforeStep` runs before every `callModel` and `decide` step: the root step of an `execute()` turn, a loop's decider, and the steps of each queued turn the harness starts after an abort. A `beforeStep` that throws for those two kinds fails the step with the hook's error and no request is sent. It runs once per step, not once per tool round. It does not see model calls made outside a step: an `aiCondition`, a steering rule's `llmEval`, a context layer that calls the model itself, or the model an ACP agent runs on.
+
 The hooks are on `ctx.harness.config.hooks`, which is how the interpreter reaches them on any context of the harness.
 
 ### What's NOT on the AgentHarness
@@ -1592,6 +1594,9 @@ interface AgentConfig<TParams extends Record<string, unknown> = Record<string, u
 
   /** Tuning for prompt-cache anchoring. */
   contextCache?: ContextCacheConfig;
+
+  /** Default model for `callModel` steps that name none. Read as `ctx.harness.config.model`. */
+  model?: string;
 
   /**
    * Whether a resumed run streams again, as `item_appended`, the items its replayed

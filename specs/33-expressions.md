@@ -70,7 +70,7 @@ stays free of the library. Core checks syntax (§ Validation).
 | `conditional` route  | `{ "expr": "<JSONata>", "target": … }`  | Takes the route when the expression gives `true`.        |
 | `loop` until         | `{ "kind": "expr", "expr": "<JSONata>" }` | Stops the loop when the expression gives `true`.       |
 | any node's `emitItems` | `{ "onStart"?: …, "onDone"?: … }`       | Computes an event or the final item the node emits.      |
-| a value position      | `{ "$expr": "<JSONata>" }`              | Computes one argument of a connection node (`35-connections`); `{ "$literal": … }` passes an object through untouched. |
+| a value position      | `{ "$expr": "<JSONata>" }`              | Computes one argument of a connection node (`35-connections`) or of an `invokeTool` node (spec 26); `{ "$literal": … }` passes an object through untouched. |
 
 A conditional route carries exactly one of `match` (substring) or `expr`. The
 `expr` until predicate may appear inside `any` and `all` like any other
@@ -96,14 +96,27 @@ the previous node's output as structured data. In JSONata terms the input is
 the context value: a bare path such as `n` reads its `n` field, and `$` is the
 whole input.
 
-Two bindings are available in every expression:
+Three bindings are available in every expression:
 
 - **`$steps`** — the outputs of nodes that have already completed in the
   enclosing workflow, by node id, each read by `readInput`. `$steps.watch` is
   the output of the node with id `watch`. A node can therefore use any earlier
   result, not only the one just before it.
+- **`$runs`** — how many times each `loop` node's body has run, by loop node
+  id. `$runs.tries` is the count for the loop with id `tries`: its final count
+  once the loop has ended, and the count so far while it runs, so its body and
+  its `until` can read it too. Each run of a loop starts again from zero. A
+  body that failed does not count. A loop that has not started has no entry.
+  The count is kept with the loop's ledger entry, so a loop replayed on a
+  resumed run still answers. Like `$steps`, it holds what ran or replayed in
+  this run: a loop inside a larger node that itself replays whole has no entry.
 - **`$refId(x)`** — the id inside a connection ref (`35-connections`),
   since JSONata paths cannot step into `$`-prefixed keys.
+
+Inside a fan-out over connections, and inside the `act` of a `verify` whose
+`subject` is a list, **`$item`** is the name of the connection the path or
+the `act` runs on (`35-connections`, `37-verification`); the `verify`'s
+shadows an enclosing fan-out's.
 
 A connection node's `wait` filter is evaluated against
 `{ "event": <the event>, "input": <the node's input> }`, and a trigger's

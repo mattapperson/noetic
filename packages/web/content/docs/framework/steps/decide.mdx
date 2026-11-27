@@ -298,7 +298,7 @@ const triage = decide({
 | `projection` | `ProjectionPolicy` | No | Budget for the decision's view. Default `DECISION_PROJECTION` |
 | `samples` | `number` | No | Runs to average on the estimated path. Positive integer. Default `1` |
 | `headers` | `Record<string, string>` | No | Extra HTTP headers for the native request. Ignored on the estimated path |
-| `emit` | `boolean \| (eventType, data) => boolean` | No | Controls framework event emission for this step |
+| `emit` | `boolean \| (eventType, data, ctx?) => boolean` | No | Controls framework event emission for this step |
 
 `decide()` returns a `DecideStep`, which keeps the literal question map so `routeSwitch` can infer the questions, choices, and levels.
 

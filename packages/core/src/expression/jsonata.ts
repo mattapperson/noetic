@@ -36,6 +36,8 @@ export interface ExpressionLimits {
 export interface ExpressionBindings {
   /** `$steps`: outputs of nodes already completed in the enclosing workflow, by node id, each read by `readInput`. */
   steps?: Readonly<Record<string, unknown>>;
+  /** `$runs`: how many times each loop's body has run in the loop's current or latest run, by loop node id. */
+  runs?: Readonly<Record<string, number>>;
   /** `$item`: the connection name a fan-out path runs on (spec 35 § Fan-out). */
   item?: unknown;
 }
@@ -233,10 +235,11 @@ function refIdBinding(value: unknown): string | undefined {
   return isRef(value) ? refId(value) : undefined;
 }
 
-/** The JSONata bindings for one evaluation: `$steps` always (empty when nothing ran), `$item` when set. */
+/** The JSONata bindings for one evaluation: `$steps` and `$runs` always (empty when nothing ran), `$item` when set. */
 function jsonataBindings(bindings: ExpressionBindings | undefined): Record<string, unknown> {
   const out: Record<string, unknown> = {
     steps: bindings?.steps ?? {},
+    runs: bindings?.runs ?? {},
   };
   if (bindings?.item !== undefined) {
     out.item = bindings.item;

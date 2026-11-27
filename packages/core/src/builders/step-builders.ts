@@ -18,6 +18,7 @@ import type {
   OperationName,
   OperationOutput,
   OutputCodec,
+  ProjectionPolicy,
   RetryPolicy,
   RunCodeExecute,
   StandardSchemaV1,
@@ -69,8 +70,8 @@ export interface CallModelOpts<TContext, O, I = unknown>
   extends StepReplay<TContext, I>,
     StepEmitItems<TContext, I, O> {
   id: string;
-  /** Model id. Eager string or `(ctx) => string` getter (resolved at step execution). */
-  model: Lazy<string, TContext>;
+  /** Model id: an eager string or a `(ctx) => string` getter (resolved at step execution). Falls back to `harness.config.model`. */
+  model?: Lazy<string | undefined, TContext>;
   /** Optional instructions; eager string or `(ctx) => string | undefined` getter. */
   instructions?: Lazy<string | undefined, TContext>;
   /**
@@ -93,7 +94,9 @@ export interface CallModelOpts<TContext, O, I = unknown>
    */
   outputJsonSchema?: Record<string, unknown>;
   params?: ModelParams;
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
+  /** Projection policy for this step's context window. Overrides the harness default. */
+  projection?: ProjectionPolicy;
 }
 
 export interface InvokeToolOpts<I, O, TContext = ContextData>
@@ -101,7 +104,8 @@ export interface InvokeToolOpts<I, O, TContext = ContextData>
     StepEmitItems<TContext, I, O> {
   id: string;
   tool: Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>;
-  args?: Partial<I>;
+  /** Fixed args laid over the step's input, or a function that gives the whole args from the input. */
+  args?: Partial<I> | ((input: I, ctx: Context) => unknown);
 }
 
 export interface StepAcpAgentOpts<TContext, O, I = unknown>
@@ -155,7 +159,7 @@ export interface StepAcpAgentOpts<TContext, O, I = unknown>
   fs?: string;
   /** The harness shell adapter that serves the agent's `terminal/*` calls, by name. Default: the harness's default. */
   shell?: string;
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
 }
 
 /** The operation names a call on `P`'s handle may use: its profile's, or any for a handle without one. */
@@ -418,7 +422,7 @@ export function runCode<
  *
  * @public
  * @param opts.id - Unique step identifier used in traces and error messages.
- * @param opts.model - Model identifier, eager string or `(ctx) => string` getter (resolved at step execution time).
+ * @param opts.model - Model identifier, eager string or `(ctx) => string` getter (resolved at step execution time). Left out, the harness `model` is used.
  * @param opts.instructions - Optional system prompt; eager string or `(ctx) => string | undefined` getter.
  * @param opts.tools - Optional tools; eager array or `(ctx) => Tool[] | undefined` getter.
  * @param opts.output - Optional Zod schema enabling structured output parsing.
@@ -427,7 +431,7 @@ export function runCode<
  * @returns A `StepCallModel` that can be composed into larger pipelines. The step
  *   is auto-registered in the shared step registry.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.
- * @throws `NoeticConfigError` with code `MISSING_MODEL` if an eager `model` string is empty. Function-form models are validated at step execution.
+ * @throws `NoeticConfigError` with code `MISSING_MODEL` if an eager `model` string is empty. A getter's model, and a step with no model on a harness with no `model`, are checked at step execution.
  * @throws `NoeticConfigError` with code `UNKNOWN_TOOL_CHOICE` if `toolChoice` forces a tool missing from an eager `tools` array.
  */
 export function callModel<TContext = ContextData, I = unknown, O = unknown>(
@@ -447,7 +451,7 @@ export function callModel<TContext = ContextData, I = unknown, O = unknown>(
     throw new NoeticConfigError({
       code: 'MISSING_MODEL',
       message: 'callModel() requires a non-empty model.',
-      hint: "Pass a model identifier, e.g. model: 'anthropic/claude-sonnet-4-20250514'.",
+      hint: "Pass a model identifier, e.g. model: 'anthropic/claude-sonnet-4-20250514', or omit it to use the harness `model`.",
     });
   }
   validateToolChoice(opts);
@@ -465,7 +469,7 @@ export function callModel<TContext = ContextData, I = unknown, O = unknown>(
  * @public
  * @param opts.id - Unique step identifier used in traces and error messages.
  * @param opts.tool - The tool definition with typed input/output schemas.
- * @param opts.args - Optional partial args that override or supplement model-provided arguments.
+ * @param opts.args - Optional partial args laid over the step's input, or `(input, ctx) => args` computing them all.
  * @returns A `StepInvokeTool` that can be composed into larger pipelines. The step
  *   is auto-registered in the shared step registry.
  * @throws `NoeticConfigError` with code `EMPTY_STEP_ID` if `id` is empty.

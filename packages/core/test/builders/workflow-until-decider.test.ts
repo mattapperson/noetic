@@ -103,9 +103,11 @@ function decideResponse(value: boolean): DecideResponse {
 }
 
 function inputText(request: DecideRequest): string {
-  const part = request.state.find((p) => p.type === 'text' && p.name === 'input');
-  assert(part && part.type === 'text');
-  return part.text;
+  const part = request.state.find(
+    (p) => (p.type === 'text' || p.type === 'json') && p.name === 'input',
+  );
+  assert(part && (part.type === 'text' || part.type === 'json'));
+  return part.type === 'text' ? part.text : JSON.stringify(part.value);
 }
 
 //#endregion

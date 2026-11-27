@@ -9,6 +9,7 @@ import {
   NoeticErrorImpl,
 } from '@noetic-tools/types';
 import type { EmitOption } from '../runtime/broadcaster-utils';
+import { emitOn } from '../runtime/broadcaster-utils';
 import { chargeSpent } from '../util/spent';
 import {
   commitLayerUsage,
@@ -124,7 +125,7 @@ function finalizeCodecOutput<O>(
   // too; `finish` still reparses the original text for the returned value.
   const textForEmit = lastText.endsWith('\n') ? lastText : `${lastText}\n`;
   session.push(textForEmit, (eventType, data) => {
-    if (shouldEmit(emit, eventType, data)) {
+    if (shouldEmit(emitOn(emit, ctx), eventType, data)) {
       emitFrameworkEvent({
         broadcaster,
         agentName,
@@ -356,12 +357,12 @@ export async function executeCallModel<TContext, I, O>(
   // Resolve lazy step fields up-front. Function-form getters run once per
   // step execution with the live context, so `ctx.harness.config.params`,
   // `ctx.unifiedTools`, and context layer state are all visible at resolution.
-  const resolvedModel = await resolveLazy(step.model, ctx);
+  const resolvedModel = (await resolveLazy(step.model, ctx)) ?? baseCtx.harness.config.model;
   if (!resolvedModel || resolvedModel.trim() === '') {
     throw new NoeticConfigError({
       code: 'MISSING_MODEL',
-      message: `callModel(${JSON.stringify(step.id)}) resolved model to an empty string.`,
-      hint: "Ensure `model` (or your `(ctx) => string` getter) returns a non-empty identifier, e.g. 'anthropic/claude-sonnet-4-20250514'.",
+      message: `callModel(${JSON.stringify(step.id)}) has no model.`,
+      hint: "Set `model` on the step (a string, or a `(ctx) => string` getter that returns one), or `model` on the harness, e.g. 'anthropic/claude-sonnet-4-20250514'.",
     });
   }
   const baseInstructions = await resolveLazy(step.instructions, ctx);

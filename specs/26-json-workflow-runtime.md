@@ -69,7 +69,7 @@ Authoring documents by hand or reviewing LLM-generated ones, reference the schem
 
 ## WorkflowNode Union
 
-`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share five fields: a required `id`, an optional boolean `durable` that the hydrator copies onto the built step, an optional declarative `replayKey` (§ Replay keys) that the hydrator turns into the step's `replayKey` function, an optional `emitItems` (§ Emitting items) that the hydrator turns into the step's `emitItems`, and optional `customItems` that only that node may emit (spec 34). `durable: false` keeps the node out of the step ledger, so a resumed run re-runs it instead of replaying its recorded output (`23a-step-level-resume` § Identity). The `acp-agent` node kind is specified in `27-acp-agent-steps`.
+`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share six fields: an optional `fromParams` (§ Options from params), and five more: a required `id`, an optional boolean `durable` that the hydrator copies onto the built step, an optional declarative `replayKey` (§ Replay keys) that the hydrator turns into the step's `replayKey` function, an optional `emitItems` (§ Emitting items) that the hydrator turns into the step's `emitItems`, and optional `customItems` that only that node may emit (spec 34). `durable: false` keeps the node out of the step ledger, so a resumed run re-runs it instead of replaying its recorded output (`23a-step-level-resume` § Identity). The `acp-agent` node kind is specified in `27-acp-agent-steps`.
 
 ```typescript
 type WorkflowNode =
@@ -198,16 +198,64 @@ interface CallModelWorkflowNode {
     stopSequences?: string[];  // deprecated: accepted, never sent (spec 02)
     serviceTier?: 'auto' | 'default' | 'fast' | 'flex' | 'priority' | 'scale' | 'ultrafast';
   };
+  output?:
+    | { schema: Record<string, unknown> }   // structured output, as a JSON Schema
+    | { codec: 'openui'; library: string }; // a streaming codec, by registry key (spec 28)
 }
 ```
 
 | Field          | Required | Description                                              |
 |----------------|----------|----------------------------------------------------------|
-| `model`        | No       | Model identifier. Falls back to the harness default.     |
-| `instructions` | Yes      | System instructions for this LLM call.                   |
+| `model`        | No       | Model identifier. Falls back to the harness `model` (`08-runtime`), read when the node runs, and to `openai/gpt-4o` on a harness that sets none. |
+| `instructions` | No       | System instructions for this LLM call.                   |
 | `tools`        | No       | Tool entries: `{ "type" }` names a registered client tool or an `openrouter:*` server tool; `{ "connection" }` and `{ "mcp" }` give the model a connection's tools (§ Tools). |
 | `toolChoice`   | No       | How the model may use its tools (spec 02, Unified Tool Set). Defaults to `"auto"`. `{ "tool": name }` must name a client tool in `tools`, or hydration throws `UNKNOWN_TOOL_CHOICE`; without `tools` it is checked against the unified set at request time. |
 | `params`       | No       | Model-level sampling parameters.                         |
+| `output`       | No       | Structured output (§ Structured output), or a streaming codec reference resolved from `uiLibraries`. |
+| `emit`         | No       | `false` keeps the step's framework events out of the stream. Default `true`. |
+| `projection`   | No       | How this call's context window is fitted: `{ tokenBudget, responseReserve, overflow, overflowModel?, windowSize? }`. Overrides the harness default (spec 11). |
+
+`instructions` is optional, as it is on `callModel()`. `model`, `instructions`, `tools` and `emit` can each be read from a harness param (§ Options from params).
+
+#### Structured output
+
+`output: { "schema": <JSON Schema> }` holds the model to a JSON Schema written
+in the document, so the schema is part of the document's version hash. The
+node behaves as a TypeScript `callModel` with an `output` schema does (spec
+02): the model is sent the document's own schema as its response format, not
+one derived from a validator, and its answer is JSON-parsed and checked
+against it. An
+answer that is not JSON or breaks the schema fails the node with
+`model_parse_error`. The hydrator loads the schema with `z.fromJSONSchema` to
+check answers; one it cannot load fails hydration with `INVALID_OUTPUT_SCHEMA`,
+and `parseAndRunWorkflow` and `dynamicWorkflow` report it when they check the
+document. An `acp-agent` node takes the same `output` (spec 27).
+
+The node's output is the parsed value. A later node reads its fields from its
+input or from `$steps.<id>` (spec 33):
+
+```json
+{
+  "kind": "sequence",
+  "id": "main",
+  "steps": [
+    {
+      "kind": "callModel",
+      "id": "triage",
+      "instructions": "Read the ticket.",
+      "output": {
+        "schema": {
+          "type": "object",
+          "properties": { "title": { "type": "string" }, "urgent": { "type": "boolean" } },
+          "required": ["title", "urgent"],
+          "additionalProperties": false
+        }
+      }
+    },
+    { "kind": "compute", "id": "label", "expr": "$steps.triage.urgent ? 'now: ' & title : 'later'" }
+  ]
+}
+```
 
 ### `invokeTool`
 
@@ -225,7 +273,42 @@ interface InvokeToolWorkflowNode {
 | Field      | Required | Description                                         |
 |------------|----------|-----------------------------------------------------|
 | `toolName` | Yes      | Name of a tool in the hydration context registry.   |
-| `args`     | No       | Static arguments passed to the tool at execution.   |
+| `args`     | No       | Arguments passed to the tool: JSON, with `{ "$expr" }` wherever a value is computed. |
+
+The node hydrates to the `invokeTool` step (spec 02), so a call runs the same
+gates as one written in TypeScript: the tool's `input` schema checks the args,
+the `beforeToolCall` layers and the approver of a tool that declares
+`needsApproval` may refuse it (`steering_denied`), and it is traced and
+reported as `tool_call_started` / `tool_call_completed`. The node's output is
+the tool's result. Like the step, it adds no item to the conversation.
+
+`args` is plain JSON, with `{ "$expr": "<JSONata>" }` wherever a value is
+computed from the node's input and `$steps` (spec 33), and `{ "$literal": … }`
+around data to pass through untouched. One `{ "$expr" }` in place of the whole
+object computes every argument. Any other object, `$`-prefixed keys included,
+is data. The args are what the node writes: unlike `invokeTool()`, whose fixed
+`args` are laid over the step's input, a node does not add its input. Write
+`{ "$expr": "$" }` to pass the input, or `{ "$expr": "$merge([$, { … }])" }` to
+lay args over it.
+
+```json
+{
+  "kind": "invokeTool",
+  "id": "file",
+  "toolName": "file-ticket",
+  "args": {
+    "title": { "$expr": "$steps.triage.title" },
+    "urgent": { "$expr": "urgent" },
+    "source": "chat"
+  }
+}
+```
+
+A registered tool is also how a document runs host code in process, and how it
+fails the flow: a tool that throws fails its node with `step_failed`, whose
+`stepId` is the node and whose `cause` is the error the tool threw. Enclosing
+`sequence` nodes wrap that in their own `step_failed`, so the host's error is
+the innermost `cause`.
 
 ### `compute`
 
@@ -279,7 +362,7 @@ interface ConditionalWorkflowNode {
 | `routes`  | Yes      | Ordered list of routes. First route whose test passes wins.        |
 | `default` | No       | Fallback node when no route matches. Omitting produces a no-op.   |
 
-Each route carries exactly one test; the schema rejects a route with both or neither:
+Each route carries exactly one test; the schema rejects a route with both or neither. (A node whose `fromParams.route` names a function is routed by it instead, and its routes carry no test: § Options from params.)
 
 - `match` — a case-insensitive substring of the input's text (§ Branch Route Hydration). Simple and model-friendly, for routing on prose.
 - `expr` — an expression (spec 33) evaluated against the input. The route is taken if it gives `true` and skipped if it gives `false` or no value (a path that matches nothing); any other result fails with `EXPRESSION_FAILED`. Exact, for routing on structured state such as a counter or a `decide` node's answers.
@@ -305,6 +388,10 @@ An `expr` route is the natural base case for a recursive named workflow (§ Recu
 Typed decisions and routing by them. The node shapes, validation rules, and
 outputs are specified in `32-decide` ("JSON Workflow Nodes"). Unlike `conditional`,
 `routeSwitch` routes on a model's answer rather than a substring of the input.
+A `decide` node also takes `projection` and `emit`, as `callModel` does. A
+`routeSwitch` whose `fromParams.on` names a function routes by it instead of by
+a question: it takes `default`, needs no `uncertain`, and its `cases` are not
+checked against a question (§ Options from params).
 
 ### `inParallel`
 
@@ -340,6 +427,7 @@ interface SpawnWorkflowNode {
   timeout?: number;
   layers?: string[];
   steers?: 'forward' | 'hold';
+  subprocess?: string;
 }
 ```
 
@@ -347,6 +435,7 @@ interface SpawnWorkflowNode {
 |-----------|----------|------------------------------------------------------|
 | `child`   | Yes      | The workflow subtree to execute in the child context. |
 | `timeout` | No       | Maximum wall-clock milliseconds for the child.       |
+| `subprocess` | No    | Named subprocess adapter the child runs through. The name is one `HydrationContext.resolveSubprocess` knows, resolved when the document hydrates (unknown name → `UNKNOWN_SUBPROCESS_REFERENCE`); it is the host's own code and needs no grant. A `runCode` node whose `execute` is a function (§ Options from params) resolves its `subprocess` the same way. Omit for the harness adapter. |
 | `layers`  | No       | Context layer names resolved from the hydration context registry, same resolution as `withContext` (unknown name → `UNKNOWN_LAYER_REFERENCE`). Omit to inherit the parent's layers, which is the default `spawn` behaviour (spec 04); naming layers **replaces** the inherited set for the child. |
 | `steers`  | No       | `'forward'` lets the child apply steers sent to the session while it runs; default `'hold'` keeps them queued until the child returns (spec 04). |
 
@@ -379,6 +468,10 @@ interface LoopWorkflowNode {
   body: WorkflowNode;
   until: UntilPredicate;
   maxIterations?: number | 'infinity';
+  onError?: 'retry' | 'skip' | 'abort';
+  maxHistorySize?: number;
+  inbox?: { name: string; mode?: 'value' | 'queue' | 'topic'; capacity?: number; external?: boolean };
+  parkTimeout?: number;
 }
 ```
 
@@ -387,6 +480,12 @@ interface LoopWorkflowNode {
 | `body`          | Yes      | The step tree executed each iteration.                                      |
 | `until`         | Yes      | Termination predicate (see Until Predicates below).                         |
 | `maxIterations` | No       | Hard cap: a positive integer, or `"infinity"` for none. Defaults to `1000`. |
+| `onError`       | No       | What a failed body does: `retry` runs it again, `skip` keeps the last output, `abort` (the default) fails the loop. `fromParams.onError` decides per error. |
+| `maxHistorySize` | No      | The most outputs kept for `until` (spec 05).                                |
+| `inbox`         | No       | A channel of text, by name, read before the loop stops; a message runs it again (spec 05, 06). `mode` defaults to `queue`. |
+| `parkTimeout`   | No       | How long, in ms, the loop waits on `inbox` before it stops.                 |
+
+`fromParams.prepareNext` shapes the next iteration's input (§ Options from params). A body of several steps is a `sequence` node.
 
 JSON cannot encode `Infinity`, so an uncapped loop spells it as the string literal `"infinity"` — exactly that spelling; any other string fails validation. The hydrator maps `"infinity"` to `Number.POSITIVE_INFINITY`, the same value the programmatic `loop({ maxIterations: Infinity })` takes (spec 05, Iteration Cap). An uncapped loop ends only through its `until` predicate, an error, or an aborted context, so pair it with a predicate that the body's output can actually satisfy (`outputContains`, `outputEquals`, `converged`, a `decide` node, …).
 
@@ -417,6 +516,8 @@ interface ScheduleWorkflowNode {
   step: WorkflowNode;
   interval: number;
   onError?: 'continue' | 'fail';
+  jitter?: number;
+  inbox?: { name: string; mode?: 'value' | 'queue' | 'topic'; capacity?: number; external?: boolean };
 }
 ```
 
@@ -425,6 +526,8 @@ interface ScheduleWorkflowNode {
 | `step`    | Yes      | The step to execute each interval.                                    |
 | `interval` | Yes      | Interval in milliseconds between executions.                          |
 | `onError` | No       | Error handling: `continue` (default) swallows; `fail` propagates.    |
+| `jitter`  | No       | The most, in ms, added at random to each interval.                    |
+| `inbox`   | No       | A channel, by name, whose messages run the step at once.              |
 
 ### `subflow`
 
@@ -475,6 +578,7 @@ type UntilPredicate =
   | { kind: 'never' }
   | { kind: 'converged';      threshold?: number }
   | { kind: 'expr';           expr: Expression }
+  | { kind: 'param';          name: string }
   | { kind: 'any';            predicates: UntilPredicate[] }
   | { kind: 'all';            predicates: UntilPredicate[] }
   | DecideWorkflowNode;
@@ -493,6 +597,7 @@ type UntilPredicate =
 | `outputEquals`   | `sentinel`      | `until.outputEquals(sentinel)`  | Stop when output exactly equals the sentinel.  |
 | `converged`      | `threshold?`    | `until.converged({threshold})`  | Stop when consecutive outputs are similar.     |
 | `expr`           | `expr`          | --                              | Stop when `expr` (spec 33) gives `true` against the last output. |
+| `param`          | `name`          | a custom `Until` function       | Ask the `Until` function the harness param `name` holds (§ Options from params). |
 | `any`            | `predicates[]`  | `any(...predicates)`            | Stop when any child predicate fires.           |
 | `all`            | `predicates[]`  | `all(...predicates)`            | Stop when all child predicates agree.          |
 | `decide`         | a `decide` node | the `decide()` step itself      | Stop when the model answers yes.               |
@@ -537,6 +642,7 @@ const UntilPredicateSchema: z.ZodType<UntilPredicate> = z.lazy(() =>
     z.object({ kind: z.literal('outputEquals'),   sentinel: z.string() }),
     z.object({ kind: z.literal('converged'),      threshold: z.number().min(0).max(1).optional() }),
     z.object({ kind: z.literal('expr'),           expr: ExpressionSchema }),
+    z.object({ kind: z.literal('param'),          name: z.string().min(1) }),
     z.object({ kind: z.literal('any'),            predicates: z.array(UntilPredicateSchema).min(1) }),
     z.object({ kind: z.literal('all'),            predicates: z.array(UntilPredicateSchema).min(1) }),
     DecideNodeSchema.refine(oneBooleanQuestion),
@@ -548,7 +654,7 @@ const UntilPredicateSchema: z.ZodType<UntilPredicate> = z.lazy(() =>
 
 ## Merge Strategies
 
-`inParallel` nodes use a `MergeStrategy` to combine results from parallel paths. This replaces the closure-based `MergeFn<O>` from the native `inParallel()` builder with a named enum.
+`inParallel` nodes use a `MergeStrategy` to combine results from parallel paths. A named strategy stands in for the common cases of the native `inParallel()` builder's `MergeFn<O>`; a node that needs its own function names it in `fromParams.merge` (§ Options from params).
 
 ```typescript
 type MergeStrategy = 'last' | 'first' | 'concat';
@@ -596,7 +702,7 @@ interface HydrationContext {
 | `acpAgents`          | No       | ACP agent adapters keyed by `agentId` (`claude-code`, `codex`, …). Open set. |
 | `bindings`           | No       | Document connection name → harness connection name, when they differ (spec 35). Connection nodes resolve connections through the harness registry when they run. |
 | `uiLibraries`        | No       | Output codecs for `callModel` nodes' `output` codec references.                |
-| `resolveSubprocess`  | No       | Resolves the name a `runCode` node's `subprocess` gives. A name it does not know is one of the harness's subprocess adapters, when `runCodeBounds` allows it (§ No In-Process Closures). |
+| `resolveSubprocess`  | No       | Resolves the name a `runCode` or `spawn` node's `subprocess` gives. For a `runCode` node that carries code, a name it does not know is one of the harness's subprocess adapters, when `runCodeBounds` allows it (§ No In-Process Closures). A `spawn` node, and a `runCode` node whose `execute` is a function, resolve their `subprocess` through `resolveSubprocess` alone, when the document hydrates. |
 | `runCodeBounds`      | No       | Internal: the `RunCodeGrant` that `runCode` nodes are held to when the host did not write the document. Set by `parseAndRunWorkflow` and `dynamicWorkflow`, dropped for named subflow refs; callers never set it (§ runCode). |
 | `workflows`          | No       | Named sub-workflow documents that `subflow` nodes resolve via `ref`.     |
 | `maxRecursionDepth`  | No       | Deepest allowed chain of named-ref resolutions on one path. Positive integer or `Infinity`; default `100`. |
@@ -640,8 +746,8 @@ Each node kind maps to a single existing builder:
 | `compute`   | `runCode` wrapper | Evaluates `expr` against the read input; output written as text. |
 | `conditional`    | `conditional({route: ...})` | Route function tests each route's `match` substring or `expr` expression. |
 | `decide`    | `decide(...)`        | Questions pass through unchanged; output is the answers object. |
-| `routeSwitch` | `routeSwitch(...)` | Key form only; cases and `uncertain` hydrate recursively. |
-| `inParallel`      | `inParallel({...})` | `paths` becomes a static function. Merge via strategy. |
+| `routeSwitch` | `routeSwitch(...)` | The key form, or the function form when `fromParams.on` names the function; cases, `default` and `uncertain` hydrate recursively. |
+| `inParallel`      | `inParallel({...})` | `paths` becomes a static function. Merge via strategy, or via the function `fromParams.merge` names. |
 | `spawn`     | `spawn({...})`            | Child hydrated recursively.                            |
 | `withContext`   | `withContext({...})` | Layer names resolved from hydration context.           |
 | `loop`      | `loop({...})`             | Until predicate hydrated to runtime `Until` function.  |
@@ -695,6 +801,7 @@ function hydrateUntil(pred: UntilPredicate, ctx: HydrationContext): Until | Step
     case 'outputEquals':   return until.outputEquals(pred.sentinel);
     case 'converged':      return until.converged(pred.threshold ? { threshold: pred.threshold } : undefined);
     case 'expr':           return (snap) => ({ stop: passes(pred.expr, readInput(snap.lastOutput)) });  // require a boolean
+    case 'param':          return (snap, run) => paramFunction(run.ctx, pred.name)(snap, run);          // read at each ask; must give a verdict
     case 'any':            return any(...pred.predicates.map((p) => hydrateUntil(p, ctx)));
     case 'all':            return all(...pred.predicates.map((p) => hydrateUntil(p, ctx)));
     case 'decide':         return hydrateNode(pred, ctx);
@@ -911,15 +1018,138 @@ A document asking for more than `acp`, `runCode` or `mcp` grants fails validatio
 
 ---
 
+## Options from params
+
+A TypeScript step takes functions: a `model` getter, a `merge`, a loop's
+`onError`. JSON cannot hold a function, so a node names one instead. The
+function lives in the harness `params`, and the node's `fromParams` maps an
+option to the param that holds it:
+
+```json
+{
+  "kind": "callModel",
+  "id": "ask",
+  "instructions": "Answer the question.",
+  "fromParams": { "model": "pickModel" }
+}
+```
+
+```typescript
+new AgentHarness({
+  params: { pickModel: (ctx) => (ctx.depth > 0 ? 'small/model' : 'large/model') },
+  // …
+});
+```
+
+**Reading.** A param is looked up on the harness every time its option is
+read, and a function is called then, with the arguments the option's
+TypeScript function takes. Nothing is kept between reads: a param the host
+swaps, or a function that answers differently, is seen at the next read. A
+param that is not a function is the option's value, read the same way, so
+`"fromParams": { "instructions": "systemPrompt" }` reads a string param.
+
+**One or the other.** An option is written on the node or named in
+`fromParams`, never both; both fails validation.
+
+**Options.** Each node kind takes the options below. Every node also takes
+`replayKey` (`(input, ctx) => string`), `emitItems` (the step's function form,
+`(output, ctx) => string | Item | Item[] | undefined`), and `onStart` and
+`onDone`, the hooks of its `emitItems` config (`(input, ctx)` and
+`(output, ctx)`; each may be a generator that yields the item's events). The
+last three must be functions.
+
+| Node          | Option                | Called with                  | Gives                                      |
+|---------------|-----------------------|------------------------------|--------------------------------------------|
+| `callModel`   | `model`               | `(ctx)`                      | The model id.                              |
+| `callModel`   | `instructions`        | `(ctx)`                      | The instructions.                          |
+| `callModel`   | `tools`               | `(ctx)`                      | The step's tool entries.                   |
+| `callModel`   | `emit`                | `(eventType, data, ctx)`     | `false` to drop the event.                 |
+| `runCode`     | `execute`             | `(input, ctx)`               | The node's output. Runs in process; the node then carries no code and needs no subprocess adapter. A generator's yields are events of the item `emitItems` names, as in TypeScript. |
+| `invokeTool`  | `args`                | `(input, ctx)`               | The tool's args.                           |
+| `call`        | `args`                | `(input, ctx)`               | The operation's args.                      |
+| `call`, `wait` | `connection`         | `(input, ctx)`               | The name of the connection to run on, checked against the manifest. |
+| `wait`        | `filter`              | `(event, input, ctx)`        | `true` for the awaited event.              |
+| `verify`      | `subject`             | `(input, ctx)`               | The name of the connection checked. The node then carries no `subject`. |
+| `decide`      | `model`, `instructions` | `(ctx)`                    | As `callModel`.                            |
+| `decide`      | `context`             | `(ctx)`                      | Extra state for the decision.              |
+| `decide`      | `emit`                | `(eventType, data, ctx)`     | `false` to drop the event.                 |
+| `routeSwitch` | `on`                  | `(answers, ctx)`             | The case to take. The node needs `default`; `uncertain` is optional. |
+| `conditional` | `route`               | `(input, ctx, run)`          | The `id` of the target to take, or nothing for `default`. The routes carry no test. An id no target has fails with `UNKNOWN_ROUTE_TARGET`. |
+| `inParallel`  | `merge`               | `(results, ctx)`             | The node's output. In `settle` mode `results` are the settled results, failures included. |
+| `loop`        | `prepareNext`         | `(output, verdict, ctx)`     | The next iteration's input.                |
+| `loop`        | `onError`             | `(error, ctx)`               | `'retry'`, `'skip'` or `'abort'`.          |
+| `acp-agent`   | `prompt`, `instructions`, `cwd`, `mode`, `model`, `tools`, `content` | `(ctx)` | As the step's options. |
+| `acp-agent`   | `onPermissionRequest` | `(request, ctx, info)`       | The permission outcome. Must be a function. |
+| `acp-agent`   | `emit`                | `(eventType, data, ctx)`     | `false` to drop the event.                 |
+
+A loop's `until` takes a function as the predicate
+`{ "kind": "param", "name": "<param>" }`: an `Until`, called with
+`(snapshot, run)` each time the loop asks (§ Until Predicates). It gives a
+verdict, `{ stop: boolean, reason? }`; anything else fails the loop with
+`INVALID_UNTIL_VERDICT`.
+
+A `conditional`'s `route` function names its target by the id the document
+wrote, also where the node sits in a subflow or an `each` template, whose
+hydrated ids carry a suffix.
+
+A `call`'s `args` function, in a document the host wrote, gives a step's args:
+they may carry a `{ "$secret" }`, as `step.call({ args })` may. In a document
+the host did not write they are a document's args, and a secret the document
+did not write out is refused (`35-connections`).
+
+**What the function is given.** `input` is the node's input as a JSON node
+receives it: inside a `sequence`, the text of the node before it (an object
+there arrives as its JSON text), so a function reads it with `JSON.parse`.
+
+**Sync and async.** A function may return a promise wherever its TypeScript
+option may. A loop's `prepareNext` and `onError`, `routeSwitch`'s `on`, an
+`emit` filter and `replayKey` are synchronous in TypeScript; a param function
+that gives a promise there fails with `PARAM_MUST_BE_SYNC` rather than being
+used as a value. For `replayKey` that failure is treated as any `replayKey`
+that throws: it is logged and the node runs without replay or recording
+(`23a-step-level-resume`).
+
+**Checking.** A document's param names are static, so they are checked before
+anything runs: a harness refuses to start a run, or a turn, of a document that
+reads a param it does not have (`UNKNOWN_PARAM_REFERENCE`), the named subflow
+documents it reaches included. A param that holds a value where only a function
+will do fails with `PARAM_NOT_A_FUNCTION` when it is read.
+
+**Documents the host did not write.** A param can hold anything the host put
+there, a secret included, so `parseAndRunWorkflow` and `dynamicWorkflow` let a
+document read only the params named in their `params` option. With no
+`params`, a document that reads any fails validation with `PARAM_NOT_ALLOWED`.
+A grant is by param name: a granted function may be named at any option.
+
+Such a document also cannot turn off `emit`, by value or by a granted
+function, on a `callModel`, `decide` or `acp-agent` node: what it does stays
+in the stream.
+
+Some options decide what a node may reach, and the connection and ACP grants
+are checked against the document, where a function's later answer cannot be
+seen. Such a document may therefore not read them from a param at all, granted
+or not (`PARAM_NOT_ALLOWED`): `tools` on `callModel`; `tools`, `cwd`, `mode`,
+`model` and `onPermissionRequest` on `acp-agent`; `connection` on `call` and
+`wait`; `subject` on `verify`.
+
+`hydrateWorkflow` and `workflow()`, for documents the host wrote, apply
+neither limit.
+
+`fromParams` is part of the document, so naming a different param is a new
+version. What the function does is not: a host that changes a param's
+behaviour under a durable run answers for it, as with any TypeScript closure.
+
+---
+
 ## Constraints
 
 ### No In-Process Closures
 
-Programmatic `runCode` accepts an `execute` closure, which is not JSON-serialisable. The `runCode` node instead carries its body as a code STRING dispatched through a subprocess adapter — never eval'd in-process. A node with no `subprocess` runs through the harness's default (`ctx.subprocess`). A node that names one runs through the adapter `HydrationContext.resolveSubprocess` returns for the name, else the harness's subprocess adapter of that name (`08-runtime` § Named Adapters). In a document the host did not write — one run by `parseAndRunWorkflow` or `dynamicWorkflow` — a harness name must be one the host's `runCode` grant lists, and none is by default (§ runCode); `resolveSubprocess` is the host's own code and needs no grant. A name neither knows fails the step with `UNKNOWN_SUBPROCESS_REFERENCE`, whose message lists the harness's names only for a document the host wrote. In-process computation is expressed as a `compute` expression (spec 33), which is interpreted as data, or through tool calls and LLM steps. An adapter that reaches only a remote runner refuses the request with `SUBPROCESS_CANNOT_END_INPUT`, since the runner's frames carry no end of input (`08-runtime` § Request Dispatch).
+Programmatic `runCode` accepts an `execute` closure, which is not JSON-serialisable. The `runCode` node instead carries its body as a code STRING dispatched through a subprocess adapter — never eval'd in-process. A node with no `subprocess` runs through the harness's default (`ctx.subprocess`). A node that names one runs through the adapter `HydrationContext.resolveSubprocess` returns for the name, else the harness's subprocess adapter of that name (`08-runtime` § Named Adapters). In a document the host did not write — one run by `parseAndRunWorkflow` or `dynamicWorkflow` — a harness name must be one the host's `runCode` grant lists, and none is by default (§ runCode); `resolveSubprocess` is the host's own code and needs no grant. A name neither knows fails the step with `UNKNOWN_SUBPROCESS_REFERENCE`, whose message lists the harness's names only for a document the host wrote. In-process computation is a `compute` expression (spec 33), interpreted as data, or a function the host holds: one named by `fromParams.execute` on a `runCode` node that then carries no code (§ Options from params), or one registered as a tool. An adapter that reaches only a remote runner refuses the request with `SUBPROCESS_CANNOT_END_INPUT`, since the runner's frames carry no end of input (`08-runtime` § Request Dispatch).
 
 ### Static Lazy Fields Only
 
-All fields in `WorkflowNode` are static JSON values. Fields that accept functions in the native builders (e.g., `fork.paths`, `branch.route`) are replaced with declarative equivalents (static arrays, substring matches, expressions).
+All fields in `WorkflowNode` are static JSON values. Fields that accept functions in the native builders are replaced with declarative equivalents (static arrays, substring matches, expressions) and, for every function a builder takes, a name in `fromParams` (§ Options from params). The exception is a function that returns steps, since a document's steps are its nodes: `inParallel`'s `paths` (`each` and `over` cover a data-dependent fan-out), `verify`'s `act` as a function of the subject (a list `subject` runs `act` once per subject, with `$item` bound), and a `conditional` `route` that builds the step it returns (the route function names one of the node's targets).
 
 ### Tool Names Resolved at Hydration Time
 
@@ -1005,7 +1235,14 @@ The JSON Workflow Runtime introduces the following `NoeticConfigError` codes:
 | `UNKNOWN_LAYER_REFERENCE`      | A layer name on a `withContext`/`spawn` node is not in the layer registry.   |
 | `UNKNOWN_ACP_AGENT_REFERENCE`  | An `acp-agent` node's adapter is not registered.                         |
 | `UNKNOWN_UI_LIBRARY_REFERENCE` | A `callModel` node's `output.library` is not in the codec registry.           |
-| `UNKNOWN_SUBPROCESS_REFERENCE` | A `runCode` node's `subprocess` names an adapter neither `resolveSubprocess` nor the harness has. |
+| `INVALID_OUTPUT_SCHEMA`        | A `callModel` or `acp-agent` node's `output.schema` is not a JSON Schema that loads. |
+| `UNKNOWN_PARAM_REFERENCE`      | A node reads a harness param the harness does not have (raised before the run or turn starts; § Options from params). |
+| `PARAM_NOT_ALLOWED`            | A document the host did not write reads a param `params` does not name, or reads from a param an option its grants cannot check. |
+| `PARAM_NOT_A_FUNCTION`         | A node reads from a param that is not a function an option only a function can give (raised when the option is read). |
+| `PARAM_MUST_BE_SYNC`           | A param function gave a promise at an option that is synchronous (raised when the option is read). |
+| `UNKNOWN_ROUTE_TARGET`         | A `conditional`'s route function gave an id none of its targets has. |
+| `INVALID_UNTIL_VERDICT`        | A `param` until predicate's function gave something other than a verdict. |
+| `UNKNOWN_SUBPROCESS_REFERENCE` | A `runCode` node's `subprocess` names an adapter neither `resolveSubprocess` nor the harness has, or a `spawn` node's, or that of a `runCode` node whose `execute` is a function, names one `resolveSubprocess` does not know. |
 | `ADAPTER_UNKNOWN`              | An `acp-agent` node's `subprocess`, `fs` or `shell` names an adapter the harness lacks. Raised when the step runs. |
 | `CONNECTION_UNKNOWN`           | A node names a connection the manifest or harness does not have. Other connection codes are in `35-connections` § Errors. |
 | `CONNECTION_NOT_ALLOWED`       | A document asks for more than `connections` grants (a manifest, or a `{ "connection" }` tool entry and its `ops`), names an MCP server, header or environment value `mcp` does not grant, an `acp-agent` node asks for more than `acp` grants, or a `runCode` node names a subprocess adapter `runCode` does not grant (§ Tools, § What a document may ask of an agent). |
@@ -1035,110 +1272,10 @@ The hydrator prefixes an `EXPRESSION_FAILED` message with the node id. Where it 
 
 ## Full Schema
 
-The complete Zod schema for reference:
-
-```typescript
-const WorkflowNodeSchema: z.ZodType<WorkflowNode> = z.lazy(() =>
-  z.discriminatedUnion('kind', [
-    z.object({
-      kind: z.literal('callModel'),
-      id: z.string().min(1),
-      model: z.string().optional(),
-      instructions: z.string(),
-      tools: z.array(z.union([TypedToolEntry, ConnectionToolEntry, McpToolEntry])).optional(),
-      toolChoice: z.union([
-        z.enum(ToolChoiceMode),
-        z.object({ tool: z.string().min(1) }),
-      ]).optional(),
-      params: z.object({
-        temperature: z.number().min(0).max(2).optional(),
-        topP: z.number().min(0).max(1).optional(),
-        maxTokens: z.number().int().positive().optional(),
-        stopSequences: z.array(z.string()).optional(),
-        serviceTier: z.enum(ServiceTier).optional(),
-      }).optional(),
-    }),
-    z.object({
-      kind: z.literal('invokeTool'),
-      id: z.string().min(1),
-      toolName: z.string().min(1),
-      args: z.record(z.unknown()).optional(),
-    }),
-    z.object({
-      kind: z.literal('compute'),
-      id: z.string().min(1),
-      expr: ExpressionSchema,
-    }),
-    z.object({
-      kind: z.literal('conditional'),
-      id: z.string().min(1),
-      routes: z.array(z.object({
-        match: z.string().min(1).optional(),
-        expr: ExpressionSchema.optional(),
-        target: WorkflowNodeSchema,
-      }).refine((r) => (r.match === undefined) !== (r.expr === undefined), {
-        message: "conditional route requires exactly one of 'match' (substring) or 'expr' (expression).",
-      })).min(1),
-      default: WorkflowNodeSchema.optional(),
-    }),
-    z.object({
-      kind: z.literal('inParallel'),
-      id: z.string().min(1),
-      mode: z.enum(['race', 'all', 'settle']),
-      paths: z.array(WorkflowNodeSchema).min(1),
-      merge: MergeStrategySchema.optional(),
-      concurrency: z.number().int().positive().optional(),
-    }),
-    z.object({
-      kind: z.literal('spawn'),
-      id: z.string().min(1),
-      child: WorkflowNodeSchema,
-      timeout: z.number().int().positive().optional(),
-      layers: z.array(z.string().min(1)).min(1).optional(),
-      steers: z.enum(['forward', 'hold']).optional(),
-    }),
-    z.object({
-      kind: z.literal('withContext'),
-      id: z.string().min(1),
-      child: WorkflowNodeSchema,
-      layers: z.array(z.string().min(1)).min(1),
-    }),
-    z.object({
-      kind: z.literal('loop'),
-      id: z.string().min(1),
-      body: WorkflowNodeSchema,
-      until: UntilPredicateSchema,
-      maxIterations: z.union([z.number().int().positive(), z.literal('infinity')]).optional(),
-    }),
-    z.object({
-      kind: z.literal('sequence'),
-      id: z.string().min(1),
-      steps: z.array(WorkflowNodeSchema).min(1),
-    }),
-    z.object({
-      kind: z.literal('schedule'),
-      id: z.string().min(1),
-      step: WorkflowNodeSchema,
-      interval: z.number().int().positive(),
-      onError: z.enum(['continue', 'fail']).optional(),
-    }),
-    z.object({
-      kind: z.literal('subflow'),
-      id: z.string().min(1),
-      document: WorkflowDocumentSchema.optional(),
-      ref: z.string().min(1).optional(),
-      input: z.string().optional(),
-    }).refine((node) => (node.document === undefined) !== (node.ref === undefined), {
-      message: "subflow node requires exactly one of 'document' (inline) or 'ref' (named).",
-    }),
-  ])
-);
-
-const WorkflowDocumentSchema = z.object({
-  version: z.literal(1),
-  root: WorkflowNodeSchema,
-});
-```
+The Zod schema is `WorkflowDocumentSchema` in
+`packages/types/src/schemas/workflow.ts`; the node sections above give each
+node's fields. The published JSON Schema is generated from it (§ Published
+JSON Schema), so the two cannot drift.
 
 ---
 

@@ -4,7 +4,9 @@ import type { EventBroadcaster } from './event-broadcaster';
 //#region Types
 
 /** @internal Option controlling framework event emission on a step or callModel request. */
-export type EmitOption = boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+export type EmitOption =
+  | boolean
+  | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
 
 //#endregion
 
@@ -31,6 +33,14 @@ export function shouldEmit(
     return false;
   }
   return emit(eventType, data);
+}
+
+/** `emit` with its filter, when it is one, given `ctx` as the context of the step it filters for. */
+export function emitOn(
+  emit: EmitOption | undefined,
+  ctx: Context | undefined,
+): EmitOption | undefined {
+  return typeof emit === 'function' ? (eventType, data) => emit(eventType, data, ctx) : emit;
 }
 
 /** Typeguard: context carries an internal _broadcaster property. */

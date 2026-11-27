@@ -6,17 +6,18 @@
 
 import type { ContextData, ContextLayer } from '@noetic-tools/context';
 import type { Context, Step } from '@noetic-tools/types';
-import { frameworkCast, NoeticConfigError } from '@noetic-tools/types';
+import { frameworkCast, NoeticConfigError, walkWorkflow } from '@noetic-tools/types';
 import type { SubflowWorkflowNode, WorkflowDocument, WorkflowNode } from '../schemas/workflow';
 import { inParallel } from './control-flow-builders';
 import { outputText } from './output-text';
 import { withContext } from './provide-builder';
 import { spawn } from './spawn-builder';
 import { runCode } from './step-builders';
-import { checkManifestName } from './workflow-connection-nodes';
+import { checkManifestName, namedSubprocess } from './workflow-connection-nodes';
 import { documentScope } from './workflow-custom-items';
 import type { HydrationContext } from './workflow-hydrator';
 import { hydrateNode } from './workflow-hydrator';
+import { fromParam, paramFor } from './workflow-params';
 
 //#region Child-Execution Node Hydrators
 
@@ -79,16 +80,30 @@ export function hydrateInParallelNode(
   }
 
   const mergeFn = buildMerge(node.merge ?? 'last');
+  const mergeParam = paramFor(node, 'merge');
+  // A merge function gets what a TypeScript one does: the results, or the settled results.
+  const merged = (results: ReadonlyArray<unknown>, execCtx: Context): string =>
+    mergeParam
+      ? frameworkCast<string>(
+          fromParam(execCtx, mergeParam, [
+            results,
+            execCtx,
+          ]),
+        )
+      : mergeFn(frameworkCast<string[]>(results));
 
   if (node.mode === 'settle') {
     return inParallel({
       id: node.id,
       mode: 'settle',
       paths: pathsFactory,
-      merge: (results) => {
-        const values = results.filter((r) => r.status === 'fulfilled').map((r) => r.value ?? '');
-        return mergeFn(values);
-      },
+      merge: (results, execCtx) =>
+        merged(
+          mergeParam
+            ? results
+            : results.filter((r) => r.status === 'fulfilled').map((r) => r.value ?? ''),
+          execCtx,
+        ),
       concurrency: node.concurrency,
       _optimizable: optimizable,
     });
@@ -98,7 +113,7 @@ export function hydrateInParallelNode(
     id: node.id,
     mode: 'all',
     paths: pathsFactory,
-    merge: mergeFn,
+    merge: merged,
     concurrency: node.concurrency,
     _optimizable: optimizable,
   });
@@ -161,7 +176,10 @@ function buildPerItemStep(opts: {
   ctx: HydrationContext;
 }): Step<ContextData, string, string> {
   const { forkId, eachTemplate, item, index, ctx } = opts;
-  const hydratedEach = hydrateNode(suffixNodeIds(eachTemplate, `-${index}`), ctx);
+  const hydratedEach = hydrateNode(
+    suffixNodeIds(eachTemplate, `-${index}`),
+    suffixed(ctx, `-${index}`),
+  );
   return frameworkCast(
     runCode({
       id: `${forkId}-item-${index}`,
@@ -187,7 +205,7 @@ function buildConnectionPathStep(opts: {
 }): Step<ContextData, string, string> {
   const { forkId, eachTemplate, name, index, ctx } = opts;
   const hydratedEach = hydrateNode(suffixNodeIds(eachTemplate, `-${index}`), {
-    ...ctx,
+    ...suffixed(ctx, `-${index}`),
     fanOutItem: name,
   });
   return frameworkCast(
@@ -199,41 +217,24 @@ function buildConnectionPathStep(opts: {
   );
 }
 
-/** Keys whose values are opaque data bags, never child workflow nodes. */
-const NON_NODE_KEYS = new Set([
-  'args',
-  'params',
-  'parameters',
-]);
+/** `ctx` for nodes hydrated under ids that carry one more `suffix`. */
+function suffixed(ctx: HydrationContext, suffix: string): HydrationContext {
+  return {
+    ...ctx,
+    idSuffix: `${ctx.idSuffix ?? ''}${suffix}`,
+  };
+}
 
 /**
- * Deep-clones a workflow node template, appending `suffix` to the `id` of every
- * nested node so a per-item instantiation has globally-unique step ids.
+ * A copy of a workflow node template with `suffix` on the `id` of every node in
+ * it, so each instantiation has step ids of its own. Only nodes are touched:
+ * data that happens to hold a `kind` and an `id` is left as written.
  */
 function suffixNodeIds(node: WorkflowNode, suffix: string): WorkflowNode {
   const clone = structuredClone(node);
-  const walk = (value: unknown): void => {
-    if (!value || typeof value !== 'object') {
-      return;
-    }
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        walk(entry);
-      }
-      return;
-    }
-    const record = frameworkCast<Record<string, unknown>>(value);
-    if (typeof record.kind === 'string' && typeof record.id === 'string') {
-      record.id = `${record.id}${suffix}`;
-    }
-    for (const [key, child] of Object.entries(record)) {
-      if (NON_NODE_KEYS.has(key)) {
-        continue;
-      }
-      walk(child);
-    }
-  };
-  walk(clone);
+  for (const child of walkWorkflow(clone)) {
+    child.id = `${child.id}${suffix}`;
+  }
   return clone;
 }
 
@@ -296,6 +297,7 @@ export function hydrateSpawnNode(
     timeout: node.timeout,
     context: resolvedLayers,
     steers: node.steers,
+    subprocess: namedSubprocess(node.subprocess, node.id, ctx),
   });
 }
 
@@ -339,6 +341,8 @@ export function hydrateSubflowNode(
       const { doc, childCtx } = resolveSubflowDocument(node, ctx);
       cached = hydrateNode(suffixNodeIds(doc.root, `-${node.id}`), {
         ...childCtx,
+        // An inline document was suffixed along with the nodes around it; a named one was not.
+        idSuffix: `${node.ref === undefined ? (ctx.idSuffix ?? '') : ''}-${node.id}`,
         customItems: documentScope(doc, ctx.customItems),
       });
     }

@@ -676,6 +676,10 @@ The same agents are available in the [JSON runtime](/docs/framework/json-runtime
 
 `subprocess`, `fs` and `shell` are optional and [name harness adapters](#picking-an-adapter-by-name), as on a TypeScript step. A document run through `parseAndRunWorkflow` or `dynamicWorkflow` may name only the adapters its agent's [`acp` grant](/docs/framework/json-runtime#what-a-document-may-ask-of-an-agent) lists.
 
+A node's `clientCapabilities` and `permissions` take what the step's do. A rule's `title` is a substring; write a `RegExp` title as `"titlePattern": "^git (push|reset)"`, with `"titleFlags": "i"` if it needs flags. Every option the step takes as a function, the node reads from a harness param named in [`fromParams`](/docs/framework/json-runtime#options-from-params).
+
+Leave `prompt` out and the node's input is the prompt, so a node can hand the agent whatever the node before it produced. `"emit": false` keeps the turn's framework events out of the stream; `parseAndRunWorkflow` and `dynamicWorkflow` ignore it, so a document the host did not write cannot hide its agent's turn. `"output": { "schema": <JSON Schema> }` parses the agent's final text as JSON and checks it, like the step's `output`.
+
 ```ts
 import { hydrateWorkflow, type ExecuteStepFn, type WorkflowDocument } from '@noetic-tools/core';
 import { claudeCode, codex, createAcpAgentRegistry } from '@noetic-tools/acp';

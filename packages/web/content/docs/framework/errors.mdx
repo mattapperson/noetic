@@ -390,9 +390,9 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### MISSING_MODEL
 
-**Cause:** `callModel()` got an empty `model`, a lazy `model` getter returned an empty string at run time, or a `decide()` step has neither its own `model` nor a harness `decisionModel`.
+**Cause:** `callModel()` got an empty `model`, a `callModel` step has neither its own `model` nor a harness `model`, or a `decide()` step has neither its own `model` nor a harness `decisionModel`.
 
-**Fix:** Pass a non-empty model id such as `'anthropic/claude-sonnet-4-20250514'`. For `decide`, set `model` on the step or `decisionModel` on the harness.
+**Fix:** Pass a non-empty model id such as `'anthropic/claude-sonnet-4-20250514'`, on the step or as `model` on the harness. For `decide`, set `model` on the step or `decisionModel` on the harness.
 
 #### UNKNOWN_TOOL_CHOICE
 
@@ -606,6 +606,48 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 **Fix:** Register an output codec under that name, for example `uiLibraries: new Map([['my-lib', openUi(myLibrary)]])` with `openUi` from `@noetic-tools/openui`.
 
+#### INVALID_OUTPUT_SCHEMA
+
+**Cause:** A `callModel` or `acp-agent` workflow node's `output.schema` is not a JSON Schema that loads, for example a `$ref` that points nowhere.
+
+**Fix:** Give a JSON Schema that `z.fromJSONSchema` loads, such as `{ "type": "object", "properties": { … } }`. See [Structured output](/docs/framework/json-runtime#structured-output).
+
+#### UNKNOWN_PARAM_REFERENCE
+
+**Cause:** A workflow node reads an option from a harness param (`fromParams`, or a `param` until predicate) that the harness does not have. It is raised before anything runs: by `parseAndRunWorkflow` and `dynamicWorkflow` when they check the document, and by the harness at the start of a run or turn of a hydrated document.
+
+**Fix:** Pass the param to the harness, `new AgentHarness({ params: { pickModel: (ctx) => … } })`, or correct the name in the document. See [Options from params](/docs/framework/json-runtime#options-from-params).
+
+#### PARAM_NOT_A_FUNCTION
+
+**Cause:** A node names a harness param where only a function will do (`emitItems`, its `onStart` and `onDone` hooks, `onPermissionRequest`, a `param` until predicate) and the param holds another value.
+
+**Fix:** Set the param to a function with the arguments the option's TypeScript form takes.
+
+#### PARAM_NOT_ALLOWED
+
+**Cause:** A document run by `parseAndRunWorkflow` or `dynamicWorkflow` reads a harness param the host did not grant. It is also raised, whatever the host granted, when such a document reads from a param an option that decides what a node may reach: `tools` on `callModel`; `tools`, `cwd`, `mode`, `model` or `onPermissionRequest` on `acp-agent`; `connection` on `call` or `wait`; `subject` on `verify`. The connection and ACP grants are checked against the document and cannot see a value a function gives later.
+
+**Fix:** Name the param in the `params` option, `params: ['pickModel']`, or take it out of the document. A document may read no params unless the host names them. For the options listed, write the value on the node, or run a document you wrote with `hydrateWorkflow`.
+
+#### PARAM_MUST_BE_SYNC
+
+**Cause:** A node read an option whose TypeScript function is synchronous (loop `prepareNext` and `onError`, `routeSwitch` `on`, an `emit` filter, `replayKey`) from a param whose function gave a promise. For `replayKey` the error is logged, not thrown: like a `replayKey` that throws, the node runs without replay or recording.
+
+**Fix:** Make the function return its value directly, not a promise.
+
+#### INVALID_UNTIL_VERDICT
+
+**Cause:** A loop's `{ "kind": "param" }` until predicate asked its function and got something other than a verdict.
+
+**Fix:** Return `{ stop: true }` or `{ stop: false }`, with an optional `reason`.
+
+#### UNKNOWN_ROUTE_TARGET
+
+**Cause:** A `conditional` node routed by `fromParams.route` got an id from its function that none of its targets has.
+
+**Fix:** Return the `id` of one of the node's route targets or its default, or nothing to take the default.
+
 #### UNKNOWN_ACP_AGENT_REFERENCE
 
 **Cause:** An `acp-agent` node names an agent that is not in `HydrationContext.acpAgents`.
@@ -614,7 +656,7 @@ Every `code` a `NoeticConfigError` can carry, with its cause and fix.
 
 #### UNKNOWN_SUBPROCESS_REFERENCE
 
-**Cause:** A `runCode` node names a subprocess adapter that neither `HydrationContext.resolveSubprocess` nor the harness's `environment.subprocess` has. The message lists the harness's names, unless the document is one `parseAndRunWorkflow` or `dynamicWorkflow` ran: its author is not told them.
+**Cause:** A `runCode` node names a subprocess adapter that neither `HydrationContext.resolveSubprocess` nor the harness's `environment.subprocess` has, or a `spawn` node, or a `runCode` node whose `execute` is a function, names one `resolveSubprocess` does not know (those two do not look among the harness's). The message lists the harness's names, unless the document is one `parseAndRunWorkflow` or `dynamicWorkflow` ran: its author is not told them.
 
 **Fix:** Name one of the harness's adapters, map the name in `resolveSubprocess(ref)`, or omit `subprocess` to use the harness default.
 

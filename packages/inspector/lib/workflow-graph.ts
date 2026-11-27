@@ -138,6 +138,8 @@ export function describeUntil(until: UntilPredicate): string {
       return `decide "${until.id}" says yes`;
     case 'expr':
       return until.expr;
+    case 'param':
+      return `param "${until.name}" says stop`;
   }
 }
 
@@ -420,7 +422,9 @@ function projectInParallel(builder: FlowBuilder, node: InParallelNode): Ports {
             'losers aborted',
           ]
         : [
-            `merge ${node.merge ?? 'last'}`,
+            node.fromParams?.merge
+              ? `merge param ${node.fromParams.merge}`
+              : `merge ${node.merge ?? 'last'}`,
           ],
   });
 
@@ -455,7 +459,9 @@ function projectConditional(builder: FlowBuilder, node: ConditionalNode): Ports 
     kind: 'conditional',
     shape: 'gate',
     title: 'conditional',
-    detail: 'first match wins, case-insensitive substring',
+    detail: node.fromParams?.route
+      ? `routed by param ${node.fromParams.route}`
+      : 'first match wins, case-insensitive substring',
     chips: [],
   });
   const exits: string[] = [];
@@ -464,7 +470,7 @@ function projectConditional(builder: FlowBuilder, node: ConditionalNode): Ports 
   // an unnumbered graph would draw them as though they were.
   for (const [index, route] of node.routes.entries()) {
     const ports = builder.project(route.target);
-    builder.connect(gate, ports.entry, `${index + 1}. "${route.match}"`);
+    builder.connect(gate, ports.entry, routeLabel(node, route, index));
     exits.push(...ports.exits);
   }
   if (node.default) {
@@ -490,7 +496,7 @@ function projectRouteSwitch(builder: FlowBuilder, node: RouteSwitchWorkflowNode)
     kind: 'routeSwitch',
     shape: 'gate',
     title: 'routeSwitch',
-    detail: `on ${node.on}`,
+    detail: node.fromParams?.on ? `on param ${node.fromParams.on}` : `on ${node.on}`,
     chips:
       node.minConfidence !== undefined
         ? [
@@ -505,6 +511,11 @@ function projectRouteSwitch(builder: FlowBuilder, node: RouteSwitchWorkflowNode)
   for (const [key, target] of Object.entries(node.cases)) {
     const ports = builder.project(target);
     builder.connect(gate, ports.entry, key);
+    exits.push(...ports.exits);
+  }
+  if (node.default) {
+    const ports = builder.project(node.default);
+    builder.connect(gate, ports.entry, 'default');
     exits.push(...ports.exits);
   }
   if (node.uncertain) {
@@ -644,11 +655,11 @@ function wrapChild(builder: FlowBuilder, spec: WrapperSpec): Ports {
 function leafDetail(node: WorkflowNode): string | undefined {
   switch (node.kind) {
     case 'callModel':
-      return clip(node.instructions);
+      return fromParamOr(node, 'instructions', node.instructions);
     case 'invokeTool':
       return node.toolName;
     case 'runCode':
-      return clip(node.execute);
+      return fromParamOr(node, 'execute', node.execute);
     case 'compute':
       return clip(node.expr);
     case 'subflow':
@@ -656,7 +667,7 @@ function leafDetail(node: WorkflowNode): string | undefined {
     case 'decide':
       return clip(Object.keys(node.questions ?? {}).join(', '));
     case 'acp-agent':
-      return clip(node.prompt);
+      return fromParamOr(node, 'prompt', node.prompt) ?? 'prompt: the input';
     default:
       return undefined;
   }
@@ -678,7 +689,11 @@ function leafChips(node: WorkflowNode): string[] {
         chips.push(`tools ${node.tools.map(toolName).join(', ')}`);
       }
       if (node.output) {
-        chips.push(`${node.output.codec}: ${node.output.library}`);
+        chips.push(
+          'schema' in node.output
+            ? 'output schema'
+            : `${node.output.codec}: ${node.output.library}`,
+        );
       }
       return chips;
     }
@@ -714,6 +729,36 @@ function toolName(entry: WorkflowToolEntry): string {
     return entry.type;
   }
   return 'connection' in entry ? entry.connection : entry.mcp.name;
+}
+
+/**
+ * A route's edge label. Routes with a test are numbered, since the first hit
+ * wins; routes a function picks between are named by their target.
+ */
+function routeLabel(
+  node: ConditionalNode,
+  route: ConditionalNode['routes'][number],
+  index: number,
+): string {
+  if (node.fromParams?.route) {
+    return route.target.id;
+  }
+  return `${index + 1}. ${route.expr === undefined ? `"${route.match}"` : route.expr}`;
+}
+
+/** A node's text option as a preview: its text, or the param it is read from. */
+function fromParamOr(
+  node: {
+    fromParams?: Readonly<Record<string, string | undefined>>;
+  },
+  option: string,
+  text: string | undefined,
+): string | undefined {
+  const param = node.fromParams?.[option];
+  if (param !== undefined) {
+    return `param ${param}`;
+  }
+  return text === undefined ? undefined : clip(text);
 }
 
 function clip(text: string): string {

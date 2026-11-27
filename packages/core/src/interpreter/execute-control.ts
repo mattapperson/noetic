@@ -31,6 +31,7 @@ import {
   isNoeticError,
   NoeticErrorImpl,
 } from '@noetic-tools/types';
+import { recordLoopRuns } from '../expression/step-outputs';
 import { NoeticAttr, NoeticEvent } from '../observability/genai-attributes';
 import type { ChannelStore } from '../runtime/channel-store';
 import { ContextImpl, PathNode } from '../runtime/context-impl';
@@ -806,6 +807,7 @@ export async function executeLoop<TContext, I, O>(
   }
   const until = toUntil(step.until);
   const run = untilRun(ctx, executeStep);
+  recordLoopRuns(baseCtx, step, 0);
 
   while (true) {
     // Abort check at top of each iteration
@@ -836,6 +838,7 @@ export async function executeLoop<TContext, I, O>(
       }
       output = frameworkCast<O>(stepOutput);
       stepCount++;
+      recordLoopRuns(baseCtx, step, stepCount);
     } catch (e) {
       if (!step.onError || !isNoeticError(e)) {
         throw e;

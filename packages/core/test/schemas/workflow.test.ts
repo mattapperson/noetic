@@ -142,13 +142,13 @@ describe('WorkflowNodeSchema — llm', () => {
     expect(result.success).toBe(true);
   });
 
-  test('rejects llm without instructions', () => {
+  test('parses llm without instructions, as callModel() does', () => {
     const node = {
       kind: 'callModel',
       id: 'llm-3',
     };
     const result = WorkflowNodeSchema.safeParse(node);
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 });
 
@@ -515,7 +515,7 @@ describe('WorkflowNodeSchema — subflow', () => {
       document: {
         version: 1,
         root: {
-          kind: 'callModel',
+          kind: 'invokeTool',
           id: 'inner',
         },
       },

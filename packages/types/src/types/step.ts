@@ -538,8 +538,8 @@ export interface StepCallModel<TContext = ContextData, I = unknown, O = unknown>
     StepEmitItems<TContext, I, O> {
   kind: 'callModel';
   id: string;
-  /** Model id. Accepts either an eager string or a `(ctx) => string` getter. */
-  model: Lazy<string, TContext>;
+  /** Model id: an eager string or a `(ctx) => string` getter. Falls back to `harness.config.model`. */
+  model?: Lazy<string | undefined, TContext>;
   /** System instructions. Eager string or `(ctx) => string | undefined` getter. */
   instructions?: Lazy<string | undefined, TContext>;
   /**
@@ -572,8 +572,8 @@ export interface StepCallModel<TContext = ContextData, I = unknown, O = unknown>
    */
   outputJsonSchema?: Record<string, unknown>;
   params?: ModelParams;
-  /** Controls framework event emission for this step. Defaults to `true`. Set `false` to suppress all framework events. A filter function receives `(eventType, data)` and returns `boolean`. */
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  /** Controls framework event emission for this step. Defaults to `true`. Set `false` to suppress all framework events. A filter function receives `(eventType, data, ctx)`, the context being the step's, and returns `boolean`. */
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
   /** Projection policy for this step's context window. Overrides the harness-level default. */
   projection?: ProjectionPolicy;
 }
@@ -645,7 +645,7 @@ export interface StepAcpAgent<TContext = ContextData, I = unknown, O = unknown>
   /** The harness shell adapter that serves the agent's `terminal/*` calls, by name. Default: the harness's default. */
   shell?: string;
   /** Controls framework event emission for this step. Defaults to `true`. */
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
 }
 
 /** @public A step that invokes a single tool directly, bypassing the model. */
@@ -655,7 +655,11 @@ export interface StepInvokeTool<TContext = ContextData, I = unknown, O = unknown
   kind: 'invokeTool';
   id: string;
   tool: Tool<StandardSchemaV1<unknown, I>, StandardSchemaV1<unknown, O>>;
-  args?: Partial<I>;
+  /**
+   * Fixed args laid over the step's input, or a function that gives the whole
+   * args from the input. Either way the tool's `input` schema checks the result.
+   */
+  args?: Partial<I> | ((input: I, ctx: Context) => unknown);
 }
 
 /**
@@ -687,7 +691,7 @@ export interface StepDecide<TContext = ContextData, I = unknown, O = unknown>
   /** Extra HTTP headers for the native request. Ignored on the estimated path. */
   headers?: Readonly<Record<string, string>>;
   /** Controls framework event emission for this step. Defaults to `true`. */
-  emit?: boolean | ((eventType: string, data: Record<string, unknown>) => boolean);
+  emit?: boolean | ((eventType: string, data: Record<string, unknown>, ctx?: Context) => boolean);
 }
 
 /**

@@ -40,7 +40,12 @@ import type {
 } from '@noetic-tools/types';
 import { createMessage, frameworkCast, toolIdentityData } from '@noetic-tools/types';
 import type { EmitOption } from '../runtime/broadcaster-utils';
-import { emitFrameworkEvent, getBroadcaster, shouldEmit } from '../runtime/broadcaster-utils';
+import {
+  emitFrameworkEvent,
+  emitOn,
+  getBroadcaster,
+  shouldEmit,
+} from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import { offerStop } from '../runtime/nested-agents';
@@ -328,7 +333,7 @@ export class AcpEventBridge {
     this.broadcaster = getBroadcaster(ctx);
     this.agentName = ctx.harness.config.name;
     this.stepId = step.id;
-    this.emitOption = step.emit;
+    this.emitOption = emitOn(step.emit, ctx);
     this.step = step;
     this.ctx = ctx;
     // One turn's subagents are not another's, even when a steering retry runs

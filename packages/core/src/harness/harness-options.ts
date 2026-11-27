@@ -268,6 +268,8 @@ export interface AgentHarnessOpts<
    * those produced by spawn/fork. Defaults to `process.cwd()`.
    */
   initialCwd?: string;
+  /** Default model for `callModel` steps that name none. */
+  model?: string;
   /** Default model for `decide` steps. */
   decisionModel?: string;
   /**
