@@ -1,11 +1,14 @@
 /**
- * Listening over the Events extension (SEP-3415). A stream prefers push
- * (`events/stream` + notifications), then webhook (`events/subscribe`, when
- * the bridge has a receiver), then poll (`events/poll`), by what the server
- * offers; callers never see the difference. Events are deduplicated by id
- * within a stream, webhook deliveries are verified (Standard Webhooks
- * signature, timestamp window, duplicate delivery ids dropped), and `gap` and
- * `terminated` control messages are passed through.
+ * Listening over the Events extension (SEP-3415). A stream uses the first of
+ * webhook (`events/subscribe`, when the bridge has a receiver), push
+ * (`events/stream`) and poll (`events/poll`) that the event type offers; callers
+ * never see the difference. Webhook deliveries are verified (Standard Webhooks
+ * signature, timestamp window). For a listener that does not store its events,
+ * events are deduplicated by id within a stream and duplicate delivery ids are
+ * dropped; one that stores them (`stores`) does that itself, so a sender may
+ * deliver again what was not stored. A server that skipped ahead of the
+ * cursor shows as a `gap`, and a subscription the server ended shows as
+ * `terminated`.
  */
 
 import type {
@@ -28,19 +31,21 @@ import type {
   WebhookReply,
 } from './webhooks';
 import { generateWebhookSecret, verifyWebhook } from './webhooks';
-import type { EventDelivery, WireEvent } from './wire';
+import type { EventDelivery, WireErrorSchema, WireEvent } from './wire';
 import {
   EmptyResultSchema,
-  EVENTS_EXTENSION,
-  EventsCapabilitySchema,
   McpMethod,
   McpNotification,
   PollResultSchema,
-  PushEventParamsSchema,
-  PushGapParamsSchema,
-  PushTerminatedParamsSchema,
-  SubscriptionResultSchema,
-  WebhookBodySchema,
+  StreamActiveParamsSchema,
+  StreamErrorParamsSchema,
+  StreamEventParamsSchema,
+  StreamHeartbeatParamsSchema,
+  SUBSCRIPTION_HEADER,
+  SUBSCRIPTION_META,
+  SubscribeResultSchema,
+  WebhookControlSchema,
+  WireEventSchema,
 } from './wire';
 
 //#region Types
@@ -50,6 +55,9 @@ export interface EventContext {
   readonly session: McpSession;
   readonly artifacts: ArtifactStore;
   readonly meta: Readonly<Record<string, unknown>>;
+  /** The modes the event type offers (`events/list`). */
+  readonly delivery: ReadonlyArray<EventDelivery>;
+  /** The shortest wait between polls, and the wait when the server suggests none. */
   readonly pollIntervalMs: number;
   readonly webhooks?: McpWebhooks;
   /** Seconds since the epoch; overridable for tests. */
@@ -58,7 +66,7 @@ export interface EventContext {
 
 type Message = EventStreamMessage<ConnectionEventInit>;
 
-type ControlMessage = z.infer<typeof WebhookBodySchema>;
+type WireError = z.infer<typeof WireErrorSchema>;
 
 //#endregion
 
@@ -170,26 +178,57 @@ class BoundedSet {
   }
 }
 
-/** @public The delivery modes the server offers, in the bridge's preference order. */
+/** What a `gap` says when the server started later than the cursor asked. */
+const SKIPPED_AHEAD = 'the server skipped ahead of the cursor: events may be missing';
+
+/** A stream with no message for this many heartbeats is dead (SEP-3415). */
+const MISSED_HEARTBEATS = 3;
+
+/** @public The delivery modes of `offered` this bridge can use, in the order it prefers them. */
 export function deliveryModes(
-  session: McpSession,
+  offered: ReadonlyArray<EventDelivery>,
   webhooks: McpWebhooks | undefined,
 ): EventDelivery[] {
-  const parsed = EventsCapabilitySchema.safeParse(session.extension(EVENTS_EXTENSION));
-  const offered: ReadonlyArray<EventDelivery> = parsed.success
-    ? (parsed.data.delivery ?? [
-        'push',
-        'poll',
-      ])
-    : [];
   const preference: ReadonlyArray<EventDelivery> = [
-    'push',
     'webhook',
+    'push',
     'poll',
   ];
   return preference.filter(
     (mode) => offered.includes(mode) && (mode !== 'webhook' || webhooks !== undefined),
   );
+}
+
+function ended(error: WireError): string {
+  return error.code === undefined ? error.message : `${error.message} (${error.code})`;
+}
+
+/** A refresh is never sooner than this, whatever the clocks say. */
+const REFRESH_FLOOR_MS = 1e3;
+
+/** How long closing a stream waits for the server to drop its subscription. */
+const UNSUBSCRIBE_TIMEOUT_MS = 5e3;
+
+/**
+ * @public
+ * How long to wait before making a subscription again: halfway to
+ * `refreshBefore`, so a slow answer still lands in time. Nothing for a
+ * subscription that does not lapse.
+ *
+ * @throws Error when `refreshBefore` is not a time.
+ */
+export function refreshDelay(
+  refreshBefore: string | null | undefined,
+  nowMs: number,
+): number | undefined {
+  if (typeof refreshBefore !== 'string') {
+    return undefined;
+  }
+  const at = Date.parse(refreshBefore);
+  if (Number.isNaN(at)) {
+    throw new Error(`the server gave a refreshBefore that is not a time: '${refreshBefore}'`);
+  }
+  return Math.max(REFRESH_FLOOR_MS, (at - nowMs) / 2);
 }
 
 //#endregion
@@ -206,10 +245,12 @@ class McpEventStream implements EventStream {
   private readonly cleanups: Array<() => Promise<void> | void> = [];
   private settleReady: (value: { cursor: string | null }) => void = () => {};
   private failReady: (error: Error) => void = () => {};
+  /** The webhook subscription's id, once the server has confirmed it. */
   private subscriptionId: string | undefined;
-  private readonly early: ControlMessage[] = [];
   private chain: Promise<void> = Promise.resolve();
   private closed = false;
+  /** How far the listener has read: what a webhook subscription is made again from. */
+  private place: string | null;
 
   constructor(
     private readonly ctx: EventContext,
@@ -220,6 +261,7 @@ class McpEventStream implements EventStream {
       this.failReady = reject;
     });
     this.ready.catch(() => {});
+    this.place = req.cursor ?? null;
     if (req.signal.aborted) {
       void this.close();
       return;
@@ -230,16 +272,22 @@ class McpEventStream implements EventStream {
   }
 
   start(): void {
-    const [mode] = deliveryModes(this.ctx.session, this.ctx.webhooks);
-    const run =
-      mode === 'push'
-        ? this.startPush()
-        : mode === 'webhook'
-          ? this.startWebhook()
-          : mode === 'poll'
-            ? this.startPoll()
-            : Promise.reject(new Error('the server offers no event delivery this bridge can use'));
-    run.catch((error: unknown) => this.fail(error));
+    this.run().catch((error: unknown) => this.fail(error));
+  }
+
+  private run(): Promise<void> {
+    const starts: Record<EventDelivery, () => Promise<void>> = {
+      webhook: () => this.startWebhook(),
+      push: () => this.startPush(),
+      poll: () => this.startPoll(),
+    };
+    const [mode] = deliveryModes(this.ctx.delivery, this.ctx.webhooks);
+    if (mode === undefined) {
+      return Promise.reject(
+        new Error(`'${this.req.event}' offers no delivery mode this bridge can use`),
+      );
+    }
+    return starts[mode]();
   }
 
   [Symbol.asyncIterator](): AsyncIterator<Message> {
@@ -291,49 +339,51 @@ class McpEventStream implements EventStream {
     };
   }
 
-  private confirm(subscriptionId: string | undefined, cursor: string | null | undefined): void {
-    this.subscriptionId = subscriptionId;
+  private confirm(cursor: string | null | undefined): void {
     this.settleReady({
       cursor: cursor ?? null,
     });
-    for (const message of this.early.splice(0)) {
-      this.route(message);
+  }
+
+  private gap(): void {
+    this.enqueue(async () => {
+      this.queue.push({
+        type: 'gap',
+        reason: SKIPPED_AHEAD,
+      });
+    });
+  }
+
+  /**
+   * Takes the place the server gives a subscription. It is recorded when the
+   * listener had none, so one that stops before its first event comes back to
+   * here and not to "now" again, and when the server skipped ahead to it.
+   */
+  private grant(cursor: string | null | undefined, truncated: boolean | undefined): void {
+    if (truncated) {
+      this.gap();
+    }
+    if (truncated || this.place === null) {
+      this.commit(cursor);
     }
   }
 
-  /** Routes a control message for this subscription, buffering until the subscription id is known. */
-  private route(message: ControlMessage): void {
-    if (this.subscriptionId === undefined) {
-      this.early.push(message);
+  /**
+   * Records how far the server has read, once every event before it is in hand.
+   * A stream that failed on an earlier event records nothing: the listener must
+   * read that event again, so its place stays behind it.
+   */
+  private commit(cursor: string | null | undefined): void {
+    if (typeof cursor !== 'string') {
       return;
     }
-    if (message.subscriptionId !== this.subscriptionId) {
-      return;
-    }
-    if (message.type === 'event') {
-      this.enqueueEvent(message);
-      return;
-    }
-    if (message.type === 'gap') {
-      this.enqueue(async () => {
-        this.queue.push({
-          type: 'gap',
-          reason: message.reason,
-          ...(message.from === undefined
-            ? {}
-            : {
-                from: message.from,
-              }),
-          ...(message.to === undefined
-            ? {}
-            : {
-                to: message.to,
-              }),
-        });
-      });
-      return;
-    }
-    this.enqueue(async () => this.terminate(message.reason));
+    this.enqueue(async () => {
+      if (this.closed) {
+        return;
+      }
+      await this.req.checkpoint?.(cursor);
+      this.place = cursor;
+    });
   }
 
   /** Runs `work` after everything queued before it, keeping delivery in order. */
@@ -341,14 +391,18 @@ class McpEventStream implements EventStream {
     this.chain = this.chain.then(work).catch((error: unknown) => this.fail(error));
   }
 
-  private enqueueEvent(event: WireEvent): void {
-    if (event.name !== this.req.event || this.seen.has(event.eventId)) {
-      return;
+  private enqueueEvent(event: WireEvent): Promise<void> {
+    if (event.name !== this.req.event || (!this.req.stores && this.seen.has(event.eventId))) {
+      return Promise.resolve();
     }
-    this.seen.add(event.eventId);
-    this.enqueue(async () => {
+    if (!this.req.stores) {
+      this.seen.add(event.eventId);
+    }
+    const work = this.chain.then(async () => {
       const payload = await storeInlineBlobs(event.data, this.ctx.artifacts);
-      this.queue.push({
+      const message: Message & {
+        type: 'event';
+      } = {
         type: 'event',
         event: {
           id: event.eventId,
@@ -362,74 +416,119 @@ class McpEventStream implements EventStream {
                 actionId: event.actionId,
               }),
         },
+      };
+      if (!this.req.stores) {
+        this.queue.push(message);
+        this.place = event.cursor ?? this.place;
+        return;
+      }
+      const signal = this.controller.signal;
+      await this.stored(message, signal);
+      this.place = event.cursor ?? this.place;
+    });
+    this.chain = work.catch((error: unknown) => this.fail(error));
+    return work;
+  }
+
+  /** Hands the listener an event and waits to hear it is stored. */
+  private stored(
+    message: Message & {
+      type: 'event';
+    },
+    signal: AbortSignal,
+  ): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const abort = (): void =>
+        reject(new Error('Event stream closed before storage acknowledged the event'));
+      if (signal.aborted) {
+        abort();
+        return;
+      }
+      signal.addEventListener('abort', abort, {
+        once: true,
+      });
+      this.queue.push({
+        ...message,
+        stored: (error) => {
+          signal.removeEventListener('abort', abort);
+          if (error === undefined) {
+            resolve();
+          } else {
+            reject(error);
+          }
+        },
       });
     });
   }
 
-  private async unsubscribe(): Promise<void> {
-    if (this.subscriptionId === undefined) {
-      return;
-    }
-    await this.ctx.session.request(
-      McpMethod.EventsUnsubscribe,
-      {
-        subscriptionId: this.subscriptionId,
-        _meta: this.ctx.meta,
-      },
-      EmptyResultSchema,
-    );
-  }
-
   private async startPush(): Promise<void> {
     const { session } = this.ctx;
+    let id: string | number | undefined;
+    let heartbeatMs: number | undefined;
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    /** Any message shows the stream is alive. */
+    const beat = (): void => {
+      clearTimeout(watchdog);
+      if (heartbeatMs !== undefined) {
+        watchdog = setTimeout(
+          () => this.fail(new Error('the event stream went quiet')),
+          heartbeatMs * MISSED_HEARTBEATS,
+        );
+      }
+    };
+    const on = <
+      S extends z.ZodType<{
+        _meta: Record<string, unknown>;
+      }>,
+    >(
+      method: string,
+      schema: S,
+      take: (params: z.output<S>) => void,
+    ): (() => void) =>
+      session.on(method, (params) => {
+        const parsed = schema.safeParse(params);
+        if (!parsed.success || parsed.data._meta[SUBSCRIPTION_META] !== id) {
+          return;
+        }
+        take(parsed.data);
+        beat();
+      });
     const offs = [
-      session.on(McpNotification.EventsEvent, (params) => {
-        const parsed = PushEventParamsSchema.safeParse(params);
-        if (parsed.success) {
-          this.route({
-            ...parsed.data,
-            type: 'event',
-          });
-        }
+      on(McpNotification.EventsActive, StreamActiveParamsSchema, (params) => {
+        heartbeatMs = params.heartbeatMs ?? heartbeatMs;
+        this.confirm(params.cursor);
+        this.grant(params.cursor, params.truncated);
       }),
-      session.on(McpNotification.EventsGap, (params) => {
-        const parsed = PushGapParamsSchema.safeParse(params);
-        if (parsed.success) {
-          this.route({
-            ...parsed.data,
-            type: 'gap',
-          });
-        }
+      on(McpNotification.EventsEvent, StreamEventParamsSchema, (params) => {
+        void this.enqueueEvent(params).catch(() => {});
       }),
-      session.on(McpNotification.EventsTerminated, (params) => {
-        const parsed = PushTerminatedParamsSchema.safeParse(params);
-        if (parsed.success) {
-          this.route({
-            ...parsed.data,
-            type: 'terminated',
-          });
-        }
-      }),
+      on(McpNotification.EventsHeartbeat, StreamHeartbeatParamsSchema, (params) =>
+        this.commit(params.cursor),
+      ),
+      // A passing fault: the stream stays open.
+      on(McpNotification.EventsError, StreamErrorParamsSchema, () => {}),
+      on(McpNotification.EventsTerminated, StreamErrorParamsSchema, (params) =>
+        this.enqueue(async () => this.terminate(ended(params.error))),
+      ),
     ];
     this.cleanups.push(() => {
+      clearTimeout(watchdog);
       for (const off of offs) {
         off();
       }
     });
-    const result = await session.request(
+    const stream = session.stream(
       McpMethod.EventsStream,
       {
         ...this.baseParams(),
         cursor: this.req.cursor ?? null,
       },
-      SubscriptionResultSchema,
-      {
-        signal: this.controller.signal,
-      },
+      this.controller.signal,
     );
-    this.cleanups.push(() => this.unsubscribe());
-    this.confirm(result.subscriptionId, result.cursor);
+    id = stream.id;
     this.watchSession();
+    await stream.done;
+    this.enqueue(async () => this.terminate('the server closed the event stream'));
   }
 
   private async startWebhook(): Promise<void> {
@@ -447,25 +546,79 @@ class McpEventStream implements EventStream {
           toleranceSec: webhooks.toleranceSec,
         }),
     );
+    if (this.closed) {
+      await registration.close();
+      return;
+    }
     this.cleanups.push(() => registration.close());
-    const result = await this.ctx.session.request(
-      McpMethod.EventsSubscribe,
+    const delivery = {
+      mode: 'webhook',
+      url: registration.url,
+      secret,
+    };
+    const subscribe = async (
+      params: Record<string, unknown>,
+    ): Promise<z.infer<typeof SubscribeResultSchema>> => {
+      const result = await this.ctx.session.request(
+        McpMethod.EventsSubscribe,
+        {
+          ...this.baseParams(),
+          ...params,
+          delivery,
+        },
+        SubscribeResultSchema,
+        {
+          signal: this.controller.signal,
+        },
+      );
+      this.subscriptionId = result.id;
+      return result;
+    };
+    const granted = await subscribe({
+      cursor: this.req.cursor ?? null,
+    });
+    if (this.closed) {
+      await this.unsubscribe(registration.url);
+      return;
+    }
+    this.cleanups.unshift(() => this.unsubscribe(registration.url));
+    this.grant(granted.cursor, granted.truncated);
+    // Worked out before the stream is confirmed: a time that makes no sense
+    // refuses the subscription, and the listener backs off before trying again.
+    let delay = refreshDelay(granted.refreshBefore, Date.now());
+    this.confirm(granted.cursor);
+    this.watchSession();
+    // A subscription lapses unless it is made again in time. Each one names how far
+    // this side has read, so a server that lost the subscription picks up from there.
+    // The answer says how far the server has read: with no heartbeat, it is the only
+    // way a quiet subscription's place moves.
+    while (delay !== undefined) {
+      await pause(delay, this.controller.signal);
+      const again = await subscribe({
+        cursor: this.place,
+      });
+      if (again.truncated) {
+        this.gap();
+      }
+      this.commit(again.cursor);
+      delay = refreshDelay(again.refreshBefore, Date.now());
+    }
+  }
+
+  private async unsubscribe(url: string): Promise<void> {
+    await this.ctx.session.request(
+      McpMethod.EventsUnsubscribe,
       {
         ...this.baseParams(),
-        cursor: this.req.cursor ?? null,
         delivery: {
-          url: registration.url,
-          secret,
+          url,
         },
       },
-      SubscriptionResultSchema,
+      EmptyResultSchema,
       {
-        signal: this.controller.signal,
+        timeoutMs: UNSUBSCRIBE_TIMEOUT_MS,
       },
     );
-    this.cleanups.unshift(() => this.unsubscribe());
-    this.confirm(result.subscriptionId, result.cursor);
-    this.watchSession();
   }
 
   private async receiveWebhook(
@@ -485,20 +638,90 @@ class McpEventStream implements EventStream {
         : {
             toleranceSec: opts.toleranceSec,
           }),
-      seen: opts.seen,
     });
     if (!verified.ok) {
       return {
-        status: verified.reason === 'duplicate' ? 200 : 401,
+        status: 401,
       };
     }
-    const parsed = WebhookBodySchema.safeParse(parseJson(delivery.body));
-    if (!parsed.success) {
+    // A delivery counts as taken only once it is: one answered 503 comes again
+    // under the same id. A trigger stores each event and says so, so its sender
+    // may deliver one again and nothing is dropped here.
+    const again = (): boolean => {
+      if (this.req.stores) {
+        return false;
+      }
+      const known = opts.seen.has(verified.id);
+      opts.seen.add(verified.id);
+      return known;
+    };
+    const body = parseJson(delivery.body);
+    const control = WebhookControlSchema.safeParse(body);
+    if (control.success) {
+      return control.data.type !== 'verification' && again()
+        ? {
+            status: 200,
+          }
+        : this.receiveControl(control.data);
+    }
+    const event = WireEventSchema.safeParse(body);
+    const subscription = delivery.headers[SUBSCRIPTION_HEADER];
+    if (!event.success || event.data.name !== this.req.event) {
       return {
         status: 400,
       };
     }
-    this.route(parsed.data);
+    // The server may deliver before it has answered `events/subscribe` with the id.
+    if (this.closed || this.subscriptionId === undefined) {
+      return {
+        status: 503,
+      };
+    }
+    if (subscription !== undefined && subscription !== this.subscriptionId) {
+      return {
+        status: 400,
+      };
+    }
+    if (again()) {
+      return {
+        status: 200,
+      };
+    }
+    const stored = this.enqueueEvent(event.data);
+    if (!this.req.stores) {
+      stored.catch(() => {});
+      return {
+        status: 204,
+      };
+    }
+    try {
+      await stored;
+    } catch {
+      return {
+        status: 503,
+      };
+    }
+    return {
+      status: 204,
+    };
+  }
+
+  private receiveControl(message: z.infer<typeof WebhookControlSchema>): WebhookReply {
+    if (message.type === 'verification') {
+      // The server delivers nothing until the endpoint proves it wants the events.
+      return {
+        status: 200,
+        body: JSON.stringify({
+          challenge: message.challenge,
+        }),
+      };
+    }
+    if (message.type === 'gap') {
+      this.gap();
+      this.commit(message.cursor);
+    } else {
+      this.enqueue(async () => this.terminate(ended(message.error)));
+    }
     return {
       status: 204,
     };
@@ -508,6 +731,7 @@ class McpEventStream implements EventStream {
     let cursor: string | null = this.req.cursor ?? null;
     let first = true;
     while (!this.closed) {
+      // A subscription the server ended answers with an error, which ends the stream.
       const result = await this.ctx.session.request(
         McpMethod.EventsPoll,
         {
@@ -519,36 +743,35 @@ class McpEventStream implements EventStream {
           signal: this.controller.signal,
         },
       );
+      const next = result.cursor ?? null;
       if (first) {
         first = false;
         // `ready` is where listening starts: before this batch's events when it
         // has any, so a resume from it delivers them again rather than skipping them.
-        this.confirm('poll', result.events.length > 0 ? cursor : (result.cursor ?? cursor));
+        this.confirm(result.events.length > 0 ? cursor : (next ?? cursor));
       }
-      if (result.gap !== undefined) {
-        this.route({
-          ...result.gap,
-          subscriptionId: 'poll',
-          type: 'gap',
-        });
+      if (result.truncated) {
+        this.gap();
       }
+      const last = result.events.at(-1);
       for (const event of result.events) {
-        this.route({
+        // A page has one cursor, for all of it. A trigger takes it once the whole
+        // page is stored; any other listener gets it on the page's last event.
+        await this.enqueueEvent({
           ...event,
-          subscriptionId: 'poll',
-          type: 'event',
+          cursor: this.req.checkpoint || event !== last ? null : next,
         });
       }
-      if (result.terminated !== undefined) {
-        this.route({
-          ...result.terminated,
-          subscriptionId: 'poll',
-          type: 'terminated',
-        });
-        return;
+      if (next !== null && next !== cursor) {
+        await this.req.checkpoint?.(next);
       }
-      cursor = result.cursor ?? cursor;
-      await pause(result.pollInterval ?? this.ctx.pollIntervalMs, this.controller.signal);
+      cursor = next ?? cursor;
+      if (!result.hasMore) {
+        await pause(
+          Math.max(result.nextPollMs ?? 0, this.ctx.pollIntervalMs),
+          this.controller.signal,
+        );
+      }
     }
   }
 

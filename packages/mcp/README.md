@@ -73,9 +73,9 @@ What the bridge does:
   `noetic.release` back `reset()` and pools.
 - **Long operations** use the Tasks extension (SEP-2663): `tasks/get`,
   `tasks/update` (answers to `input_required`), `tasks/cancel`.
-- **Events** use the Events extension (SEP-3415), by push, webhook (Standard
-  Webhooks signatures, five-minute window, duplicate ids dropped) or poll,
-  in that order of preference; events are deduplicated by id.
+- **Events** use the Events extension (SEP-3415), by webhook (Standard
+  Webhooks signatures, five-minute window), push or poll, in that order of
+  preference; events are deduplicated by id.
 - **Errors** are `structuredContent: { code, message, details? }` with the
   codes of spec 36 § Errors; `tools.noetic/confirmed` is sent only when the
   harness approved a `guarded` call.

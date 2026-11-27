@@ -328,7 +328,7 @@ describe('a provider that delivers the same event twice', () => {
       connections: {
         inbox,
       },
-      triggers: [
+      triggerTurnOn: [
         {
           id: 'vendor-mail',
           connection: 'inbox',

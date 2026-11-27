@@ -78,7 +78,7 @@ describe('an event delivered twice', () => {
       connections: {
         inbox,
       },
-      triggers: [
+      triggerTurnOn: [
         {
           id: 'vendor-mail',
           connection: 'inbox',

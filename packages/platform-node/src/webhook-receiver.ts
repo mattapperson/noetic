@@ -118,9 +118,10 @@ export interface RawWebhookRequest {
   readonly body: string;
 }
 
-/** @public Handles a raw request and says which HTTP status to answer. */
+/** @public Handles a raw request and says which HTTP status, and body if any, to answer with. */
 export type RawWebhookHandler = (request: RawWebhookRequest) => Promise<{
   readonly status: number;
+  readonly body?: string;
 }>;
 
 /** @public A registered endpoint: hand `url` and `secret` to the sender. */
@@ -378,13 +379,10 @@ async function dispatch(
   }
 }
 
-/** A raw endpoint answers with its handler's status; a handler that throws answers 500. */
+/** A raw endpoint answers as its handler says; a handler that throws answers 500. */
 async function answerRaw(handler: RawWebhookHandler, request: RawWebhookRequest): Promise<Reply> {
   try {
-    const { status } = await handler(request);
-    return {
-      status,
-    };
+    return await handler(request);
   } catch {
     return {
       status: HttpStatus.HandlerFailed,

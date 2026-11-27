@@ -362,7 +362,7 @@ const harness = new AgentHarness({
     slack: mcp({ type: 'http', url: SLACK_MCP }),
     morning: cron('0 8 * * *', { timezone: 'America/New_York' }),
   },
-  triggers: [
+  triggerTurnOn: [
     {
       id: 'mentions',
       connection: 'slack',
@@ -380,7 +380,7 @@ await harness.start();
 
 Each matching event starts a turn on its thread — `thread(event)`, defaulting to the profile's natural thread for that event (a chat thread) or the trigger's id — with `input(event)` as the message. The event itself is attached to the turn as a `noetic:connection_event` item, so steps can read it.
 
-A trigger delivers each event once, even across crashes: matching events are written to a durable inbox together with the advanced cursor, delivered as turns with message id `<connection>:<trigger>:<event id>`, and recorded as done when their turn completes.
+A trigger delivers each event once, even across crashes: a matching event is written to a durable inbox before the cursor moves past it, delivered as a turn with message id `<connection>:<trigger>:<event id>`, and recorded as done when their turn completes.
 
 **Triggers as data.** `filter`, `input` and `thread` each take a function or an [expression](/docs/framework/expressions) over `{ event }`:
 
@@ -395,9 +395,64 @@ await harness.addTrigger({
 });
 ```
 
-A trigger written with expressions only is plain data. `harness.addTrigger()` starts it and keeps it in storage, so it is there again after a restart; `removeTrigger(id)` and `listTriggers()` manage them.
+A trigger written with expressions only is plain data. `harness.addTrigger()` starts it and keeps it in storage, so it is there again after a restart (one with a function or a zod `payload` in it lasts for the process); `removeTrigger(id)` and `listTriggers()` manage them.
 
-**When a turn keeps failing.** A trigger tries an event's turn five times, with backoff. After that it gives up: each failure was reported, and the event is not tried again. If you want another go, emit the event again under a new id.
+**When a turn keeps failing.** A trigger tries an event's turn five times
+with backoff. It retains the failed entry for inspection and replay.
+
+`harness.getTriggerOutcomes(id)` lists a trigger's pending, delivered and
+failed events, without their payloads. A delivered event's turn finished or
+parked; an event the filter turned away leaves no record.
+`harness.replayTriggerEvent(id, eventId)` runs again an event whose turn
+failed, under the same event and message ids. It resolves `false` when the
+trigger holds no such event: it was delivered, or it never became a turn.
+
+**Checked against the server.** A connection says what each event carries and what arguments a subscription may give; an MCP server says so in `events/list` (`payloadSchema`, `inputSchema`). When the harness starts, each `triggerTurnOn` entry is checked against that, and a mismatch throws `CONNECTION_INVALID` before any event arrives:
+
+- `arguments` the event does not accept;
+- a `filter`, `input` or `thread` expression that reads an `event.payload` field the event does not declare (an object schema is taken to list all its fields unless it says more may come, with `additionalProperties`, `patternProperties` or a combinator);
+- a `payload` schema (zod or JSON Schema, the shape your workflow expects) that asks for a field the event does not give, gives only sometimes, or gives as another type.
+
+```ts validate=none
+triggerTurnOn: [{
+  id: 'vendor-mail',
+  connection: 'mail',
+  event: 'email.received',
+  payload: z.object({ from: z.string(), subject: z.string() }),
+  filter: '$contains(event.payload.from, "@vendor.example")',
+  input: 'event.payload.subject',
+}],
+```
+
+A trigger whose connection is not connected when the harness starts is checked when it first listens; if it does not fit, it is reported and reads no events.
+
+Each event is also held to the trigger's `payload` as it arrives. One that does not fit starts no turn and shows in `getTriggerOutcomes` as `failed`, with the reason; it cannot be replayed. A server schema the check cannot read is left unchecked.
+
+**Events from an installed connector.** A connector that reports events is an
+MCP server offering the [Events extension](https://modelcontextprotocol.io/extensions/events/overview):
+attach it with `mcp(...)` and name its events in triggers. The server knows who
+is subscribed from the session's credentials, checks the grant when it delivers,
+and ends the subscription when access is revoked, so the trigger's stream ends.
+The bridge picks webhook, push or poll from what the event type offers. A webhook
+is acknowledged once the trigger has stored the event, and a poll cursor moves
+only after its whole page is stored.
+
+```ts validate=none
+const harness = new AgentHarness({
+  name: 'vendor-mail-workflow',
+  params: {},
+  agentGraph: workflow,
+  connections: { mail: mcp(mailServer) },
+  environment: { storage: { adapter: workflowStorage } },
+  triggerTurnOn: [{
+    id: 'vendor-mail',
+    connection: 'mail',
+    event: 'email.received',
+    arguments: { from: '*@vendor.example' },
+    input: 'event.payload.subject',
+  }],
+});
+```
 
 **Webhooks.** Noetic has no webhook concept. Your HTTP handler verifies the request and calls `source.emit(...)`, which resolves once every listening trigger has stored the event:
 
@@ -636,7 +691,7 @@ console.log(shop.connection.calls); // [{ op: 'ui.tap', … }]
 
 `mcp()` implements the contract over MCP: tools for operations, resources for reads, the [Tasks extension](https://modelcontextprotocol.io/seps/2663-tasks-extension) (SEP-2663) for long operations, and the [Events extension](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/3415) (SEP-3415) for events. It reads a server's [profile declaration](/docs/framework/connection-profiles#declaring-a-server) during capability discovery and checks the server's tools against it; a server whose tools contradict its declared profile is marked unavailable. A server with no declaration is a connection with no profile: its tools pass through, and it has no reads, events, or verification.
 
-`mcp()` receives events by push, webhook, or poll, preferring them in that order; callers never see the difference. For webhook delivery, pass a receiver — `createWebhookReceiver()` from [`@noetic-tools/platform-node`](/docs/framework/platform-packages#webhook-receiver) — as `mcp(server, { webhooks: { receiver } })`. Deliveries are verified (Standard Webhooks signature, five-minute timestamp window, duplicate ids dropped).
+`mcp()` receives events by webhook, push, or poll, preferring them in that order among those the event type offers; callers never see the difference. Webhook delivery is used only when you pass a receiver — `createWebhookReceiver()` from [`@noetic-tools/platform-node`](/docs/framework/platform-packages#webhook-receiver) — as `mcp(server, { webhooks: { receiver } })`. Deliveries are verified (Standard Webhooks signature, five-minute timestamp window). A trigger drops an event it has already taken by its id; for any other listener the bridge drops duplicate delivery ids.
 
 [Agent plugins](/docs/framework/context-layers/agent-plugins) turn each plugin MCP server into an `mcp()` connection entry with `expose: 'call'` (`pluginConnections()`), which you attach to the harness or a turn, so a plugin's tools and a configured server's tools share one registry, one naming rule, and one set of gates.
 

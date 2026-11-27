@@ -882,7 +882,12 @@ describe('triggers', () => {
     expect(delivered).toEqual([
       'deploys:failures:d9',
     ]);
-    expect(await storage.get('noetic/connections/triggers/failures/seen/d9')).toBe(true);
+    expect(await runner.outcomes('failures')).toMatchObject([
+      {
+        eventId: 'd9',
+        status: 'delivered',
+      },
+    ]);
     expect(await storage.get('noetic/connections/triggers/failures/inbox/garbage')).toBeNull();
     await runner.close();
   });
@@ -1414,18 +1419,16 @@ describe('triggers', () => {
     await runner.start();
     await sleep(5);
     await rig.source.emit(failed('e1'));
-    await until(() => tries === 5);
-    await until(
-      async () =>
-        (await rig.storage.list('noetic/connections/triggers/failures/inbox/')).length === 0,
-    );
-
-    // Each failed try was reported; nothing is kept but the mark that it was seen.
+    await runner.idle();
     expect(errors).toHaveLength(5);
-    expect(await rig.storage.get('noetic/connections/triggers/failures/seen/e1')).toEqual({
-      failed: 'model is down',
-    });
-    expect(await rig.storage.list('noetic/connections/triggers/failures/dead/')).toEqual([]);
+    expect(await runner.outcomes('failures')).toMatchObject([
+      {
+        eventId: 'e1',
+        status: 'failed',
+        attempts: 5,
+        error: 'model is down',
+      },
+    ]);
     await runner.close();
 
     // Not tried again after a restart, nor when the source delivers it again.

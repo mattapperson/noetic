@@ -602,7 +602,7 @@ describe('turn entries', () => {
         new AgentHarness({
           name: 'h',
           params: {},
-          triggers: [
+          triggerTurnOn: [
             {
               id: 't',
               connection: 'phone',

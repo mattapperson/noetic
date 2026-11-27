@@ -375,6 +375,7 @@ export class McpConnection implements Connection {
         session: this.init.session,
         artifacts: this.init.artifacts,
         meta: this.meta(),
+        delivery: this.served.events.find((event) => event.name === req.event)?.delivery ?? [],
         pollIntervalMs: this.init.options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
         ...(this.init.options.webhooks === undefined
           ? {}

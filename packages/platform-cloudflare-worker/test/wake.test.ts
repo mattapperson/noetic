@@ -459,7 +459,7 @@ describe('a cron() trigger on the alarm preset', () => {
       connections: {
         clock: cron('* * * * *'),
       },
-      triggers: [
+      triggerTurnOn: [
         {
           id: 'every-minute',
           connection: 'clock',
