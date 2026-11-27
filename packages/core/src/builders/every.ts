@@ -92,6 +92,7 @@ export function schedule<TContext = ContextData, I = unknown, O = unknown>(
     inbox: opts.inbox,
     onError: opts.onError ?? 'continue',
     jitter: opts.jitter ?? 0,
+    execution: opts.execution,
     durable: opts.durable,
     replayKey: opts.replayKey,
   };

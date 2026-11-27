@@ -1,6 +1,4 @@
-// A resumed ACP step: it reloads the agent's own session when the agent can, and
-// a tool call the agent makes again gets the result it got the first time. See
-// specs/27-acp-agent-steps § Resuming a step.
+// Recovery of ACP prompts and their bridged tool calls.
 
 import { describe, expect, it } from 'bun:test';
 import assert from 'node:assert';
@@ -15,12 +13,12 @@ import type {
   HeldCall,
   Tool,
 } from '@noetic-tools/types';
-import { frameworkCast, isNoeticError } from '@noetic-tools/types';
+import { isNoeticError } from '@noetic-tools/types';
 import { z } from 'zod';
-import { step } from '../../src/builders/step-builders';
+import { runCode, step } from '../../src/builders/step-builders';
 import { tool } from '../../src/builders/tool-builder';
 import { AgentHarness } from '../../src/harness/agent-harness';
-import { ACP_RESUME_NOTICE } from '../../src/interpreter/acp-resume';
+import { BridgedCallRecords } from '../../src/interpreter/acp-resume';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import { makeMessage } from '../_helpers';
 
@@ -62,10 +60,9 @@ function agent(opts: {
   calls: Call[];
   diesAfter?: number;
   canLoad?: boolean;
-  /** The session ids this agent still has. Loading any other fails. */
-  has?: string[];
-  /** The load fails some way other than "no such session". */
-  loadCrashes?: boolean;
+  kept?: boolean;
+  stableIds?: boolean;
+  earlyCall?: boolean;
 }): AcpAgent {
   const { log } = opts;
   let made = 0;
@@ -73,37 +70,43 @@ function agent(opts: {
     specificationVersion: 'acp-v1',
     agentId: 'fake-coder',
     async connect(connect): Promise<AcpAgentConnection> {
-      const session = (sessionId: string): AcpSession => ({
-        sessionId,
-        availableCommands: [],
-        async prompt(prompt): Promise<AcpTurnResult> {
-          log.prompts.push(promptText(prompt));
-          const tools = connect.host.tools;
-          assert(tools);
-          for (const call of opts.calls) {
-            if (made === opts.diesAfter) {
-              await new Promise(() => {});
-            }
-            made += 1;
-            log.results.push(
-              await tools.call({
-                ...call,
-                // A new id every time: an agent that makes a call again does not reuse one.
-                agentCallId: `call-${crypto.randomUUID()}`,
-                signal: new AbortController().signal,
-              }),
-            );
-          }
+      const finish = async (): Promise<AcpTurnResult> => {
+        const tools = connect.host.tools;
+        assert(tools);
+        for (const call of opts.calls) {
           if (made === opts.diesAfter) {
             await new Promise(() => {});
           }
-          return {
-            stopReason: 'end_turn',
-            items: [
-              makeMessage('assistant', 'done'),
-            ],
-            text: 'done',
-          };
+          made += 1;
+          log.results.push(
+            await tools.call({
+              ...call,
+              ...(opts.stableIds
+                ? {
+                    agentCallId: `call-${made}`,
+                  }
+                : {}),
+              signal: new AbortController().signal,
+            }),
+          );
+        }
+        if (made === opts.diesAfter) {
+          await new Promise(() => {});
+        }
+        return {
+          stopReason: 'end_turn',
+          items: [
+            makeMessage('assistant', 'done'),
+          ],
+          text: 'done',
+        };
+      };
+      const session = (sessionId: string): AcpSession => ({
+        sessionId,
+        availableCommands: [],
+        async prompt(prompt) {
+          log.prompts.push(promptText(prompt));
+          return finish();
         },
         async cancel() {},
         async setMode() {},
@@ -122,30 +125,30 @@ function agent(opts: {
           return session(`s-${crypto.randomUUID()}`);
         },
         async loadSession(load) {
-          if (opts.loadCrashes) {
-            throw new Error('the agent crashed while loading');
-          }
-          if (opts.has && !opts.has.includes(load.sessionId)) {
-            // JSON-RPC "resource not found": the agent no longer has it.
-            throw {
-              code: -32002,
-              message: `Resource not found: ${load.sessionId}`,
-            };
-          }
-          // The agent replays the session's conversation while it loads.
-          connect.host.onSessionUpdate({
-            sessionId: load.sessionId,
-            update: {
-              sessionUpdate: 'agent_message_chunk',
-              content: {
-                type: 'text',
-                text: 'what I said before the crash',
-              },
-            },
-          });
           log.loaded.push(load.sessionId);
           return session(load.sessionId);
         },
+        ...(opts.kept
+          ? {
+              reattach: {
+                keeper: 'fixture',
+              },
+              async attachSession(sessionId: string) {
+                const running = opts.earlyCall ? finish() : undefined;
+                if (running) {
+                  await until(() => log.results.length > 0);
+                }
+                return {
+                  ...session(sessionId),
+                  resumeTurn: async ({ promptId }) => ({
+                    ...(await (running ?? finish())),
+                    promptId,
+                  }),
+                };
+              },
+              async detach() {},
+            }
+          : {}),
         async close() {},
       };
     },
@@ -202,12 +205,19 @@ function harnessOn(storage: StorageAdapter): AgentHarness {
   });
 }
 
-function coder(acpAgent: AcpAgent, tools: Tool[]) {
+function coder(acpAgent: AcpAgent, tools: Tool[], keyed = false) {
   return step.acpAgent({
     id: 'code',
     agent: acpAgent,
     prompt: 'Add the feature.',
     tools,
+    ...(keyed
+      ? {
+          execution: {
+            replayKey: () => 'job',
+          },
+        }
+      : {}),
   });
 }
 
@@ -225,30 +235,41 @@ async function until(done: () => boolean | Promise<boolean>): Promise<void> {
  * Runs the step until the first agent's process hangs after two of its three
  * calls. Resolves the execution id to resume.
  */
-async function cutOff(storage: StorageAdapter, tools: Tool[], log: AgentLog): Promise<string> {
+async function cutOff({
+  storage,
+  tools,
+  log,
+  kept = false,
+  stableIds = false,
+}: {
+  storage: StorageAdapter;
+  tools: Tool[];
+  log: AgentLog;
+  kept?: boolean;
+  stableIds?: boolean;
+}): Promise<string> {
   const first = harnessOn(storage);
   const ctx = first.createContext();
-  void first
-    .run(
-      coder(
-        agent({
-          log,
-          calls: THREE,
-          diesAfter: 2,
-        }),
-        tools,
-      ),
-      undefined,
-      ctx,
-    )
-    .catch(() => {});
+  const code = coder(
+    agent({
+      log,
+      calls: THREE,
+      diesAfter: 2,
+      kept,
+      stableIds,
+    }),
+    tools,
+    kept,
+  );
+  const target = kept
+    ? runCode({
+        id: 'first-worker',
+        execute: async (_input, ctx) => ctx.harness.run(code, undefined, ctx),
+      })
+    : code;
+  void first.run(target, undefined, ctx).catch(() => {});
   await until(() => log.results.length === 2);
   return ctx.id;
-}
-
-interface RecordedEvent {
-  type: string;
-  data: Record<string, unknown>;
 }
 
 async function resume(opts: {
@@ -256,8 +277,7 @@ async function resume(opts: {
   executionId: string;
   acpAgent: AcpAgent;
   tools: Tool[];
-  /** Records every event the resumed step emits. */
-  events?: RecordedEvent[];
+  moved?: boolean;
 }): Promise<{
   harness: AgentHarness;
   running: Promise<unknown>;
@@ -265,19 +285,19 @@ async function resume(opts: {
   const harness = harnessOn(opts.storage);
   const ctx = await harness.restore(opts.executionId);
   assert(ctx);
-  const events = opts.events;
-  if (events) {
-    frameworkCast<{
-      _broadcaster: unknown;
-    }>(ctx)._broadcaster = {
-      emit(event: RecordedEvent) {
-        events.push(event);
-      },
-    };
-  }
   return {
     harness,
-    running: harness.run(coder(opts.acpAgent, opts.tools), undefined, ctx),
+    running: harness.run(
+      opts.moved
+        ? runCode({
+            id: 'second-worker',
+            execute: async (_input, ctx) =>
+              ctx.harness.run(coder(opts.acpAgent, opts.tools, true), undefined, ctx),
+          })
+        : coder(opts.acpAgent, opts.tools),
+      undefined,
+      ctx,
+    ),
   };
 }
 
@@ -296,321 +316,270 @@ async function heldCall(harness: AgentHarness, executionId: string): Promise<Hel
 
 //#endregion
 
-describe('an ACP step resumed after its host died', () => {
-  it('reloads the agent’s session, and a call the agent makes again is not run again', async () => {
-    const storage = createInMemoryStorage();
-    const runs: string[] = [];
-    const tools = [
-      counted('write', runs),
-      counted('test', runs),
-    ];
-    const before = agentLog();
-    const executionId = await cutOff(storage, tools, before);
-    expect(before.newSessions).toBe(1);
-    expect(runs).toEqual([
-      'write:a.ts',
-      'write:b.ts',
-    ]);
-
-    // A new process. The agent has its session back, knows the two writes are
-    // done, and writes a.ts once more on purpose before running the tests.
-    const after = agentLog();
-    const events: RecordedEvent[] = [];
-    const { running } = await resume({
-      storage,
-      executionId,
-      events,
-      acpAgent: agent({
-        log: after,
-        calls: [
-          {
-            name: 'write',
-            args: {
-              file: 'a.ts',
-            },
-          },
-          {
-            name: 'test',
-            args: {
-              file: 'all',
-            },
-          },
-        ],
+describe('ACP prompt recovery', () => {
+  it('cannot assign an interrupted anonymous call to a redelivery by arrival order', async () => {
+    const harness = harnessOn(
+      createInMemoryStorage({
+        swap: true,
       }),
-      tools,
-    });
-    expect(await running).toBe('done');
-
-    expect(after.newSessions).toBe(0);
-    expect(after.loaded).toHaveLength(1);
-    // What the agent replayed while it loaded is its history, never new output.
-    expect(JSON.stringify(events)).not.toContain('what I said before the crash');
-    const deltas = events
-      .filter((e) => e.type === 'response.output_text.delta')
-      .map((e) => String(e.data.delta));
-    expect(deltas.join('')).not.toContain('what I said before the crash');
-    // It is told it was cut off, and given the task again.
-    expect(after.prompts).toHaveLength(1);
-    expect(after.prompts[0]).toContain(ACP_RESUME_NOTICE);
-    expect(after.prompts[0]).toContain('Add the feature.');
-    expect(after.prompts[0]).not.toContain('what I said before the crash');
-
-    // A reloaded agent's call is a new call, even with a tool and arguments it
-    // used before: it runs, and is not answered with the old result.
-    expect(runs).toEqual([
-      'write:a.ts',
-      'write:b.ts',
-      'write:a.ts',
-      'test:all',
-    ]);
-    expect(after.results.map((result) => result.output)).toEqual([
-      'write a.ts #3',
-      'test all #4',
-    ]);
-  });
-
-  it('starts a new session when the agent cannot reload one, and still repeats no call', async () => {
-    const storage = createInMemoryStorage();
-    const runs: string[] = [];
-    const tools = [
-      counted('write', runs),
-      counted('test', runs),
-    ];
-    const executionId = await cutOff(storage, tools, agentLog());
-
-    const after = agentLog();
-    const { running } = await resume({
-      storage,
-      executionId,
-      acpAgent: agent({
-        log: after,
-        calls: THREE,
-        canLoad: false,
+    );
+    const opts = {
+      ctx: harness.createContext(),
+      stepId: 'code',
+      tool: counted('write', [], {
+        durable: true,
       }),
-      tools,
-    });
-    expect(await running).toBe('done');
-    expect(after.loaded).toEqual([]);
-    expect(after.newSessions).toBe(1);
-    expect(after.prompts[0]).not.toContain(ACP_RESUME_NOTICE);
-    expect(runs).toEqual([
-      'write:a.ts',
-      'write:b.ts',
-      'test:all',
-    ]);
-  });
-
-  it('starts a new session when the agent no longer has the old one', async () => {
-    const storage = createInMemoryStorage();
-    const runs: string[] = [];
-    const tools = [
-      counted('write', runs),
-      counted('test', runs),
-    ];
-    const executionId = await cutOff(storage, tools, agentLog());
-
-    const after = agentLog();
-    const { running } = await resume({
-      storage,
-      executionId,
-      acpAgent: agent({
-        log: after,
-        calls: THREE,
-        has: [],
-      }),
-      tools,
-    });
-    expect(await running).toBe('done');
-    expect(after.loaded).toEqual([]);
-    expect(after.newSessions).toBe(1);
-    expect(after.prompts[0]).not.toContain(ACP_RESUME_NOTICE);
-  });
-
-  it('fails rather than start the work over when the load fails another way', async () => {
-    const storage = createInMemoryStorage();
-    const runs: string[] = [];
-    const tools = [
-      counted('write', runs),
-      counted('test', runs),
-    ];
-    const executionId = await cutOff(storage, tools, agentLog());
-
-    const after = agentLog();
-    const { running } = await resume({
-      storage,
-      executionId,
-      acpAgent: agent({
-        log: after,
-        calls: THREE,
-        loadCrashes: true,
-      }),
-      tools,
-    });
-    const error = await running.catch((e: unknown) => e);
-    assert(isNoeticError(error));
-    expect(error.noeticError.kind).toBe('step_failed');
-    expect(after.newSessions).toBe(0);
-    expect(after.prompts).toEqual([]);
-  });
-
-  it('runs a call the agent makes differently this time', async () => {
-    const storage = createInMemoryStorage();
-    const runs: string[] = [];
-    const tools = [
-      counted('write', runs),
-      counted('test', runs),
-    ];
-    const executionId = await cutOff(storage, tools, agentLog());
-
-    const { running } = await resume({
-      storage,
-      executionId,
-      acpAgent: agent({
-        log: agentLog(),
-        canLoad: false,
-        calls: [
-          {
-            name: 'write',
-            args: {
-              file: 'a.ts',
-            },
-          },
-          {
-            name: 'write',
-            args: {
-              file: 'c.ts',
-            },
-          },
-        ],
-      }),
-      tools,
-    });
-    await running;
-    expect(runs).toEqual([
-      'write:a.ts',
-      'write:b.ts',
-      'write:c.ts',
-    ]);
-  });
-
-  it('tells two equal calls apart by their order', async () => {
-    const storage = createInMemoryStorage();
-    const runs: string[] = [];
-    const tools = [
-      counted('write', runs),
-    ];
-    const twice: Call[] = [
-      {
-        name: 'write',
-        args: {
-          file: 'a.ts',
-        },
+      wireName: 'write',
+      args: {
+        file: 'a.ts',
       },
-      {
-        name: 'write',
-        args: {
-          file: 'a.ts',
+    };
+    try {
+      const first = new BridgedCallRecords();
+      first.bind('/work', 'fresh');
+      await first.recordFor(opts);
+
+      const resumed = new BridgedCallRecords();
+      resumed.bind('/work', 'resume');
+      await expect(resumed.recordFor(opts)).rejects.toMatchObject({
+        noeticError: {
+          kind: 'acp_outcome_unknown',
         },
+      });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('keeps distinct holds for equal tool inputs redelivered in reverse order', async () => {
+    const harness = harnessOn(
+      createInMemoryStorage({
+        swap: true,
+      }),
+    );
+    const opts = {
+      ctx: harness.createContext(),
+      stepId: 'code',
+      tool: counted('write', [], {
+        durable: true,
+      }),
+      wireName: 'write',
+      args: {
+        file: 'a.ts',
       },
-      {
-        name: 'write',
-        args: {
-          file: 'a.ts',
+    };
+    try {
+      const first = new BridgedCallRecords();
+      first.bind('/work', 'fresh');
+      const a = await first.recordFor({
+        ...opts,
+        agentCallId: 'a',
+      });
+      const b = await first.recordFor({
+        ...opts,
+        agentCallId: 'b',
+      });
+      expect(a.id).not.toBe(b.id);
+
+      const second = new BridgedCallRecords();
+      second.bind('/work', 'resume');
+      expect(
+        (
+          await second.recordFor({
+            ...opts,
+            agentCallId: 'b',
+          })
+        ).id,
+      ).toBe(b.id);
+      expect(
+        (
+          await second.recordFor({
+            ...opts,
+            agentCallId: 'a',
+          })
+        ).id,
+      ).toBe(a.id);
+      await expect(
+        second.recordFor({
+          ...opts,
+          agentCallId: 'a',
+          args: {
+            file: 'other',
+          },
+        }),
+      ).rejects.toMatchObject({
+        noeticError: {
+          kind: 'acp_outcome_unknown',
         },
-      },
-    ];
+      });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('does not dispatch a moved keyed step with an unresolved legacy intent', async () => {
+    const storage = createInMemoryStorage();
     const first = harnessOn(storage);
     const ctx = first.createContext();
-    const before = agentLog();
-    void first
-      .run(
+    await first.checkpoint(ctx);
+    await storage.set(`execution:${ctx.id}:pending:/old-worker#0/code#0/acp-session`, {
+      sessionId: 'old',
+      agentId: 'fake-coder',
+      reattach: {
+        keeper: 'fixture',
+      },
+    });
+    const log = agentLog();
+    const { running, harness } = await resume({
+      storage,
+      executionId: ctx.id,
+      acpAgent: agent({
+        log,
+        calls: [],
+        kept: true,
+      }),
+      tools: [],
+      moved: true,
+    });
+    try {
+      await expect(running).rejects.toMatchObject({
+        noeticError: {
+          kind: 'acp_outcome_unknown',
+        },
+      });
+      expect(log.newSessions).toBe(0);
+      expect(log.prompts).toEqual([]);
+    } finally {
+      await Promise.all([
+        first.close(),
+        harness.close(),
+      ]);
+    }
+  });
+
+  it.each([
+    true,
+    false,
+  ])('stops when the original prompt is gone (load support: %s)', async (canLoad) => {
+    const storage = createInMemoryStorage();
+    const runs: string[] = [];
+    const tools = [
+      counted('write', runs),
+      counted('test', runs),
+    ];
+    const executionId = await cutOff({
+      storage,
+      tools,
+      log: agentLog(),
+    });
+    const log = agentLog();
+    const { running } = await resume({
+      storage,
+      executionId,
+      acpAgent: agent({
+        log,
+        calls: THREE,
+        canLoad,
+      }),
+      tools,
+    });
+    const error = await running.catch((error: unknown) => error);
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('acp_outcome_unknown');
+    expect(log.loaded).toEqual([]);
+    expect(log.newSessions).toBe(0);
+    expect(log.prompts).toEqual([]);
+    expect(runs).toEqual([
+      'write:a.ts',
+      'write:b.ts',
+    ]);
+  });
+
+  it.each([
+    true,
+    false,
+  ])('checks redelivered tool results against their call IDs (stable: %s)', async (stableIds) => {
+    const storage = createInMemoryStorage();
+    const runs: string[] = [];
+    const tools = [
+      counted('write', runs, {
+        durable: true,
+      }),
+      counted('test', runs),
+    ];
+    const executionId = await cutOff({
+      storage,
+      tools,
+      log: agentLog(),
+      kept: true,
+      stableIds,
+    });
+    const log = agentLog();
+    const { running, harness } = await resume({
+      storage,
+      executionId,
+      acpAgent: agent({
+        log,
+        calls: THREE,
+        kept: true,
+        stableIds,
+        earlyCall: true,
+      }),
+      tools,
+      moved: true,
+    });
+    try {
+      if (!stableIds) {
+        await expect(running).rejects.toMatchObject({
+          noeticError: {
+            kind: 'acp_outcome_unknown',
+          },
+        });
+        expect(runs).toEqual([
+          'write:a.ts',
+          'write:b.ts',
+        ]);
+        return;
+      }
+      expect(await running).toBe('done');
+      expect(log.results.map((result) => result.output)).toEqual([
+        'write a.ts #1',
+        'write b.ts #2',
+        'test all #3',
+      ]);
+      expect(runs).toEqual([
+        'write:a.ts',
+        'write:b.ts',
+        'test:all',
+      ]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('clears the pending session after a completed step', async () => {
+    const storage = createInMemoryStorage();
+    const harness = harnessOn(storage);
+    const ctx = harness.createContext();
+    const tools = [
+      counted('write', []),
+      counted('test', []),
+    ];
+    expect(
+      await harness.run(
         coder(
           agent({
-            log: before,
-            calls: twice,
-            diesAfter: 2,
+            log: agentLog(),
+            calls: THREE,
           }),
           tools,
         ),
         undefined,
         ctx,
-      )
-      .catch(() => {});
-    await until(() => before.results.length === 2);
-
-    const after = agentLog();
-    const { running } = await resume({
-      storage,
-      executionId: ctx.id,
-      acpAgent: agent({
-        log: after,
-        canLoad: false,
-        calls: twice,
-      }),
-      tools,
-    });
-    await running;
-    // The first two are replayed, each with its own result; the third runs.
-    expect(runs).toHaveLength(3);
-    expect(after.results.map((result) => result.output)).toEqual([
-      'write a.ts #1',
-      'write a.ts #2',
-      'write a.ts #3',
-    ]);
-  });
-
-  it('runs a `durable: false` tool again: nothing was recorded for it', async () => {
-    const storage = createInMemoryStorage();
-    const runs: string[] = [];
-    const tools = [
-      counted('write', runs, {
-        durable: false,
-      }),
-      counted('test', runs),
-    ];
-    const executionId = await cutOff(storage, tools, agentLog());
-    const { running } = await resume({
-      storage,
-      executionId,
-      acpAgent: agent({
-        log: agentLog(),
-        calls: THREE,
-      }),
-      tools,
-    });
-    await running;
-    expect(runs).toEqual([
-      'write:a.ts',
-      'write:b.ts',
-      'write:a.ts',
-      'write:b.ts',
-      'test:all',
-    ]);
-  });
-
-  it('forgets the session once the step has finished', async () => {
-    const storage = createInMemoryStorage();
-    const runs: string[] = [];
-    const tools = [
-      counted('write', runs),
-      counted('test', runs),
-    ];
-    const executionId = await cutOff(storage, tools, agentLog());
-    const kept = await storage.list(`execution:${executionId}:pending:`);
-    expect(kept.filter((key) => key.endsWith('/acp-session'))).toHaveLength(1);
-
-    const { running } = await resume({
-      storage,
-      executionId,
-      acpAgent: agent({
-        log: agentLog(),
-        calls: THREE,
-      }),
-      tools,
-    });
-    await running;
-    const left = await storage.list(`execution:${executionId}:pending:`);
-    expect(left.filter((key) => key.endsWith('/acp-session'))).toEqual([]);
+      ),
+    ).toBe('done');
+    const keys = await storage.list(`execution:${ctx.id}:pending:`);
+    expect(keys.some((key) => key.endsWith('/acp-session'))).toBe(false);
   });
 });
 
@@ -652,6 +621,8 @@ describe('a `durable: true` tool an agent was inside when its host died', () => 
           agent({
             log: agentLog(),
             calls,
+            kept: true,
+            stableIds: true,
           }),
           [
             deploy,
@@ -670,6 +641,8 @@ describe('a `durable: true` tool an agent was inside when its host died', () => 
       acpAgent: agent({
         log: after,
         calls,
+        kept: true,
+        stableIds: true,
       }),
       tools: [
         deploy,
@@ -697,6 +670,7 @@ describe('a `durable: true` tool an agent was inside when its host died', () => 
     expect(attempts).toEqual([
       'build-7',
     ]);
+    expect(after.prompts).toEqual([]);
     expect(after.results).toEqual([
       {
         output: 'deployed build-7',

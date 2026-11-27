@@ -263,6 +263,9 @@
                 "minLength": 1
               }
             },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
+            },
             "durable": {
               "type": "boolean"
             },
@@ -711,6 +714,9 @@
                 "minLength": 1
               }
             },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
+            },
             "durable": {
               "type": "boolean"
             },
@@ -846,6 +852,9 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
             },
             "durable": {
               "type": "boolean"
@@ -1010,6 +1019,9 @@
                 "minLength": 1
               }
             },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
+            },
             "durable": {
               "type": "boolean"
             },
@@ -1137,6 +1149,9 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
             },
             "durable": {
               "type": "boolean"
@@ -1291,6 +1306,9 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
             },
             "durable": {
               "type": "boolean"
@@ -1622,6 +1640,9 @@
                 "minLength": 1
               }
             },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
+            },
             "durable": {
               "type": "boolean"
             },
@@ -1741,6 +1762,9 @@
                     "type": "string",
                     "minLength": 1
                   }
+                },
+                "execution": {
+                  "$ref": "#/$defs/WorkflowStepExecution"
                 },
                 "durable": {
                   "type": "boolean"
@@ -2106,6 +2130,9 @@
                 "minLength": 1
               }
             },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
+            },
             "durable": {
               "type": "boolean"
             },
@@ -2277,6 +2304,9 @@
                 "minLength": 1
               }
             },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
+            },
             "durable": {
               "type": "boolean"
             },
@@ -2427,6 +2457,9 @@
                 "minLength": 1
               }
             },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
+            },
             "durable": {
               "type": "boolean"
             },
@@ -2564,6 +2597,9 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
             },
             "durable": {
               "type": "boolean"
@@ -2755,6 +2791,9 @@
                 "minLength": 1
               }
             },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
+            },
             "durable": {
               "type": "boolean"
             },
@@ -2915,6 +2954,9 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
             },
             "durable": {
               "type": "boolean"
@@ -3087,6 +3129,9 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
             },
             "durable": {
               "type": "boolean"
@@ -3284,6 +3329,9 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
             },
             "durable": {
               "type": "boolean"
@@ -3804,6 +3852,9 @@
                 "minLength": 1
               }
             },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
+            },
             "durable": {
               "type": "boolean"
             },
@@ -3972,6 +4023,9 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
             },
             "durable": {
               "type": "boolean"
@@ -4203,6 +4257,9 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
             },
             "durable": {
               "type": "boolean"
@@ -4662,6 +4719,72 @@
       ],
       "title": "WorkflowNode"
     },
+    "WorkflowStepExecution": {
+      "type": "object",
+      "properties": {
+        "durable": {
+          "type": "boolean"
+        },
+        "replayKey": {
+          "anyOf": [
+            {
+              "type": "boolean",
+              "const": true
+            },
+            {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": [
+                "from"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "retry": {
+          "type": "object",
+          "properties": {
+            "maxAttempts": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "backoff": {
+              "type": "string",
+              "enum": [
+                "fixed",
+                "linear",
+                "exponential"
+              ]
+            },
+            "initialDelay": {
+              "type": "number",
+              "minimum": 0
+            },
+            "maxDelay": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "maxAttempts",
+            "backoff",
+            "initialDelay"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "Expression": {
       "type": "string",
       "minLength": 1,
@@ -4912,6 +5035,9 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "execution": {
+              "$ref": "#/$defs/WorkflowStepExecution"
             },
             "durable": {
               "type": "boolean"

@@ -23,6 +23,12 @@ import { StepLedger } from './step-ledger';
 export type RestoreCheckpointOptions = RestoreContextOptions & {
   /** @internal Event broadcaster the host attached to the original context. */
   _broadcaster?: EventBroadcaster;
+  /** @internal A turn record's input when no baseline snapshot landed. */
+  _baseline?: {
+    items: Item[];
+    threadId: string;
+    resourceId?: string;
+  } | null;
 };
 
 /**
@@ -228,10 +234,16 @@ export async function restoreFromCheckpoint(
   }
   const snapshot = await store.load(executionId);
   const recovered = await h.stepLedgerStore?.load(executionId);
-  if (!snapshot && (!recovered || recovered.entries.size === 0)) {
+  const { _baseline, ...context } = opts ?? {};
+  if (!snapshot && (_baseline === null || (!_baseline && !recovered?.entries.size))) {
     return null;
   }
-  const ctx = snapshot ? contextFromSnapshot(h, snapshot, opts) : h.createContext(opts);
+  const ctx = snapshot
+    ? contextFromSnapshot(h, snapshot, context)
+    : h.createContext({
+        ...context,
+        ..._baseline,
+      });
   if (ctx instanceof ContextImpl) {
     adoptExecution({
       h,
@@ -317,7 +329,7 @@ function adoptExecution({
     writable: false,
     enumerable: true,
   });
-  if (!h.stepLedgerStore || !recovered) {
+  if (!h.stepLedgerStore) {
     return;
   }
   Object.defineProperty(ctx, 'ledger', {

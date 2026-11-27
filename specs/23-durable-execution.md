@@ -152,9 +152,9 @@ The ledger's retention caps (`23a-step-level-resume` § Retention) are a policy,
 
 ### Cut turns
 
-`lease_lost` and `ledger_write_failed` do not mean the turn is wrong. Everything before the stop is on record, and another run can go on from there: the turn is **cut**, not failed.
+A turn is **cut** on `lease_lost`, `ledger_write_failed`, `acp_link_lost` with a keeper handle or `connection_outcome_unknown` with a known task or a safe same-key retry. A replacement reads the same execution and replays its completed steps before recovering the pending operation.
 
-- **The response.** `getAgentResponse()` resolves, rather than rejects, with `cut: { reason, attempt?, wakeAt }`, an empty `text` and the items so far. `reason` is the error kind, `attempt` counts the write-failure cuts of this turn (1 for the first; absent for `lease_lost`), and `wakeAt` is when a wake will run it again. The runner emits `{name}:turn_cut` with the same fields in place of `turn_aborted`.
+- **The response.** `getAgentResponse()` resolves, rather than rejects, with `cut: { reason, attempt?, wakeAt }`, an empty `text` and the items so far. `reason` is the error kind, `attempt` counts this turn's cuts (1 for the first; absent for `lease_lost`), and `wakeAt` is when a wake will run it again. The runner emits `{name}:turn_cut` with the same fields in place of `turn_aborted`.
 - **The record.** The turn is not marked `stopped`. Its record gains `cut: { reason, count, at }`, best-effort: storage that just refused a write may refuse this one too, so the harness also keeps the mark in memory for as long as it lives. Its checkpoint, ledger, held calls and pending entries stay.
 - **Messages.** Messages queued in the process for the thread are kept in storage, as for a park (§ A message for a parked thread), and a message that arrives while the turn is cut is set aside the same way. Re-delivering the turn's own message ids resumes it at once.
 - **Waking.** A cut turn is due `delay(count)` after it was cut: `delayMs * 2^(count - 1)`, at most `maxDelayMs`, and never before another holder's lease runs out. `getNextWakeTime()` reports that time and listeners hear it before the response resolves; a routine `wake()` leaves the turn alone until then and resumes it after, with `turnOptions` (§ Parked turns). The count belongs to the turn's messages, not its execution: a turn whose checkpoint could not be written resumes under a new execution id, and its cuts still count. It is cleared when the turn ends, parks or is dropped.
@@ -295,9 +295,9 @@ A graph whose root has no source stores nothing, although a workflow step inside
 
 **Resuming.** A stored turn that is delivered again — cut off by a crash, cut, parked and woken, or its message re-delivered — is looked at before it runs:
 
-1. Its record names the harness's own version, or none: it runs the harness's flow.
+1. Its record names the harness's own version and source hash: it runs the harness's flow.
 2. It stored no flow: it moves forward to the harness's flow, as a turn on a flow that is code does.
-3. It stored one: the harness has its own root step build a step from the stored source, and checks that the step tree it gets back hashes to the stored `hash`. The turn runs that tree, records under its own version, and its record goes on naming that version. Every ledger entry matches, nothing that ran runs again, and no entry is discarded, so there is no `turn_stuck`.
+3. It stored a different flow: the harness checks the stored source against the hash pinned by the turn, builds it, and checks the rebuilt step tree against the same hash. The turn runs that tree and records under its own version. Completed steps replay from the ledger and incomplete steps follow their own recovery rules.
 
 The rebuilt flow is the old documents run by the new code. Tools, agents, connections, context layers and the hydration context are the running harness's; only the documents are old. The named workflows are the stored ones, with any the harness holds that the source does not name beside them. A harness builds a given stored flow once.
 

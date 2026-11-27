@@ -20,6 +20,8 @@ import type {
 import {
   createMessage,
   frameworkCast,
+  isAcpConnectError,
+  isNoeticError,
   NoeticConfigError,
   NoeticErrorImpl,
   SteeringAction,
@@ -33,12 +35,13 @@ import { bindHostToStep, buildHost } from './acp-host';
 import { renderLayerContext } from './acp-layers';
 import type { QuestionAsker } from './acp-questions';
 import { questionAsker } from './acp-questions';
-import { ACP_RESUME_NOTICE, acpSessionRecords } from './acp-resume';
+import type { AcpSessionRecords } from './acp-resume';
+import { ACP_RESUME_NOTICE, acpRecovery, wasCut } from './acp-resume';
 import type { SessionResolution } from './acp-session';
 import {
   applySessionSelection,
   assertReuseIsKeptAlive,
-  discardIfFresh,
+  detachSession,
   finalizeSession,
   openSession,
   resolveSessionSettings,
@@ -59,6 +62,7 @@ import {
 } from './acp-turn';
 import { MAX_STEERING_RETRIES, resolveLazy } from './action-tools';
 import { appendUserInput } from './context-assembly';
+import type { StepKindScope } from './step-kind-dispatch';
 
 async function resolveAgent<TContext, I, O>(
   step: StepAcpAgent<TContext, I, O>,
@@ -97,21 +101,6 @@ async function resolveServedTools<TContext, I, O>(
   return undefined;
 }
 
-/**
- * A resumed step that now runs through another subprocess adapter than the one
- * its agent was started through. The agent may still be working where it was
- * started, so the step fails and attaches to nothing: starting its work again
- * elsewhere could do it twice.
- */
-function movedAgent(stepId: string, started: string, now: string): NoeticConfigError {
-  return new NoeticConfigError({
-    code: 'ACP_SESSION_ADAPTER_CONFLICT',
-    message: `step.acpAgent(${JSON.stringify(stepId)}) resumes an agent started through the subprocess adapter '${started}', but now runs through '${now}'.`,
-    hint: `Resume with the step, its agent and \`environment.subprocess\` resolving to '${started}', as in the run that started the agent.`,
-  });
-}
-
-/** Whether a step setting may name anything: a getter, or a non-empty array. */
 function gives(setting: unknown): boolean {
   return typeof setting === 'function' || (Array.isArray(setting) && setting.length > 0);
 }
@@ -119,9 +108,12 @@ function gives(setting: unknown): boolean {
 export async function executeAcpAgent<TContext, I, O>(
   step: StepAcpAgent<TContext, I, O>,
   input: I,
-  ctx: Context<TContext>,
-  layers?: ContextLayer[],
+  scope: StepKindScope<TContext>,
 ): Promise<O> {
+  const {
+    stepCtx: ctx,
+    baseCtx: { layers },
+  } = scope;
   const baseCtx = frameworkCast<Context<ContextData>>(ctx);
   assertReuseIsKeptAlive(step);
   const agent = await resolveAgent(step, ctx);
@@ -134,16 +126,30 @@ export async function executeAcpAgent<TContext, I, O>(
   // taking it and before the agent got it is not asked again (spec 27
   // § Questions the agent asks). A step cut off with its host never gets here.
   try {
-    return await runAcpStep({
+    const output = await runAcpStep({
       step,
       input,
       ctx,
       layers,
       agent,
       questions,
+      scope,
     });
-  } finally {
     await questions.release().catch(() => undefined);
+    return output;
+  } catch (error) {
+    // The keeper can ask the next attachment the same question.
+    if (
+      !wasCut(baseCtx) &&
+      (!isNoeticError(error) ||
+        ![
+          'acp_link_lost',
+          'lease_lost',
+        ].includes(error.noeticError.kind))
+    ) {
+      await questions.release().catch(() => undefined);
+    }
+    throw error;
   }
 }
 
@@ -154,8 +160,9 @@ async function runAcpStep<TContext, I, O>(params: {
   layers: ContextLayer[] | undefined;
   agent: AcpAgent;
   questions: QuestionAsker;
+  scope: StepKindScope<TContext>;
 }): Promise<O> {
-  const { step, input, ctx, layers, agent, questions } = params;
+  const { step, input, ctx, layers, agent, questions, scope } = params;
   const baseCtx = frameworkCast<Context<ContextData>>(ctx);
   const resolvedPrompt = await resolveLazy(step.prompt, ctx);
   const blocks = await resolveLazy(step.content, ctx);
@@ -191,20 +198,20 @@ async function runAcpStep<TContext, I, O>(params: {
     input: promptText,
   });
 
-  // An earlier attempt of this step may have left its session behind.
-  const sessions = step.session?.load ? undefined : acpSessionRecords(baseCtx);
-  const recorded = await sessions?.load();
-  const sameAgent = recorded?.agentId === agent.agentId;
-  const resumeId = sameAgent ? recorded?.sessionId : undefined;
-  const reattach = sameAgent ? recorded?.reattach : undefined;
-  if (
-    reattach &&
-    recorded?.subprocess !== undefined &&
-    recorded.subprocess !== adapters.subprocess
-  ) {
-    throw movedAgent(step.id, recorded.subprocess, adapters.subprocess);
-  }
-  const fingerprint = sameAgent ? recorded?.fingerprint : undefined;
+  const { sessions, recorded, ledger, position, bridgePath, promptHash } = await acpRecovery({
+    ctx: baseCtx,
+    stepId: step.id,
+    agentId: agent.agentId,
+    ledgerKey: scope.ledgerKey,
+    subprocess: adapters.subprocess,
+    prompt: {
+      text: promptText,
+      blocks,
+    },
+  });
+  const resumeId = recorded?.sessionId;
+  const reattach = recorded?.reattach;
+  const fingerprint = recorded?.fingerprint;
   // `session/load` replays the session's conversation as updates. They are the
   // agent's history, not this turn's work: they reach raw-event consumers
   // marked `replay: true`, and never the text, reasoning or item streams.
@@ -258,9 +265,15 @@ async function runAcpStep<TContext, I, O>(params: {
     cwd,
   });
 
-  // Both an explicit `session.load` and the resume of an earlier attempt's
-  // session load it; a reused live session is not reloaded and replays nothing.
-  reloading = resumeId !== undefined || step.session?.load !== undefined;
+  reloading = step.session?.load !== undefined && resumeId === undefined;
+  if (reattach) {
+    await ledger?.verifyHeld();
+  }
+  // The bridge starts accepting calls during the connection handshake.
+  tools?.recordCallsAt(
+    bridgePath,
+    reattach === undefined ? 'fresh' : recorded?.stableCalls ? 'resume' : 'legacy',
+  );
   const resolution = await openSession({
     step,
     agent,
@@ -276,33 +289,66 @@ async function runAcpStep<TContext, I, O>(params: {
     adapters,
   })
     .catch((cause: unknown) => {
+      if (reattach && isAcpConnectError(cause) && !baseCtx.aborted) {
+        throw new NoeticErrorImpl({
+          kind: 'acp_link_lost',
+          stepId: step.id,
+          cause,
+        });
+      }
       throw stepFailure(step, cause, baseCtx);
     })
     .finally(() => {
       reloading = false;
     });
-  if (resolution.resumed) {
-    tools?.sessionReloaded();
-  }
-  // A reloaded session was opened again with this step's settings: its record
-  // takes the new fingerprint. A reattached one keeps the one it has.
-  if (resolution.fresh && !resolution.reattached) {
+  // A live turn already has the mode and model under which it started.
+  const selectedModel = resolution.reattached
+    ? undefined
+    : await applySessionSelection(step, ctx, resolution, baseCtx).catch((cause: unknown) => {
+        throw stepFailure(step, cause, baseCtx);
+      });
+  turnError.cancel = () => resolution.live.session.cancel();
+  const { connection, session } = resolution.live;
+  // A shared session's last answer may belong to another step.
+  const handle = step.session?.reuse ? undefined : connection.reattach;
+  ledger?.noteEffect(position);
+  scope.onRecorded(async (stored) => {
+    const owns = await ledger?.verifyHeld().then(
+      () => true,
+      () => false,
+    );
+    if (
+      sessions &&
+      handle &&
+      connection.detach &&
+      (owns === false || (!stored && (!baseCtx.aborted || wasCut(baseCtx))))
+    ) {
+      await detachSession(resolution, baseCtx);
+      return;
+    }
+    await finalizeSession(resolution, baseCtx);
+    if (stored) {
+      if (bridgePath?.startsWith('acp-tools:')) {
+        await ledger?.dropWithin(bridgePath);
+      }
+      await sessions?.clear();
+    }
+  });
+  const beforePrompt = async (prompt: PromptAttempt): Promise<void> => {
     await sessions?.write({
-      sessionId: resolution.live.session.sessionId,
+      sessionId: session.sessionId,
       agentId: agent.agentId,
-      // How a resumed run reaches this agent if it outlives this host.
-      reattach: resolution.live.connection.reattach,
-      fingerprint: resolution.live.session.fingerprint,
+      sent: true,
+      promptHash,
+      bridgePath,
+      stableCalls: true,
+      ...prompt,
+      reattach: handle ?? recorded?.reattach,
+      fingerprint: session.fingerprint ?? recorded?.fingerprint,
       subprocess: adapters.subprocess,
     });
-  }
-
-  const selectedModel = await applySessionSelection(step, ctx, resolution, baseCtx).catch(
-    (cause: unknown) => {
-      throw stepFailure(step, cause, baseCtx);
-    },
-  );
-  turnError.cancel = () => resolution.live.session.cancel();
+    await ledger?.verifyHeld();
+  };
 
   return promptAgent({
     step,
@@ -314,13 +360,29 @@ async function runAcpStep<TContext, I, O>(params: {
     bindingFor,
     tools,
     turnError,
+    beforePrompt,
+    beforeCollect: () => ledger?.verifyHeld(),
+    prompt: {
+      steering: recorded?.steering ?? 0,
+      promptId: recorded?.promptId,
+      guidance: recorded?.guidance,
+    },
     sessions,
+    keepPromptId: sessions !== undefined && (handle ?? recorded?.reattach) !== undefined,
+    recovery: sessions ? (handle && connection.detach ? 'reattach' : 'unavailable') : undefined,
+    collectRequired: recorded !== undefined && !recorded.sent,
     promptText,
     priorHistory,
     blocks,
     rerenderRequests,
     selectedModel,
   });
+}
+
+interface PromptAttempt {
+  steering: number;
+  promptId?: string;
+  guidance?: string;
 }
 
 async function promptAgent<TContext, I, O>(params: {
@@ -333,7 +395,13 @@ async function promptAgent<TContext, I, O>(params: {
   bindingFor(events: AcpEventBridge): HostBindingOptions<TContext, I, O>;
   tools: AcpToolRunner | undefined;
   turnError: TurnError;
-  sessions: ReturnType<typeof acpSessionRecords>;
+  beforePrompt(prompt: PromptAttempt): Promise<void>;
+  beforeCollect(): Promise<void> | undefined;
+  prompt: PromptAttempt;
+  keepPromptId: boolean;
+  sessions?: AcpSessionRecords;
+  recovery?: 'reattach' | 'unavailable';
+  collectRequired: boolean;
   promptText: string;
   priorHistory: Item[];
   blocks: ReadonlyArray<AcpContentBlock> | undefined;
@@ -349,7 +417,10 @@ async function promptAgent<TContext, I, O>(params: {
     bindingFor,
     tools,
     turnError,
-    sessions,
+    beforePrompt,
+    beforeCollect,
+    recovery,
+    collectRequired,
     promptText,
     priorHistory,
     blocks,
@@ -359,16 +430,19 @@ async function promptAgent<TContext, I, O>(params: {
   // History seeds only a freshly opened session; a reused one already owns
   // its conversation on the agent side.
   // A reloaded session has its conversation too, and the work it had done.
-  let turnPrompt = resolution.resumed
-    ? `${ACP_RESUME_NOTICE}\n\n${promptText}`
-    : resolution.fresh
-      ? withHistoryPrompt({
-          prompt: promptText,
-          history: priorHistory,
-        })
-      : promptText;
-  let turnBlocks = blocks;
-  let retries = 0;
+  const { prompt } = params;
+  let turnPrompt =
+    prompt.guidance ??
+    (resolution.reattached
+      ? `${ACP_RESUME_NOTICE}\n\n${promptText}`
+      : resolution.fresh
+        ? withHistoryPrompt({
+            prompt: promptText,
+            history: priorHistory,
+          })
+        : promptText);
+  let turnBlocks = prompt.guidance === undefined ? blocks : undefined;
+  let collect = resolution.reattached;
   for (;;) {
     // Recall runs before every turn, as before every model call; its output
     // leads the prompt.
@@ -384,15 +458,24 @@ async function promptAgent<TContext, I, O>(params: {
       throw error;
     });
     rerenderRequests = [];
+    const collectId = collect ? prompt.promptId : undefined;
+    if (params.keepPromptId && prompt.promptId === undefined) {
+      prompt.promptId = crypto.randomUUID();
+    }
     const result = await runTurn({
       step,
       baseCtx,
       session: resolution.live.session,
-      discard: () => discardIfFresh(resolution, baseCtx),
       bridge,
       tools,
       turnError,
-      collect: retries === 0 && resolution.reattached,
+      collect,
+      collectId,
+      promptId: prompt.promptId,
+      collectRequired,
+      recovery,
+      beforeCollect,
+      beforePrompt: () => beforePrompt(prompt),
       content: buildContent({
         text: [
           context.text,
@@ -411,19 +494,26 @@ async function promptAgent<TContext, I, O>(params: {
             layerText: context.layerText,
           })),
     }).finally(() => observation?.end());
+    collect = false;
     applyTurnResult(baseCtx, result);
     try {
       assertTurnSucceeded(step.id, result, baseCtx);
     } catch (e) {
-      await finalizeSession(resolution, baseCtx);
+      if (!wasCut(baseCtx)) {
+        await finalizeSession(resolution, baseCtx);
+      }
       throw e;
     }
 
     const response = toLlmResponse(result);
+    const steer = () =>
+      layers?.length
+        ? baseCtx.harness.afterModelCall(layers, response, baseCtx)
+        : Promise.resolve(undefined);
     const decision =
-      layers && layers.length > 0
-        ? await baseCtx.harness.afterModelCall(layers, response, baseCtx)
-        : undefined;
+      layers?.length && params.sessions && prompt.promptId
+        ? await params.sessions.decide(prompt.promptId, steer)
+        : await steer();
     if (decision?.action === SteeringAction.Deny) {
       await finalizeSession(resolution, baseCtx);
       throw new NoeticErrorImpl({
@@ -434,12 +524,14 @@ async function promptAgent<TContext, I, O>(params: {
     // A layer asking for a better answer gets another turn carrying its
     // guidance, as a `callModel` step retries its call. The agent keeps its
     // first answer in its own history, so it stays in the log as well.
-    if (decision?.action === SteeringAction.Guide && retries < MAX_STEERING_RETRIES) {
+    if (decision?.action === SteeringAction.Guide && prompt.steering < MAX_STEERING_RETRIES) {
       const guidance = decision.guidance ?? 'Please adjust your response.';
       baseCtx.itemLog.append(createMessage(guidance, 'developer'));
       turnPrompt = guidance;
       turnBlocks = undefined;
-      retries += 1;
+      prompt.steering += 1;
+      prompt.guidance = guidance;
+      prompt.promptId = undefined;
       bridge = new AcpEventBridge(step, baseCtx);
       bridge.identifyToolCalls(agent.toolIdOf?.bind(agent));
       bindHostToStep(resolution.live.host, bindingFor(bridge));
@@ -449,8 +541,6 @@ async function promptAgent<TContext, I, O>(params: {
     if (layers && layers.length > 0) {
       await baseCtx.harness.storeLayers(layers, response, baseCtx);
     }
-    await finalizeSession(resolution, baseCtx);
-    await sessions?.clear();
     return await stepOutput(step, result);
   }
 }

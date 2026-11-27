@@ -90,6 +90,12 @@ export interface GatedCallOptions {
     readonly name: string;
     readonly field: string;
   }>;
+  /** Save the step's intent after the approval and input gates, just before dispatch. */
+  readonly beforeSend?: () => Promise<void>;
+  /** The provider sent a definite refusal. */
+  readonly onRefused?: () => Promise<void>;
+  /** Save the provider's task id before waiting on it. */
+  readonly onTaskStarted?: (taskId: string) => Promise<void>;
   /** Progress of a long operation, also emitted as `connection_task`. */
   readonly onTask?: (status: ConnectionTaskStatus) => void;
   /**

@@ -49,10 +49,14 @@ export type StreamEvent = SdkStreamEvent | FrameworkStreamEvent;
 
 /**
  * @public
- * Why a turn was cut (spec 23 § Cut turns): another harness took its lease, or a
- * durable write failed. Everything before the stop is on record.
+ * Why a turn was cut (spec 23 § Cut turns). A later wake can resume the turn
+ * using its recorded progress or the original external execution.
  */
-export type TurnCutReason = 'lease_lost' | 'ledger_write_failed';
+export type TurnCutReason =
+  | 'lease_lost'
+  | 'ledger_write_failed'
+  | 'acp_link_lost'
+  | 'connection_outcome_unknown';
 
 /** @public A turn that was cut rather than failed: a later wake runs it again from its record. */
 export interface TurnCut {

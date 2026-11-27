@@ -27,6 +27,7 @@ import { compileExpression, compute, passes, readInput } from '../expression/jso
 import type { AcpAgentWorkflowNode, WaitWorkflowNode, WorkflowNode } from '../schemas/workflow';
 import { getDefaultRegistrar } from '../types/step-registrar';
 import { DetachedHandleImpl } from '../util/detached-handle';
+import { commandLaunchers } from '../util/workflow-command';
 import { outputText } from './output-text';
 import { runCode, step } from './step-builders';
 import { boundedAcpSettings } from './workflow-acp-grants';
@@ -401,6 +402,7 @@ export function hydrateRunCodeNode(
         });
         return runCodeViaSubprocess({
           adapter,
+          ctx: execCtx,
           nodeId: node.id,
           code,
           input: outputText(input),
@@ -529,11 +531,12 @@ function resolveSubprocessAdapter(opts: {
  */
 async function runCodeViaSubprocess(opts: {
   adapter: SubprocessAdapter;
+  ctx: Context;
   nodeId: string;
   code: string;
   input: string;
 }): Promise<string> {
-  const { adapter, nodeId, code, input } = opts;
+  const { adapter, ctx, nodeId, code, input } = opts;
   const request: ProcessSubprocessRequest = {
     kind: 'process',
     command: 'node',
@@ -549,10 +552,11 @@ async function runCodeViaSubprocess(opts: {
       input,
     },
   };
+  const launch = commandLaunchers.get(ctx);
   const handle = new DetachedHandleImpl<string>({
     id: `run-${nodeId}`,
     stepId: nodeId,
-    spawned: adapter.spawn(request),
+    spawned: launch ? launch.spawn(adapter, request) : adapter.spawn(request),
   });
   const result = await handle.await();
   return outputText(result);

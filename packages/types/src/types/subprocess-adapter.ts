@@ -187,6 +187,11 @@ export interface SubprocessStopResult {
 
 //#region Adapter
 
+/** @public A launch rejection that guarantees no child accepted the request. */
+export class SubprocessLaunchError extends Error {
+  override readonly name = 'SubprocessLaunchError';
+}
+
 /**
  * @public
  * Contract for dispatching and managing subprocess-style executions — both
@@ -199,7 +204,11 @@ export interface SubprocessStopResult {
  * it: `get`, `stop`, `pause`, and `resume` then treat the id as unknown.
  */
 export interface SubprocessAdapter {
-  /** Dispatches a new request; returns its handle and a promise of its final state. */
+  /**
+   * Dispatch a request and return its handle and settlement promise.
+   * Use `SubprocessLaunchError` for a refusal known to precede acceptance.
+   * A generic rejection leaves acceptance uncertain and cannot trigger a launch retry.
+   */
   spawn(request: SubprocessRequest): Promise<SpawnedSubprocess>;
   /** Fetches a running handle by id, or `null` once it has finished or when unknown. */
   get(handleId: string): Promise<SubprocessHandle | null>;

@@ -44,7 +44,7 @@ import { closeUnstartedSpan, openChildSpan, traceChild } from './child-span';
 import { cloneWithGuard } from './clone-guard';
 import { releasePathLeases } from './connection-steps';
 import { forgetAnswers } from './execute-decide';
-import { turnEndingIn } from './turn-ending';
+import { recoverableAbort, turnEndingIn } from './turn-ending';
 import { getContextChannelStore, isContextImpl, isMutableContext } from './typeguards';
 
 //#region conditional
@@ -529,9 +529,10 @@ async function executeAll<TContext, I, O>(
       const isCancellation = isNoeticError(e) && e.noeticError.kind === 'cancelled';
       if (!isCancellation && !firstFailureSeen) {
         firstFailureSeen = true;
+        const reason = recoverableAbort(e, `inParallel '${step.id}' sibling failed`);
         for (let j = 0; j < childContexts.length; j++) {
           if (j !== i) {
-            childContexts[j].abort(`inParallel '${step.id}' sibling failed`);
+            childContexts[j].abort(reason);
           }
         }
       }
@@ -580,6 +581,7 @@ async function executeRace<TContext, I, O>(
     let nextIndex = 0;
     const errors: StepError[] = [];
     const totalPaths = paths.length;
+    const active = new Set<Promise<void>>();
 
     function startNext(): void {
       if (settled || nextIndex >= totalPaths) {
@@ -587,7 +589,7 @@ async function executeRace<TContext, I, O>(
       }
       const i = nextIndex++;
 
-      executeStep<TContext, I, O>(
+      const task = executeStep<TContext, I, O>(
         paths[i],
         input,
         frameworkCast<Context<TContext>>(childContexts[i]),
@@ -610,6 +612,18 @@ async function executeRace<TContext, I, O>(
           }
         })
         .catch((err: unknown) => {
+          const ending = turnEndingIn(err);
+          if (ending && !settled) {
+            settled = true;
+            const reason = recoverableAbort(ending, 'parallel path failed');
+            for (let j = 0; j < childContexts.length; j++) {
+              if (j !== i) {
+                childContexts[j].abort(reason);
+              }
+            }
+            void Promise.allSettled(active).then(() => reject(ending));
+            return;
+          }
           failedCount++;
           errors.push({
             stepId: paths[i].id,
@@ -633,6 +647,8 @@ async function executeRace<TContext, I, O>(
             );
           }
         });
+      active.add(task);
+      void task.then(() => active.delete(task));
     }
 
     // Launch initial batch respecting concurrency
@@ -652,11 +668,34 @@ async function executeSettle<TContext, I, O>(
   executeStep: ExecuteStepFn,
   concurrency: number,
 ): Promise<O> {
-  const tasks = paths.map(
-    (path, i) => () =>
-      executeStep<TContext, I, O>(path, input, frameworkCast<Context<TContext>>(childContexts[i])),
-  );
+  let ending: NoeticErrorImpl | undefined;
+  const tasks = paths.map((path, i) => async () => {
+    if (ending) {
+      throw ending;
+    }
+    try {
+      return await executeStep<TContext, I, O>(
+        path,
+        input,
+        frameworkCast<Context<TContext>>(childContexts[i]),
+      );
+    } catch (error) {
+      const failure = turnEndingIn(error);
+      if (failure && !ending) {
+        ending = failure;
+        for (let j = 0; j < childContexts.length; j++) {
+          if (j !== i) {
+            childContexts[j].abort(recoverableAbort(failure, 'parallel path failed'));
+          }
+        }
+      }
+      throw error;
+    }
+  });
   const settled = await runWithConcurrency(tasks, concurrency);
+  if (ending) {
+    throw ending;
+  }
 
   // Parent aborted mid-inParallel: the inParallel is cancelled, merge never runs
   // (spec 09, Cancellation item 3 — same rule as mode 'all').
@@ -767,6 +806,10 @@ async function judge(until: Until, snapshot: Snapshot, run: UntilRun): Promise<V
   try {
     return await until(snapshot, run);
   } catch (predicateError) {
+    const ending = turnEndingIn(predicateError);
+    if (ending) {
+      throw ending;
+    }
     if (isNoeticConfigError(predicateError)) {
       throw predicateError;
     }
@@ -1120,6 +1163,10 @@ export async function executeSchedule<TContext, I, O>(
     } catch (e) {
       if (onError === 'fail') {
         throw e;
+      }
+      const ending = turnEndingIn(e);
+      if (ending) {
+        throw ending;
       }
       // 'continue' policy — but a cancellation should still terminate the
       // operator promptly rather than be swallowed and re-parked.

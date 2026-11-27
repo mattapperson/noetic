@@ -522,6 +522,8 @@ export interface AcpPromptOptions {
   content: ReadonlyArray<acp.ContentBlock>;
   /** Aborting this signal issues `session/cancel` and awaits the `cancelled` stop reason. */
   signal?: AbortSignal;
+  /** The keeper's identity for this prompt when a host may need to collect it later. */
+  promptId?: string;
 }
 
 /**
@@ -531,6 +533,8 @@ export interface AcpPromptOptions {
  * @public
  */
 export interface AcpTurnResult {
+  /** The identity of a collected prompt, when requested by the replacement host. */
+  promptId?: string;
   /** Why the agent stopped — drives the interpreter's success/error decision. */
   stopReason: AcpStopReason;
   /** Noetic Items produced this turn (assistant message, tool calls, tool results). */
@@ -626,7 +630,8 @@ export interface AcpSession {
    * of that turn — those the previous host saw and those sent while no host
    * was attached — arrives again as this turn's output, and any request the
    * agent is still waiting on is asked again. Resolves with the turn's result,
-   * or `undefined` when no turn was running, so the caller prompts instead.
+   * including a result delivered to an earlier attachment. Resolves
+   * `undefined` if there is no turn for this attachment to collect.
    */
   resumeTurn?(opts: AcpResumeTurnOptions): Promise<AcpTurnResult | undefined>;
   /**
@@ -689,6 +694,8 @@ export interface AcpAgentConnection {
 export interface AcpResumeTurnOptions {
   /** Aborting it cancels the turn, as for {@link AcpSession.prompt}. */
   signal?: AbortSignal;
+  /** Collect this prompt only. Returning no result certifies it was never accepted. */
+  promptId?: string;
 }
 
 /** @public Options handed to {@link AcpAgent.connect}. */
@@ -982,9 +989,9 @@ export class AcpConnectError extends Error {
   readonly agentId: string;
   readonly connectCause?: unknown;
   /**
-   * The agent, or the session asked for, is confirmed gone: nothing an earlier
-   * host started is still running there. Only then does a resumed step start
-   * its work over; any other connect failure leaves that unknown.
+   * The agent, session, or prompt result is permanently unavailable through
+   * this link. The prompt may have had external effects.
+   * Recovery reports an unknown outcome if the original prompt may have run.
    */
   readonly gone: boolean;
 

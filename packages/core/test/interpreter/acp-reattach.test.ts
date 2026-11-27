@@ -16,18 +16,22 @@ import type {
   AcpSession,
   AcpTurnResult,
   AcpWhenHostExits,
+  ContextData,
 } from '@noetic-tools/types';
 import {
   AcpConnectError,
   frameworkCast,
   isNoeticConfigError,
   isNoeticError,
+  NoeticErrorImpl,
+  SteeringAction,
 } from '@noetic-tools/types';
-import { step } from '../../src/builders/step-builders';
+import { inParallel } from '../../src/builders/control-flow-builders';
+import { runCode, step } from '../../src/builders/step-builders';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { ACP_RESUME_NOTICE } from '../../src/interpreter/acp-resume';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
-import { makeMessage } from '../_helpers';
+import { makeLayer, makeMessage } from '../_helpers';
 
 //#region Fixtures
 
@@ -75,6 +79,10 @@ function result(text: string): AcpTurnResult {
 function keptAgent(opts: {
   seen: Seen;
   collected?: string;
+  collectedPromptId?: string;
+  /** What the first host gets before it can commit its step. */
+  first?: 'link-lost' | 'rpc-error' | 'answered';
+  cutGuidance?: boolean;
   /** The agent is gone: reattaching fails with `AcpConnectError`. */
   gone?: boolean;
   /** Reattaching fails some other way: the old turn may still be there. */
@@ -112,6 +120,27 @@ function keptAgent(opts: {
         async prompt(prompt) {
           opts.seen.prompts.push(promptText(prompt));
           if (!reattached) {
+            if (opts.cutGuidance && opts.seen.prompts.length === 2) {
+              throw new AcpConnectError({
+                agentId: 'kept',
+                message: 'runner socket dropped',
+              });
+            }
+            if (opts.first === 'link-lost') {
+              throw new AcpConnectError({
+                agentId: 'kept',
+                message: 'runner socket dropped',
+              });
+            }
+            if (opts.first === 'rpc-error') {
+              throw {
+                code: -32603,
+                message: 'lost result after writing',
+              };
+            }
+            if (opts.first === 'answered') {
+              return result('original answer');
+            }
             // The host dies mid-turn: the turn ends only when the test lets go.
             return await new Promise<AcpTurnResult>((resolve) => {
               prompt.signal?.addEventListener('abort', () =>
@@ -127,7 +156,7 @@ function keptAgent(opts: {
         },
         ...(reattached
           ? {
-              async resumeTurn() {
+              async resumeTurn({ promptId }) {
                 const text = opts.collected;
                 if (text === undefined) {
                   return undefined;
@@ -144,7 +173,10 @@ function keptAgent(opts: {
                     },
                   });
                 }
-                return result(text);
+                return {
+                  ...result(text),
+                  promptId: opts.collectedPromptId ?? promptId,
+                };
               },
             }
           : {}),
@@ -178,13 +210,9 @@ function keptAgent(opts: {
             opts.seen.released.push('closed');
           }
         },
-        ...(connect.reattach
-          ? {
-              async detach() {
-                opts.seen.released.push('detached');
-              },
-            }
-          : {}),
+        async detach() {
+          opts.seen.released.push('detached');
+        },
       };
     },
   };
@@ -204,7 +232,7 @@ function harnessOn(storage: StorageAdapter, killAgentsOnExit?: boolean): AgentHa
 }
 
 function coder(agent: AcpAgent) {
-  return step.acpAgent({
+  return step.acpAgent<ContextData, string, string>({
     id: 'code',
     agent,
     prompt: 'Add the feature.',
@@ -233,6 +261,124 @@ afterEach(async () => {
   }
 });
 
+it.each([
+  'received',
+  'unseen',
+  'wrong',
+  'failed-write',
+])('recovers a guidance prompt that the keeper reports as %s', async (mode) => {
+  const backing = createInMemoryStorage({
+    swap: true,
+  });
+  let refused = false;
+  const storage: StorageAdapter = {
+    ...backing,
+    async swap(key, prev, next) {
+      if (
+        mode === 'failed-write' &&
+        !refused &&
+        key.endsWith('/acp-session') &&
+        next &&
+        typeof next === 'object' &&
+        Reflect.get(next, 'guidance')
+      ) {
+        refused = true;
+        throw new Error('lost guidance intent');
+      }
+      return backing.swap!(key, prev, next);
+    },
+  };
+  let guided = 0;
+  const before = seen();
+  const after = seen();
+  const build = (agent: AcpAgent) =>
+    new AgentHarness({
+      name: 'steered',
+      params: {},
+      agentGraph: coder(agent),
+      contextLayers: [
+        makeLayer('guide', {
+          hooks: {
+            afterModelCall: async () => ({
+              decision: {
+                action:
+                  mode === 'failed-write' && ++guided > 1
+                    ? SteeringAction.Allow
+                    : SteeringAction.Guide,
+                guidance: 'revise',
+              },
+            }),
+          },
+        }),
+      ],
+      environment: {
+        storage: {
+          adapter: storage,
+          lease: {
+            cut: {
+              delayMs: 0,
+            },
+          },
+          park: {
+            autoWake: false,
+          },
+        },
+      },
+    });
+  const first = build(
+    keptAgent({
+      seen: before,
+      first: 'answered',
+      cutGuidance: true,
+    }),
+  );
+  const second = build(
+    keptAgent({
+      seen: after,
+      collected:
+        mode === 'unseen'
+          ? undefined
+          : mode === 'failed-write'
+            ? 'original answer'
+            : 'guided answer',
+      collectedPromptId: mode === 'wrong' ? 'previous-prompt' : undefined,
+    }),
+  );
+  const delivery = {
+    threadId: 'thread',
+    messageId: 'start',
+  };
+  try {
+    await first.execute('begin', delivery);
+    expect((await first.getAgentResponse(delivery)).cut?.reason).toBe(
+      mode === 'failed-write' ? 'ledger_write_failed' : 'acp_link_lost',
+    );
+    expect(before.prompts).toHaveLength(mode === 'failed-write' ? 1 : 2);
+    expect(await second.wake()).toEqual([
+      'thread',
+    ]);
+    if (mode === 'wrong') {
+      await expect(second.getAgentResponse(delivery)).rejects.toMatchObject({
+        noeticError: {
+          kind: 'acp_outcome_unknown',
+        },
+      });
+      expect(after.prompts).toHaveLength(0);
+    } else {
+      await second.getAgentResponse(delivery);
+      expect(after.prompts).toHaveLength(mode === 'failed-write' ? 1 : mode === 'unseen' ? 3 : 2);
+      if (mode === 'unseen' || mode === 'failed-write') {
+        expect(after.prompts[0]).toContain('revise');
+      }
+    }
+  } finally {
+    await Promise.all([
+      first.close(),
+      second.close(),
+    ]);
+  }
+});
+
 /** Run the step until its agent is mid-turn, as a host that then dies leaves it. */
 async function cutOff(storage: StorageAdapter, first: Seen, fingerprint?: string): Promise<string> {
   const harness = harnessOn(storage);
@@ -245,7 +391,7 @@ async function cutOff(storage: StorageAdapter, first: Seen, fingerprint?: string
           fingerprint,
         }),
       ),
-      undefined,
+      '',
       ctx,
     )
     .catch(() => undefined);
@@ -267,11 +413,13 @@ async function resume({
   executionId,
   agent,
   events,
+  keyed,
 }: {
   storage: StorageAdapter;
   executionId: string;
   agent: AcpAgent;
   events: RecordedEvent[];
+  keyed?: boolean;
 }): Promise<unknown> {
   const harness = harnessOn(storage);
   const ctx = await harness.restore(executionId);
@@ -292,7 +440,13 @@ async function resume({
     },
   };
   try {
-    return await harness.run(coder(agent), undefined, ctx);
+    const step = coder(agent);
+    if (keyed) {
+      step.execution = {
+        replayKey: () => 'batch',
+      };
+    }
+    return await harness.run(step, '', ctx);
   } finally {
     settle(undefined);
   }
@@ -301,7 +455,10 @@ async function resume({
 //#endregion
 
 describe('an ACP step resumed while its agent still runs', () => {
-  it('reattaches and collects the turn in flight instead of prompting again', async () => {
+  it.each([
+    false,
+    true,
+  ])('checks that a positional intent belongs to the dispatch (keyed: %s)', async (keyed) => {
     const storage = createInMemoryStorage();
     const first = seen();
     const executionId = await cutOff(storage, first);
@@ -309,16 +466,27 @@ describe('an ACP step resumed while its agent still runs', () => {
 
     const after = seen();
     const events: RecordedEvent[] = [];
-    const output = await resume({
+    const pending = resume({
       storage,
       executionId,
       agent: keptAgent({
         seen: after,
         collected: 'finished while away',
       }),
-      events: events,
+      events,
+      keyed,
     });
 
+    if (keyed) {
+      await expect(pending).rejects.toMatchObject({
+        noeticError: {
+          kind: 'acp_outcome_unknown',
+        },
+      });
+      expect(after.connects).toEqual([]);
+      return;
+    }
+    const output = await pending;
     expect(output).toBe('finished while away');
     expect(after.connects[0]?.reattach).toEqual(HANDLE);
     expect(after.newSessions).toBe(0);
@@ -350,7 +518,7 @@ describe('an ACP step resumed while its agent still runs', () => {
     expect(after.prompts[0]).toContain(ACP_RESUME_NOTICE);
   });
 
-  it('starts over when the agent is gone', async () => {
+  it('surfaces an unknown outcome without prompting when the agent is gone', async () => {
     const storage = createInMemoryStorage();
     const executionId = await cutOff(storage, seen());
 
@@ -359,20 +527,324 @@ describe('an ACP step resumed while its agent still runs', () => {
       seen: after,
       gone: true,
     });
-    // The fallback connection's prompt would hang like the first one; stop at it.
-    void resume({
+    const error = await resume({
       storage,
       executionId,
       agent: gone,
       events: [],
-    }).catch(() => undefined);
-    await until(() => after.prompts.length === 1);
-
-    expect(after.connects).toHaveLength(2);
+    }).catch((e: unknown) => e);
+    assert(isNoeticError(error));
+    expect(error.noeticError.kind).toBe('acp_outcome_unknown');
+    expect(after.connects).toHaveLength(1);
     expect(after.connects[0]?.reattach).toEqual(HANDLE);
-    expect(after.connects[1]?.reattach).toBeUndefined();
-    expect(after.newSessions).toBe(1);
+    expect(after.newSessions).toBe(0);
+    expect(after.prompts).toEqual([]);
   });
+});
+
+describe('a durable turn cuts and wakes on the same ACP prompt', () => {
+  it.each([
+    'acp_link_lost',
+    'ledger_write_failed',
+  ] as const)('recovers from %s', async (reason) => {
+    const backing = createInMemoryStorage({
+      swap: true,
+    });
+    let failWrite = reason === 'ledger_write_failed';
+    const storage: StorageAdapter = {
+      ...backing,
+      async swap(key, prior, next) {
+        if (failWrite && key.includes(':ledger:')) {
+          failWrite = false;
+          throw new Error('storage dropped the completion checkpoint');
+        }
+        return await backing.swap!(key, prior, next);
+      },
+    };
+    const before = seen();
+    const after = seen();
+    const build = (holder: string, agent: AcpAgent) =>
+      new AgentHarness({
+        name: 'acp-recovery',
+        params: {},
+        agentGraph: coder(agent),
+        environment: {
+          storage: {
+            adapter: storage,
+            lease: {
+              holder,
+              cut: {
+                delayMs: 0,
+              },
+            },
+            park: {
+              autoWake: false,
+            },
+          },
+        },
+      });
+    const first = build(
+      'first',
+      keptAgent({
+        seen: before,
+        first: reason === 'acp_link_lost' ? 'link-lost' : 'answered',
+      }),
+    );
+    const second = build(
+      'second',
+      keptAgent({
+        seen: after,
+        collected: 'original answer',
+      }),
+    );
+    const scope = {
+      threadId: 'thread',
+    };
+    try {
+      await first.execute('begin', {
+        ...scope,
+        messageId: 'start',
+      });
+      expect((await first.getAgentResponse(scope)).cut?.reason).toBe(reason);
+      expect(before.released).toEqual([
+        'detached',
+      ]);
+      expect(before.prompts).toHaveLength(1);
+      expect(await second.wake()).toEqual([
+        'thread',
+      ]);
+      expect((await second.getAgentResponse(scope)).text).toBe('original answer');
+      expect(after.connects[0]?.reattach).toEqual(HANDLE);
+      expect(after.newSessions).toBe(0);
+      expect(after.prompts).toEqual([]);
+    } finally {
+      await Promise.all([
+        first.close(),
+        second.close(),
+      ]);
+    }
+  });
+});
+
+it('does not send a second prompt through a cached shared session after a cut', async () => {
+  const backing = createInMemoryStorage({
+    swap: true,
+  });
+  let failWrite = true;
+  const storage: StorageAdapter = {
+    ...backing,
+    async swap(key, prior, next) {
+      if (failWrite && key.includes(':ledger:')) {
+        failWrite = false;
+        throw new Error('storage dropped the completion checkpoint');
+      }
+      return backing.swap!(key, prior, next);
+    },
+  };
+  const log = seen();
+  const agent = keptAgent({
+    seen: log,
+    first: 'answered',
+  });
+  const harness = new AgentHarness({
+    name: 'shared-recovery',
+    params: {},
+    agentGraph: {
+      ...coder(agent),
+      session: {
+        keepAlive: 'harness',
+        reuse: 'shared',
+      },
+    },
+    environment: {
+      storage: {
+        adapter: storage,
+        lease: {
+          cut: {
+            delayMs: 0,
+          },
+        },
+        park: {
+          autoWake: false,
+        },
+      },
+    },
+  });
+  const scope = {
+    threadId: 'thread',
+  };
+  try {
+    await harness.execute('begin', {
+      ...scope,
+      messageId: 'start',
+    });
+    expect((await harness.getAgentResponse(scope)).cut?.reason).toBe('ledger_write_failed');
+    expect(await harness.wake(scope)).toEqual([
+      'thread',
+    ]);
+    await expect(harness.getAgentResponse(scope)).rejects.toMatchObject({
+      noeticError: {
+        kind: 'acp_outcome_unknown',
+      },
+    });
+    expect(log.prompts).toHaveLength(1);
+  } finally {
+    await harness.close();
+  }
+});
+
+it.each([
+  undefined,
+  false,
+])('does not retry a dispatched prompt without recovery storage (%s)', async (durable) => {
+  const harness = new AgentHarness({
+    name: 'no-storage',
+    params: {},
+  });
+  const log = seen();
+  const agent = keptAgent({
+    seen: log,
+    first: 'link-lost',
+  });
+  await expect(
+    harness.run(
+      {
+        ...coder(agent),
+        execution: {
+          durable,
+          retry: {
+            maxAttempts: 2,
+            initialDelay: 0,
+            backoff: 'fixed',
+          },
+        },
+      },
+      '',
+      harness.createContext(),
+    ),
+  ).rejects.toMatchObject({
+    noeticError: {
+      kind: 'acp_outcome_unknown',
+    },
+  });
+  expect(log.prompts).toHaveLength(1);
+  await harness.close();
+});
+
+it('does not retry an ACP internal error after dispatch', async () => {
+  const harness = new AgentHarness({
+    name: 'rpc-failure',
+    params: {},
+  });
+  const log = seen();
+  await expect(
+    harness.run(
+      {
+        ...coder(
+          keptAgent({
+            seen: log,
+            first: 'rpc-error',
+          }),
+        ),
+        execution: {
+          retry: {
+            maxAttempts: 2,
+            initialDelay: 0,
+            backoff: 'fixed',
+          },
+        },
+      },
+      '',
+      harness.createContext(),
+    ),
+  ).rejects.toMatchObject({
+    noeticError: {
+      kind: 'acp_outcome_unknown',
+    },
+  });
+  expect(log.prompts).toHaveLength(1);
+  await harness.close();
+});
+
+it.each([
+  'all',
+  'race',
+  'settle',
+] as const)('detaches a parallel sibling on a recoverable cut in %s mode', async (mode) => {
+  const storage = createInMemoryStorage({
+    swap: true,
+  });
+  const log = seen();
+  const sibling = coder(
+    keptAgent({
+      seen: log,
+    }),
+  );
+  const paths = () => [
+    sibling,
+    runCode<ContextData, string, string>({
+      id: 'cut',
+      async execute() {
+        await until(() => log.prompts.length === 1);
+        throw new NoeticErrorImpl({
+          kind: 'ledger_write_failed',
+          executionId: 'fixture',
+          path: 'fixture',
+          cause: new Error('cut'),
+        });
+      },
+    }),
+  ];
+  const graph =
+    mode === 'race'
+      ? inParallel({
+          id: 'parallel',
+          mode,
+          paths,
+        })
+      : mode === 'all'
+        ? inParallel({
+            id: 'parallel',
+            mode,
+            paths,
+            merge: (values) => values.join(''),
+          })
+        : inParallel({
+            id: 'parallel',
+            mode,
+            paths,
+            merge: () => '',
+          });
+  const harness = new AgentHarness({
+    name: 'parallel-cut',
+    params: {},
+    agentGraph: graph,
+    environment: {
+      storage: {
+        adapter: storage,
+        park: {
+          autoWake: false,
+        },
+      },
+    },
+  });
+  try {
+    await harness.execute('start', {
+      threadId: 'parallel',
+    });
+    expect(
+      (
+        await harness.getAgentResponse({
+          threadId: 'parallel',
+        })
+      ).cut?.reason,
+    ).toBe('ledger_write_failed');
+    expect(log.released).toEqual([
+      'detached',
+    ]);
+  } finally {
+    await harness.close();
+  }
 });
 
 describe('killAgentsOnExit', () => {
@@ -401,7 +873,7 @@ describe('killAgentsOnExit', () => {
       seen: connects,
     });
     const ctx = harness.createContext();
-    const done = harness.run(coder(agent), undefined, ctx).catch(() => undefined);
+    const done = harness.run(coder(agent), '', ctx).catch(() => undefined);
     running.push({
       ctx,
       done,
@@ -428,7 +900,7 @@ describe('an ACP step that cannot safely reattach', () => {
     }).catch((e: unknown) => e);
 
     assert(isNoeticError(error));
-    expect(error.noeticError.kind).toBe('step_failed');
+    expect(error.noeticError.kind).toBe('acp_link_lost');
     expect(after.newSessions).toBe(0);
     expect(after.prompts).toEqual([]);
   });

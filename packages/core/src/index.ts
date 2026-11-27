@@ -747,6 +747,7 @@ export type {
   StepEmitItemsFn,
   StepEmitItemsOption,
   StepEmitItemsResult,
+  StepExecution,
   StepGiving,
   StepInParallel,
   StepInParallelAll,
@@ -959,7 +960,7 @@ export type {
   SubprocessStopResult,
 } from '@noetic-tools/types';
 /** @public */
-export { TIMEOUT_ERROR_PREFIX } from '@noetic-tools/types';
+export { SubprocessLaunchError, TIMEOUT_ERROR_PREFIX } from '@noetic-tools/types';
 /** @public Reusable error-serialiser used by custom SubprocessAdapter implementations. */
 export { serializeError } from './adapters/in-memory-subprocess/metadata';
 /** @public Running-handle table that custom SubprocessAdapter implementations settle through. */

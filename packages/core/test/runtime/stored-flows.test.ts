@@ -514,6 +514,222 @@ describe('a turn that began on a flow with a source', () => {
   });
 });
 
+it.each([
+  undefined,
+  'release',
+])('resumes the original batch and replays its completed item (version: %s)', async (version) => {
+  const storage = createInMemoryStorage({
+    swap: true,
+  });
+  const ran: string[] = [];
+  const executions = new Set<string>();
+  const stopped = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const run = (label: string, holder: string, now: number) =>
+    new AgentHarness({
+      name: 'batch',
+      version,
+      params: {},
+      agentGraph: flowFrom(
+        {
+          label,
+        },
+        ({ label }) =>
+          runCode<ContextData, string, string>({
+            id: 'batch',
+            execute: async (_input, ctx) => {
+              executions.add(ctx.id);
+              const results: string[] = [];
+              for (const id of [
+                'a',
+                'b',
+              ]) {
+                results.push(
+                  await ctx.harness.run(
+                    runCode({
+                      id,
+                      execute: async () => {
+                        if (holder === 'first' && id === 'b') {
+                          stopped.resolve();
+                          await release.promise;
+                        }
+                        ran.push(`${holder}:${label}:${id}`);
+                        return `${label}:${id}`;
+                      },
+                    }),
+                    undefined,
+                    ctx,
+                  ),
+                );
+              }
+              return results.join(',');
+            },
+          }),
+      ),
+      environment: {
+        storage: {
+          adapter: storage,
+          lease: {
+            holder,
+            ttlMs: 10_000,
+            waitMs: 0,
+            now: () => now,
+          },
+          park: {
+            autoWake: false,
+          },
+        },
+      },
+    });
+
+  const first = run('old', 'first', 0);
+  const second = run('new', 'second', 10_000);
+  try {
+    await first.execute('batch input', delivery);
+    await stopped.promise;
+    const firstTurn = (await first.getStoredThread(thread.threadId))?.turn;
+    assert(firstTurn);
+    expect(await second.wake()).toEqual([
+      thread.threadId,
+    ]);
+    expect((await second.getAgentResponse(thread)).text).toBe('old:a,old:b');
+    expect(ran).toEqual([
+      'first:old:a',
+      'second:old:b',
+    ]);
+    expect([
+      ...executions,
+    ]).toEqual([
+      firstTurn.executionId,
+    ]);
+
+    release.resolve();
+    await expect(first.getAgentResponse(thread)).rejects.toMatchObject({
+      noeticError: {
+        kind: 'lease_lost',
+      },
+    });
+    expect((await second.getStoredThread(thread.threadId))?.turn).toBeUndefined();
+    expect(await second.wake()).toEqual([]);
+  } finally {
+    release.resolve();
+    await Promise.all([
+      first.close(),
+      second.close(),
+    ]);
+  }
+});
+
+it.each([
+  'baseline',
+  'end',
+  'end-reply',
+] as const)('keeps the correct recovery state when storage loses %s', async (lost) => {
+  const backing = createInMemoryStorage({
+    swap: true,
+  });
+  let interrupted = false;
+  const storage: StorageAdapter = {
+    ...backing,
+    async set(key, value) {
+      if (!interrupted && lost === 'baseline' && key.endsWith(':snapshot')) {
+        interrupted = true;
+        throw new Error('baseline write failed');
+      }
+      await backing.set(key, value);
+    },
+    async swap(key, prior, next) {
+      if (
+        !interrupted &&
+        lost !== 'baseline' &&
+        key === 'session:t' &&
+        prior &&
+        typeof prior === 'object' &&
+        'turn' in prior &&
+        next &&
+        typeof next === 'object' &&
+        !('turn' in next)
+      ) {
+        interrupted = true;
+        if (lost === 'end-reply') {
+          expect(await backing.swap!(key, prior, next)).toBe(true);
+        }
+        throw new Error('turn end reply lost');
+      }
+      return await backing.swap!(key, prior, next);
+    },
+  };
+  const ran: string[] = [];
+  const build = (label: string) =>
+    new AgentHarness({
+      name: 'checkpoint-boundary',
+      params: {},
+      agentGraph: flowFrom(
+        {
+          label,
+        },
+        ({ label }) =>
+          runCode<ContextData, string, string>({
+            id: 'item',
+            execute: async (_input, ctx) => {
+              ran.push(
+                `${label}:${ctx.itemLog.items.filter((item) => item.type === 'message' && item.role === 'user').length}`,
+              );
+              return label;
+            },
+          }),
+      ),
+      environment: {
+        storage: {
+          adapter: storage,
+          lease: {
+            waitMs: 0,
+            cut: {
+              delayMs: 0,
+            },
+          },
+          park: {
+            autoWake: false,
+          },
+        },
+      },
+    });
+  const first = build('original');
+  const replacement = build('updated');
+  try {
+    await first.execute('start', delivery);
+    const response = await first.getAgentResponse(thread);
+    expect(interrupted).toBe(true);
+    if (lost === 'end-reply') {
+      expect(response.text).toBe('original');
+      expect(await replacement.wake()).toEqual([]);
+    } else {
+      expect(response.cut?.reason).toBe('ledger_write_failed');
+      expect(ran).toEqual(
+        lost === 'baseline'
+          ? []
+          : [
+              'original:1',
+            ],
+      );
+      expect(await replacement.wake()).toEqual([
+        thread.threadId,
+      ]);
+      expect((await replacement.getAgentResponse(thread)).text).toBe('original');
+    }
+    await replacement.execute('start', delivery);
+    expect((await replacement.getAgentResponse(thread)).text).toBe('original');
+    expect(ran).toEqual([
+      'original:1',
+    ]);
+  } finally {
+    await Promise.all([
+      first.close(),
+      replacement.close(),
+    ]);
+  }
+});
+
 describe('a parked turn', () => {
   const DAY = 864e5;
 

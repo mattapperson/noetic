@@ -29,6 +29,35 @@ function makeCapturingSpan(): {
 }
 
 describe('executeSchedule', () => {
+  it('stops on an unknown write instead of scheduling a new iteration', async () => {
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+    let calls = 0;
+    const failure = new NoeticErrorImpl({
+      kind: 'connection_outcome_unknown',
+      connection: 'db',
+      op: 'insert',
+      key: 'insert-1',
+    });
+    const repeated = schedule({
+      id: 'repeat',
+      interval: 1,
+      step: {
+        kind: 'runCode',
+        id: 'insert',
+        execute: async () => {
+          if (++calls > 1) {
+            ctx.abort('duplicate');
+          }
+          throw failure;
+        },
+      },
+    });
+    await expect(executeSchedule(repeated, undefined, ctx, simpleExecute)).rejects.toBe(failure);
+    expect(calls).toBe(1);
+  });
+
   it('paces 3 iterations at ms=50 in >= 100ms total', async () => {
     let count = 0;
     const everyStep = schedule<ContextData, number, number>({

@@ -5,10 +5,12 @@
  * the same idempotency key instead of acting twice (spec 23a § Connection Steps).
  */
 
-import type { ConnectionTaskStatus, Context, StepCall } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import type { ConnectionOperationInfo, Context, StepCall } from '@noetic-tools/types';
+import { frameworkCast, isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
+import { sameInstance } from '../connections/durability';
 import type { ConnectionCaller, GatedCallOptions } from '../connections/registry-types';
 import { ContextImpl } from '../runtime/context-impl';
+import { hashStepInput } from '../runtime/durable/step-ledger';
 import type { PendingEntry, StepConnection } from './connection-steps';
 import {
   evaluateTarget,
@@ -17,6 +19,7 @@ import {
   resolveStepConnection,
   signalOf,
 } from './connection-steps';
+import { turnEndingIn } from './turn-ending';
 
 //#region Types
 
@@ -24,6 +27,7 @@ import {
 export interface ExecuteCallOptions {
   /** The step's ledger key, from which its idempotency key and pending entry derive. */
   ledgerKey?: string;
+  onRecorded(cleanup: (stored: boolean) => Promise<void>): void;
 }
 
 /** Internal fields a hydrated JSON `call` node carries. */
@@ -94,7 +98,7 @@ export async function executeCall<TContext, I, O>(
   step: StepCall<TContext, I, O>,
   input: I,
   ctx: Context<TContext>,
-  options: ExecuteCallOptions = {},
+  options: ExecuteCallOptions,
 ): Promise<O> {
   const baseCtx = frameworkCast<Context>(ctx);
   const target = await evaluateTarget(step.connection, input, ctx, step.id);
@@ -116,15 +120,57 @@ export async function executeCall<TContext, I, O>(
     baseCtx.ledger?.noteEffect(baseCtx.currentDispatch()?.path);
   }
   const signal = signalOf(baseCtx);
-  const prior = await reconcilePending(connection, signal, baseCtx);
-  const key = prior?.key ?? connection.idempotencyKey;
-  const entry = baseEntry({
-    connection,
-    stepId: step.id,
-    key,
-    prior,
+  const argsHash = hashStepInput(args);
+  const effect = info?.once === true || info?.effects === true;
+  const pending = connection.pending;
+  const unknown = (key: string, retry?: 'same-key' | 'task') =>
+    new NoeticErrorImpl({
+      kind: 'connection_outcome_unknown',
+      connection: connection.resolved.name,
+      op: step.op,
+      key,
+      retry,
+    });
+  const prior = await reconcilePending(connection, signal, {
+    ctx: baseCtx,
+    check: (saved) => {
+      if (pending?.unreadable) {
+        throw unknown(connection.idempotencyKey);
+      }
+      if (
+        saved &&
+        (effect || saved.effect) &&
+        !canResume({
+          saved,
+          connection,
+          op: step.op,
+          argsHash,
+          info,
+        })
+      ) {
+        throw unknown(saved.key);
+      }
+    },
   });
-  await connection.pending?.write(entry);
+  const key = prior?.key ?? connection.idempotencyKey;
+  const entry = {
+    ...baseEntry({
+      connection,
+      stepId: step.id,
+      key,
+      prior,
+    }),
+    op: step.op,
+    argsHash,
+    effect,
+  };
+  let sent = false;
+  let knownTask = prior?.taskId;
+  options.onRecorded(async (stored) => {
+    if (stored) {
+      await pending?.clear().catch(() => undefined);
+    }
+  });
   const document = frameworkCast<DocumentCallFields>(step);
   const callOptions: GatedCallOptions = {
     signal,
@@ -140,12 +186,21 @@ export async function executeCall<TContext, I, O>(
         }
       : {}),
     ctx: baseCtx,
-    // The registry emits `connection_task` to this run's stream (the call carries ctx).
-    onTask: (status: ConnectionTaskStatus) => {
-      if (entry.taskId !== status.taskId) {
-        entry.taskId = status.taskId;
-        void connection.pending?.write(entry).then(markWaiting);
-      }
+    beforeSend: async () => {
+      await pending?.write(entry);
+      sent = true;
+    },
+    onRefused: async () => {
+      await pending?.clear();
+      sent = false;
+    },
+    onTaskStarted: async (taskId) => {
+      await pending?.write({
+        ...entry,
+        taskId,
+      });
+      knownTask = taskId;
+      markWaiting();
     },
   };
   // Once the long operation has an id on record the step only waits for it, and a
@@ -170,11 +225,91 @@ export async function executeCall<TContext, I, O>(
       prior?.taskId && connection.resolved.awaitTask
         ? await connection.resolved.awaitTask(prior.taskId, step.op, callOptions)
         : await connection.resolved.call(step.op, args, callOptions);
+  } catch (error) {
+    const retryWrite = pending !== undefined && info?.once === true && argsHash !== undefined;
+    throw callFailure({
+      error,
+      key,
+      unknown,
+      knowsTask: knownTask !== undefined,
+      hasPending: pending !== undefined,
+      writeSent: sent && effect,
+      retryWrite,
+      aborted: signal.aborted,
+    });
   } finally {
     stopWaiting?.();
   }
-  await connection.pending?.clear();
   return frameworkCast<O>(output);
+}
+
+function canResume({
+  saved,
+  connection,
+  op,
+  argsHash,
+  info,
+}: {
+  saved: PendingEntry;
+  connection: StepConnection;
+  op: string;
+  argsHash: string | undefined;
+  info: ConnectionOperationInfo | undefined;
+}): boolean {
+  const { resolved } = connection;
+  if (saved.connection !== resolved.name) {
+    return false;
+  }
+  const identity = resolved.identity();
+  const sameTask =
+    saved.taskId !== undefined &&
+    (saved.op === undefined || saved.op === op) &&
+    (saved.argsHash === undefined || saved.argsHash === argsHash) &&
+    saved.identity.surface === identity.surface &&
+    resolved.awaitTask !== undefined;
+  return (
+    sameTask ||
+    (info?.once === true &&
+      saved.op === op &&
+      saved.argsHash !== undefined &&
+      saved.argsHash === argsHash &&
+      sameInstance(saved.identity, identity))
+  );
+}
+
+function callFailure({
+  error,
+  key,
+  unknown,
+  knowsTask,
+  hasPending,
+  writeSent,
+  retryWrite,
+  aborted,
+}: {
+  error: unknown;
+  key: string;
+  unknown(key: string, retry?: 'same-key' | 'task'): NoeticErrorImpl;
+  knowsTask: boolean;
+  hasPending: boolean;
+  writeSent: boolean;
+  retryWrite: boolean;
+  aborted: boolean;
+}): unknown {
+  const failure = isNoeticError(error) ? error.noeticError : undefined;
+  const code = failure?.kind === 'connection_failed' ? failure.error.code : undefined;
+  if (knowsTask && code === 'not_found') {
+    return unknown(key);
+  }
+  if (aborted || turnEndingIn(error)) {
+    return error;
+  }
+  if (knowsTask) {
+    return !failure || code === 'unavailable'
+      ? unknown(key, hasPending ? 'task' : undefined)
+      : error;
+  }
+  return writeSent ? unknown(key, retryWrite ? 'same-key' : undefined) : error;
 }
 
 //#endregion

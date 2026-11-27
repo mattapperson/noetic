@@ -34,6 +34,8 @@ import type {
 } from '../connections/registry-types';
 import { emitFrameworkEvent, getBroadcaster } from '../runtime/broadcaster-utils';
 import { ContextImpl } from '../runtime/context-impl';
+import { StepIntent } from '../runtime/durable/step-intent';
+import type { StepLedger } from '../runtime/durable/step-ledger';
 import { harnessInternal } from '../util/harness-internals';
 import { someStep } from './step-walk';
 
@@ -81,12 +83,26 @@ const PendingEntrySchema = z.object({
     instance: z.string(),
     epoch: z.number().optional(),
   }),
+  op: z.string().optional(),
+  argsHash: z.string().optional(),
+  effect: z.boolean().optional(),
   taskId: z.string().optional(),
   leaseId: z.string().optional(),
   cursor: z.string().nullish(),
   deadline: z.number().optional(),
   /** On a `wait`: the event it listens for, so a parked turn can be watched over. */
   event: z.string().optional(),
+  matched: z
+    .object({
+      id: z.string(),
+      type: z.string(),
+      time: z.string(),
+      payload: z.unknown(),
+      cursor: z.string().nullable(),
+      connection: z.string(),
+      actionId: z.string().optional(),
+    })
+    .optional(),
   /**
    * Set on a `wait` whose event replays from a cursor (`replay: 'durable'`). Such
    * a wait does not depend on the connection instance it began on: any instance of
@@ -512,49 +528,31 @@ export function refuseWitnessAct(ctx: Context, resolved: ResolvedConnection, op:
  * in the harness `StorageAdapter` next to the run's ledger.
  */
 export class PendingEntries {
-  constructor(
-    private readonly storage: StorageAdapter,
-    private readonly key: string,
-    /** False once the run writes under a lease it no longer holds. */
-    private readonly mayWrite: () => boolean = () => true,
-  ) {}
+  private readonly intent: StepIntent;
+  unreadable = false;
+
+  constructor(storage: StorageAdapter, key: string, ledger?: StepLedger) {
+    this.intent = new StepIntent(storage, key, ledger);
+  }
 
   /** The entry a previous attempt left, or undefined when there is none (or it does not parse). */
   async load(): Promise<PendingEntry | undefined> {
-    const raw = await this.storage.get<unknown>(this.key);
+    const raw = await this.intent.read();
+    this.unreadable = false;
     if (raw === null) {
       return undefined;
     }
     const parsed = PendingEntrySchema.safeParse(raw);
+    this.unreadable = !parsed.success;
     return parsed.success ? parsed.data : undefined;
   }
 
-  async write(entry: PendingEntry): Promise<void> {
-    if (!this.mayWrite()) {
-      return;
-    }
-    try {
-      await this.storage.set(this.key, entry);
-    } catch (error) {
-      console.warn(
-        `connection step: failed to write pending entry "${this.key}":`,
-        error instanceof Error ? error.message : String(error),
-      );
-    }
+  write(entry: PendingEntry): Promise<void> {
+    return this.intent.write(entry, entry.matched !== undefined);
   }
 
-  async clear(): Promise<void> {
-    if (!this.mayWrite()) {
-      return;
-    }
-    try {
-      await this.storage.delete(this.key);
-    } catch (error) {
-      console.warn(
-        `connection step: failed to clear pending entry "${this.key}":`,
-        error instanceof Error ? error.message : String(error),
-      );
-    }
+  clear(): Promise<void> {
+    return this.intent.clear();
   }
 }
 
@@ -651,11 +649,7 @@ function pendingEntriesFor(
     return undefined;
   }
   const ledger = ctx.ledger;
-  return new PendingEntries(
-    storage,
-    pendingEntryKey(runRootOf(ctx).id, ledgerKey),
-    () => ledger?.isHeld ?? true,
-  );
+  return new PendingEntries(storage, pendingEntryKey(runRootOf(ctx).id, ledgerKey), ledger);
 }
 
 /**
@@ -672,9 +666,14 @@ function pendingEntriesFor(
 export async function reconcilePending(
   connection: StepConnection,
   signal: AbortSignal,
-  ctx?: Context,
+  options?: {
+    ctx: Context;
+    check?: (entry: PendingEntry | undefined) => void;
+  },
 ): Promise<PendingEntry | undefined> {
   const entry = await connection.pending?.load();
+  options?.check?.(entry);
+  const ctx = options?.ctx;
   if (!entry) {
     return undefined;
   }
@@ -732,7 +731,7 @@ function noteConnectionUse(
     return;
   }
   const identity = resolved.identity();
-  ctx.ledger.noteConnection(ledgerKey, {
+  ctx.ledger.noteConnection(ctx.currentPath() ?? ledgerKey, {
     name: resolved.name,
     surface: identity.surface,
     instance: identity.instance,
@@ -755,9 +754,8 @@ export interface ResumeChecker {
  * replaced connection that may run live (after a reset when that is the
  * decision), the ledger is discarded from the first entry that used it —
  * everything after runs live too, model rounds included — and its pending
- * entries are dropped (their idempotency keys derive from the run and step,
- * so `once` calls still carry their original keys). Resolves the number of
- * ledger entries discarded.
+ * read and wait entries are dropped. Pending writes keep their intents.
+ * Resolves the number of ledger entries discarded.
  *
  * @throws `NoeticErrorImpl` `connection_resume_refused` when a replaced connection cannot be driven again.
  */
@@ -810,17 +808,23 @@ async function dropReplacedPending(
   }
   const keys = await storage.list(`execution:${executionId}:pending:`);
   for (const key of keys) {
-    const parsed = PendingEntrySchema.safeParse(await storage.get<unknown>(key));
+    const intent = new StepIntent(storage, key);
+    const parsed = PendingEntrySchema.safeParse(await intent.read());
     if (!parsed.success) {
       continue;
     }
-    // A wait that replays from a cursor is settled when its step runs again.
-    if (resumesFromCursor(parsed.data)) {
+    // A replacement instance cannot prove a pending write was never applied.
+    // Leave its intent for the step to check against the provider's guarantees.
+    if (
+      resumesFromCursor(parsed.data) ||
+      (parsed.data.kind === 'wait' && parsed.data.durable === false) ||
+      (parsed.data.kind === 'call' && parsed.data.effect !== false)
+    ) {
       continue;
     }
     const decision = await decide(parsed.data.connection, parsed.data.identity);
     if (decision !== 'keep') {
-      await storage.delete(key);
+      await intent.clear();
     }
   }
 }

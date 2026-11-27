@@ -16,6 +16,7 @@ import type {
   SessionUsage,
 } from '@noetic-tools/types';
 import { NoeticErrorImpl } from '@noetic-tools/types';
+import { ContextImpl } from '../runtime/context-impl';
 import type { SessionRecord } from '../runtime/durable/session-store';
 import type { LedgerFence } from '../runtime/durable/turn-lease';
 import type { TurnUsage } from '../runtime/session-runner';
@@ -117,21 +118,43 @@ export class ThreadRecord {
   }
 
   /**
-   * The context of the cut-off turn, when `messageIds` re-deliver exactly its
-   * messages. A cut-off turn that is not re-delivered is abandoned: its record is
+   * The context of the cut-off turn when any of its messages are re-delivered
+   * together, with no other messages. An unrelated turn abandons its record:
    * dropped, its checkpoint cleared, and the new messages start a fresh turn.
    */
   resume(
     messageIds: ReadonlyArray<string>,
     opts: RestoreCheckpointOptions,
+    deliveredItems: ReadonlyArray<Item> = [],
   ): Promise<Context | undefined> {
     return this.run(async () => {
-      const turn = (await this.load())?.turn;
-      if (!turn) {
+      const record = await this.load();
+      const turn = record?.turn;
+      if (!record || !turn) {
         return undefined;
       }
       if (isSameDelivery(turn.messageIds, messageIds)) {
-        return (await this.host.restore(turn.executionId, opts)) ?? undefined;
+        const input =
+          turn.inputItems !== undefined
+            ? this.host.parseItems(turn.inputItems)
+            : messageIds.length === turn.messageIds.length && deliveredItems.length > 0
+              ? deliveredItems
+              : undefined;
+        return (
+          (await this.host.restore(turn.executionId, {
+            ...opts,
+            _baseline: input
+              ? {
+                  threadId: this.threadId,
+                  resourceId: turn.resourceId,
+                  items: [
+                    ...this.host.parseItems(record.items),
+                    ...input,
+                  ],
+                }
+              : null,
+          })) ?? undefined
+        );
       }
       await this.write(withoutTurn);
       await this.host.clearCheckpoint(turn.executionId);
@@ -226,7 +249,13 @@ export class ThreadRecord {
     ctx: Context,
     messageIds: ReadonlyArray<string>,
     flow: TurnFlowRecord,
-    removed: ReadonlyArray<string> = [],
+    {
+      removed = [],
+      inputItems,
+    }: {
+      removed?: ReadonlyArray<string>;
+      inputItems?: ReadonlyArray<Item>;
+    } = {},
   ): Promise<void> {
     const start = (record: SessionRecord): SessionRecord => ({
       ...record,
@@ -240,6 +269,17 @@ export class ThreadRecord {
         messageIds: [
           ...messageIds,
         ],
+        ...(record.turn?.executionId === ctx.id
+          ? {
+              inputItems: record.turn.inputItems,
+              resourceId: record.turn.resourceId,
+            }
+          : {
+              inputItems: inputItems && [
+                ...inputItems,
+              ],
+              resourceId: ctx.resourceId,
+            }),
         ...(flow.version === undefined
           ? {}
           : {
@@ -360,9 +400,8 @@ export class ThreadRecord {
 
   /**
    * The turn on `ctx` was cut (spec 23 § Cut turns): keep its record, marked with how
-   * often and when. Best-effort and unfenced: storage that just refused a write may
-   * refuse this one, and the harness keeps the mark in memory as well. Written only
-   * while the record still names the turn's execution.
+   * often and when. Best-effort under the lease. The harness keeps a mark in
+   * memory too, in case storage refuses this write.
    */
   cut(
     ctx: Context,
@@ -372,7 +411,7 @@ export class ThreadRecord {
       at: number;
     },
   ): Promise<void> {
-    return this.update((record) =>
+    return this.markHeld(ctx, (record) =>
       record.turn?.executionId === ctx.id
         ? {
             ...record,
@@ -390,7 +429,7 @@ export class ThreadRecord {
    * does not land is simply taken for one that was cut off.
    */
   stop(ctx: Context, reason: string, at: number): Promise<void> {
-    return this.update((record) =>
+    return this.markHeld(ctx, (record) =>
       record.turn?.executionId === ctx.id
         ? {
             ...record,
@@ -404,31 +443,6 @@ export class ThreadRecord {
           }
         : record,
     );
-  }
-
-  /**
-   * The turn on `ctx` gave its answer: remember it under the turn's message ids, so
-   * the same messages delivered again get it back (`answerFor`). Call before `end`,
-   * which forgets the turn. Only the last few turns are kept.
-   */
-  answered(ctx: Context, text: string): Promise<void> {
-    return this.update((record) => {
-      if (record.turn?.executionId !== ctx.id) {
-        return record;
-      }
-      const kept = (record.done ?? []).slice(1 - MAX_DONE_TURNS);
-      return {
-        ...record,
-        done: [
-          ...(MAX_DONE_TURNS > 1 ? kept : []),
-          {
-            messageIds: record.turn.messageIds,
-            text,
-            executionId: ctx.id,
-          },
-        ],
-      };
-    });
   }
 
   /**
@@ -463,18 +477,64 @@ export class ThreadRecord {
    */
   async end(
     ctx: Context,
-    history: ReadonlyArray<Item>,
-    queuedIds: ReadonlyArray<string>,
+    {
+      history,
+      queuedIds,
+      answer,
+    }: {
+      history: ReadonlyArray<Item>;
+      queuedIds: ReadonlyArray<string>;
+      answer?: string;
+    },
   ): Promise<void> {
-    await this.updateHeld(ctx, (record) => ({
-      ...withoutTurn(record),
-      ...this.withLayers(record),
-      steers: record.steers?.filter((steer) => queuedIds.includes(steer.id)),
-      items: [
-        ...history,
-      ],
-    }));
-    await this.host.clearCheckpoint(ctx.id);
+    try {
+      await this.updateHeld(
+        ctx,
+        (record) => ({
+          ...withoutTurn(record),
+          ...this.withLayers(record),
+          steers: record.steers?.filter((steer) => queuedIds.includes(steer.id)),
+          items: [
+            ...history,
+          ],
+          // The receipt and the end of the turn must land together. Until then
+          // duplicate delivery must still be able to replay this turn's ledger.
+          ...(answer !== undefined && record.turn?.executionId === ctx.id
+            ? {
+                done: [
+                  ...(MAX_DONE_TURNS > 1 ? (record.done ?? []).slice(1 - MAX_DONE_TURNS) : []),
+                  {
+                    messageIds: record.turn.messageIds,
+                    text: answer,
+                    executionId: ctx.id,
+                  },
+                ],
+              }
+            : {}),
+        }),
+        true,
+      );
+    } catch (error) {
+      // Storage may have committed the compare-and-set before its reply was lost.
+      const stored = await this.stored().catch(() => undefined);
+      if (
+        !(error instanceof NoeticErrorImpl) ||
+        error.noeticError.kind !== 'ledger_write_failed' ||
+        answer === undefined ||
+        stored?.turn?.executionId === ctx.id ||
+        !stored?.done?.some((done) => done.executionId === ctx.id && done.text === answer)
+      ) {
+        throw error;
+      }
+    }
+    if (ctx instanceof ContextImpl) {
+      await ctx.ledger?.dropPaths();
+    }
+    // History and the receipt are already committed. A failed cleanup cannot
+    // turn that answer into a cut. The execution is still listed for forget().
+    await this.host.clearCheckpoint(ctx.id).catch((error: unknown) => {
+      console.warn(`[noetic] could not clear the finished turn '${ctx.id}':`, error);
+    });
   }
 
   /** Add one turn's spend to the stored totals, and return the totals now stored. */
@@ -521,8 +581,8 @@ export class ThreadRecord {
       return this.update(change);
     }
     return this.run(async () => {
-      fence?.assert();
       try {
+        await fence?.verify();
         await this.commit((record) => {
           if (!fence) {
             return change(record);
@@ -546,6 +606,13 @@ export class ThreadRecord {
           cause: error instanceof Error ? error : new Error(String(error)),
         });
       }
+    });
+  }
+
+  /** A cut or stop can be picked up again if its mark cannot be saved. */
+  private markHeld(ctx: Context, change: (record: SessionRecord) => SessionRecord): Promise<void> {
+    return this.updateHeld(ctx, change).catch((error: unknown) => {
+      console.warn(`[noetic] could not mark turn '${ctx.id}':`, error);
     });
   }
 

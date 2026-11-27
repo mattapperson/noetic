@@ -418,6 +418,50 @@ describe('TurnLease against a bad clock or slow storage', () => {
 });
 
 describe('a fenced step ledger', () => {
+  it('blocks dispatch if a replacement saved its intent while the stale CAS was in flight', async () => {
+    const saved = createInMemoryStorage(SWAP);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const key = 'execution:x:pending:step';
+    const storage: StorageAdapter = {
+      ...saved,
+      async swap(key, prior, next) {
+        if (next === 'stale intent') {
+          entered.resolve();
+          await release.promise;
+        }
+        return await saved.swap!(key, prior, next);
+      },
+    };
+    const first = await TurnLease.take(
+      leaseOptions(storage, 'a', {
+        t: 0,
+      }),
+      't',
+    );
+    const stale = fencedLedger(storage, first.term);
+    stale.fence(first);
+    const blocked = failure(() => stale.writeIntent(storage, key, null, 'stale intent'));
+    await entered.promise;
+
+    const second = await TurnLease.take(
+      leaseOptions(storage, 'b', {
+        t: TTL,
+      }),
+      't',
+    );
+    const current = fencedLedger(storage, second.term);
+    current.fence(second);
+    try {
+      await current.writeIntent(storage, key, null, 'current intent');
+    } finally {
+      release.resolve();
+      await second.release();
+    }
+    expect((await blocked).kind).toBe('lease_lost');
+    expect(await storage.get(key)).toBe('current intent');
+  });
+
   it('tags what it records with the lease term', async () => {
     const storage = createInMemoryStorage(SWAP);
     await fencedLedger(storage, 4).record(entry('/a#0', 'out'));

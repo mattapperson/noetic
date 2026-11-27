@@ -20,6 +20,9 @@
 /** The abort reason of a context whose turn parked. */
 export const PARK_REASON = 'parked';
 
+/** A sibling dropped its local work so the turn can resume. */
+export const TURN_CUT_ABORT = 'turn_cut';
+
 /** @public How long every in-flight step must stay waiting before a turn parks, by default. */
 export const DEFAULT_PARK_GRACE_MS = 100;
 

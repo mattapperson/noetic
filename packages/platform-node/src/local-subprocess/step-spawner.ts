@@ -12,6 +12,7 @@
 
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import type { LiveHandles, StepSubprocessRequest } from '@noetic-tools/core';
+import { SubprocessLaunchError } from '@noetic-tools/core';
 import { handleStepCompletion } from './step-completion';
 import type { ProcessSignaller } from './types';
 
@@ -91,7 +92,7 @@ export function spawnStepChild(args: SpawnStepChildArgs): SpawnStepChildResult {
   });
 
   if (child.pid === undefined || !args.signaller.isAlive(child.pid)) {
-    throw new Error(
+    throw new SubprocessLaunchError(
       asyncSpawnError instanceof Error
         ? asyncSpawnError.message
         : `Local step subprocess failed to start for step "${args.request.stepId}"`,

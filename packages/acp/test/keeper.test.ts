@@ -195,8 +195,9 @@ describe.skipIf(!POSIX)('a kept agent and a host that dies', () => {
       const result = await session.resumeTurn({});
       assert(result);
       expect(result.text).toBe('one two');
-      // Nothing is running now: a second resume finds no turn.
-      expect(await session.resumeTurn({})).toBeUndefined();
+      await expect(session.resumeTurn({})).rejects.toMatchObject({
+        gone: true,
+      });
     } finally {
       await connection.close();
     }

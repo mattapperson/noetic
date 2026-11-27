@@ -238,6 +238,41 @@ describe('scopes and keys', () => {
 });
 
 describe('durable call steps', () => {
+  it('does not clear an intent another executor updated after the read', async () => {
+    const backing = createInMemoryStorage({
+      swap: true,
+    });
+    const clearing = Promise.withResolvers<void>();
+    const resumeClear = Promise.withResolvers<void>();
+    const storage: Storage = {
+      ...backing,
+      async swap(key, prev, next) {
+        if (next && typeof next === 'object' && Reflect.get(next, 'cleared') === true) {
+          clearing.resolve();
+          await resumeClear.promise;
+        }
+        return backing.swap!(key, prev, next);
+      },
+    };
+    const old = new PendingEntries(storage, 'pending');
+    await old.write(entry('device'));
+    const clear = old.clear().catch((error: unknown) => error);
+    await clearing.promise;
+    const current = new PendingEntries(storage, 'pending');
+    try {
+      const saved = await current.load();
+      assert(saved);
+      await current.write({
+        ...saved,
+        taskId: 'replacement-task',
+      });
+    } finally {
+      resumeClear.resolve();
+    }
+    expect(await clear).toBeInstanceOf(Error);
+    expect((await current.load())?.taskId).toBe('replacement-task');
+  });
+
   it('write a pending entry before the server sees the call and clear it after', async () => {
     const storage = createInMemoryStorage();
     const seen: Array<unknown[]> = [];
@@ -289,6 +324,67 @@ describe('durable call steps', () => {
     });
     await harness.run(call, '', ctx);
     expect(registry.calls[0]?.opts.idempotencyKey).toBe('earlier-key');
+  });
+
+  it.each([
+    false,
+    true,
+  ])('handles a lost write response with once=%p', async (once) => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const writes = new Map<string, string>();
+    let requests = 0;
+    const registry = new FakeRegistry({
+      app: {
+        operations: {
+          'ui.write': {
+            name: 'ui.write',
+            inputSchema: {
+              type: 'object',
+            },
+            effects: true,
+            once,
+          },
+        },
+        ops: {
+          'ui.write': (_args, { idempotencyKey }) => {
+            requests += 1;
+            const receipt = writes.get(idempotencyKey);
+            if (receipt !== undefined) {
+              return receipt;
+            }
+            writes.set(idempotencyKey, 'receipt-1');
+            throw new Error('provider closed the response after writing');
+          },
+        },
+      },
+    });
+    const call = step.call({
+      id: 'write',
+      connection: 'app',
+      op: 'ui.write',
+    });
+    const first = durableHarness(storage, registry);
+    const ctx = first.createContext();
+    const unknown = {
+      noeticError: {
+        kind: 'connection_outcome_unknown',
+      },
+    };
+    await expect(first.run(call, '', ctx)).rejects.toMatchObject(unknown);
+
+    const second = durableHarness(storage, registry);
+    const restored = await second.restore(ctx.id);
+    assert(restored);
+    const resumed = second.run(call, '', restored);
+    if (once) {
+      expect(await resumed).toBe('receipt-1');
+    } else {
+      await expect(resumed).rejects.toMatchObject(unknown);
+    }
+    expect(requests).toBe(once ? 2 : 1);
+    expect(writes.size).toBe(1);
   });
 
   it('waits on the recorded task instead of sending the operation again', async () => {

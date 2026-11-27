@@ -84,6 +84,7 @@ export function spawn<TContext = ContextData, I = unknown, O = unknown>(
     timeout: opts.timeout,
     steers: opts.steers,
     subprocess: opts.subprocess,
+    execution: opts.execution,
     durable: opts.durable,
     replayKey: opts.replayKey,
   };

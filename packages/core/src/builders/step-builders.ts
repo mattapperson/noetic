@@ -57,6 +57,7 @@ export interface RunCodeOpts<TContext, I, O, M extends CustomItemMap = CustomIte
   id: string;
   /** Async, or a generator whose yields are events of the item `emitItems` names. */
   execute: RunCodeExecute<TContext, I, O>;
+  /** @deprecated Use `execution.retry`. */
   retry?: RetryPolicy;
   /**
    * Optional subprocess adapter override. When set, `execute()` is routed
@@ -378,7 +379,7 @@ function validateToolChoice<TContext, O, I>(opts: CallModelOpts<TContext, O, I>)
  * @public
  * @param opts.id - Unique step identifier used in traces and error messages.
  * @param opts.execute - Async function `(input, ctx) => output` that performs the work.
- * @param opts.retry - Optional retry policy controlling attempts, backoff, and delay.
+ * @param opts.execution - Optional durability, replay identity, and retry settings.
  * @param opts.subprocess - Optional per-step subprocess adapter override.
  * @returns A `StepRunCode` that can be composed into larger pipelines. The step
  *   is auto-registered in the shared step registry so the subprocess

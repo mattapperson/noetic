@@ -55,11 +55,13 @@ const fetchAll = runCode({
 ## Type Signature
 
 ```ts
+import type { Context, StepExecution, StepRunCode } from '@noetic-tools/core';
+
 type RunCodeStepOptions<TContext, I, O> = {
   id: string;
   execute: (input: I, ctx: Context<TContext>) =>
     Promise<O> | AsyncGenerator<unknown, O> | Generator<unknown, O>;
-  retry?: RetryPolicy;
+  execution?: StepExecution<TContext, I>;
 };
 
 declare const stepRunCode: <TContext, I, O>(
@@ -79,7 +81,7 @@ declare const stepRunCode: <TContext, I, O>(
 | `execute` | `RunCodeExecute<TContext, I, O>` | Yes | The async function (or generator) to run. A generator's yields are events of the item `emitItems` names; building one whose step names no item with an `event` schema throws `CUSTOM_ITEM_HAS_NO_EVENTS` |
 | `customItems` | `CustomItemMap` | No | [Custom items](/docs/framework/custom-items) only this step may emit |
 | `emitItems` | `StepEmitItemsOption` | No | What the step emits as it runs. See [Emitting Items Early](/docs/framework/steps#emitting-items-early) |
-| `retry` | `RetryPolicy` | No | Retry configuration on failure |
+| `execution` | `StepExecution<TContext, I>` | No | Durability, replay identity, and retry settings |
 | `subprocess` | `SubprocessAdapter` | No | Per-step subprocess adapter override. When set, the interpreter dispatches this step through the given adapter instead of the harness default (resolution order: `detachedSpawn` overrides → `step.subprocess` → `harness.subprocess`) |
 
 ### RetryPolicy
@@ -90,6 +92,15 @@ declare const stepRunCode: <TContext, I, O>(
 | `backoff` | `'fixed' \| 'linear' \| 'exponential'` | Yes | -- | Backoff strategy between retries |
 | `initialDelay` | `number` | Yes | -- | Delay in ms before first retry |
 | `maxDelay` | `number` | No | -- | Cap on delay between retries |
+
+A subprocess adapter can throw `SubprocessLaunchError` from
+`@noetic-tools/core` when it knows the step did not start. This lets the
+interpreter retry within the step's attempt budget. A lost launch
+acknowledgment can leave the step running, so a generic launch error ends
+the attempt without resubmitting it. A durable step dispatched through a
+custom adapter or a JSON command keeps its launch intent until its
+completion is recorded. If the turn is redelivered with only that intent, it reports
+`subprocess_outcome_unknown`.
 
 ## Retry Example
 
@@ -105,11 +116,13 @@ const fetchData = runCode({
     }
     return res.json();
   },
-  retry: {
-    maxAttempts: 3,
-    backoff: 'exponential',
-    initialDelay: 1e3,
-    maxDelay: 1e4,
+  execution: {
+    retry: {
+      maxAttempts: 3,
+      backoff: 'exponential',
+      initialDelay: 1e3,
+      maxDelay: 1e4,
+    },
   },
 });
 ```

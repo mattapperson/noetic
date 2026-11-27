@@ -35,6 +35,8 @@ type Id = string | number;
 
 type Json = Record<string, unknown>;
 
+export const KEEPER_PROMPT_ID = 'noetic/prompt-id';
+
 /** Where a host request's response goes. */
 interface Asked {
   /** The attachment that asked; a response for an earlier one has no host. */
@@ -69,12 +71,16 @@ interface SessionState {
   claimedBy: number;
   /** The keeper id of the `session/prompt` in flight. */
   turn?: number;
+  promptId?: string;
+  prompts?: Set<string>;
   /** Every update since the turn in flight (or the last unclaimed one) began. */
   journal: string[];
   /** Updates sent while no attachment held the session and no turn ran. */
   backlog: string[];
-  /** The last turn's answer, when no host was there to take it. */
+  /** The last turn's answer, kept even after delivery. */
   finished?: Answer;
+  /** The attachment that collected the answer, if it did not send the prompt. */
+  collectedBy?: number;
   /** A reattached host waiting for the turn in flight. */
   waiter?: {
     epoch: number;
@@ -255,7 +261,11 @@ export class AcpRelay {
       return;
     }
     if (method === KEEPER_METHODS.turn) {
-      this.resumeTurn(sessionIdOf(params), hostId);
+      this.resumeTurn(
+        sessionIdOf(params),
+        hostId,
+        typeof params.promptId === 'string' ? params.promptId : undefined,
+      );
       return;
     }
     if (method === 'initialize' && this.initialized !== undefined) {
@@ -277,8 +287,26 @@ export class AcpRelay {
       const session = this.session(sessionId);
       this.claim(sessionId, session, false);
       if (method === 'session/prompt') {
+        const id = isRecord(params._meta) ? params._meta[KEEPER_PROMPT_ID] : undefined;
+        if (typeof id === 'string' && session.prompts?.has(id)) {
+          this.asked.delete(keeperId);
+          this.answerHost(hostId, {
+            error: {
+              code: -32602,
+              message: 'The keeper already accepted this prompt.',
+            },
+          });
+          return;
+        }
         session.turn = keeperId;
+        session.promptId = typeof id === 'string' ? id : undefined;
+        if (session.promptId !== undefined) {
+          session.prompts ??= new Set();
+          session.prompts.add(session.promptId);
+        }
         session.finished = undefined;
+        session.collectedBy = undefined;
+        session.waiter = undefined;
         session.journal = [];
       }
     }
@@ -313,7 +341,7 @@ export class AcpRelay {
    * Hand a session to this host: its turn's updates and the agent's waiting
    * requests again, then the turn's result — now, or when the agent answers.
    */
-  private resumeTurn(sessionId: string | undefined, hostId: Id): void {
+  private resumeTurn(sessionId: string | undefined, hostId: Id, promptId?: string): void {
     const session = sessionId ? this.sessions.get(sessionId) : undefined;
     if (!session) {
       this.answerHost(hostId, {
@@ -324,17 +352,27 @@ export class AcpRelay {
       });
       return;
     }
+    if (promptId !== undefined && promptId !== session.promptId) {
+      this.answerHost(hostId, {
+        result: {
+          state: 'idle',
+          unseen:
+            session.turn === undefined && !session.prompts?.has(promptId) ? promptId : undefined,
+        },
+      });
+      return;
+    }
     this.claim(sessionId, session, true);
-    if (session.finished) {
-      const finished = session.finished;
-      session.finished = undefined;
-      this.answerHost(hostId, turnAnswer(finished));
+    if (session.finished && session.collectedBy !== this.epoch) {
+      session.collectedBy = this.epoch;
+      this.answerHost(hostId, turnAnswer(session.finished, session.promptId));
       return;
     }
     if (session.turn === undefined) {
       this.answerHost(hostId, {
         result: {
           state: 'idle',
+          neverPrompted: session.finished === undefined,
         },
       });
       return;
@@ -497,6 +535,9 @@ export class AcpRelay {
     const session = sessionId ? this.sessions.get(sessionId) : undefined;
     if (session) {
       session.turn = undefined;
+      // Delivery to a host does not mean it committed the step. Keep the
+      // answer for later attachments until the session starts another prompt.
+      session.finished = answer;
     }
     if (this.isLive(asked.epoch)) {
       this.answerHost(asked.hostId, answer);
@@ -505,11 +546,9 @@ export class AcpRelay {
     const waiter = session?.waiter;
     if (session && waiter && this.isLive(waiter.epoch)) {
       session.waiter = undefined;
-      this.answerHost(waiter.hostId, turnAnswer(answer));
+      session.collectedBy = waiter.epoch;
+      this.answerHost(waiter.hostId, turnAnswer(answer, session.promptId));
       return;
-    }
-    if (session) {
-      session.finished = answer;
     }
   }
 
@@ -774,13 +813,14 @@ export class AcpRelay {
 }
 
 /** A finished turn, as `_noetic/keeper/turn` answers it. */
-function turnAnswer(answer: Answer): Answer {
+function turnAnswer(answer: Answer, promptId: string | undefined): Answer {
   if ('error' in answer) {
     return answer;
   }
   return {
     result: {
       state: 'finished',
+      promptId,
       response: answer.result,
     },
   };

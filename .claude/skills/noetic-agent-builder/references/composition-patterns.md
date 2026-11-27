@@ -952,6 +952,14 @@ const handle = harness.detachedSpawn(agent, input, ctx, {
 
 When the host that launched a long-running child can crash, configure durable storage so the child survives independently and the parent context can be rebuilt on restart.
 
+For batch items, use stable item ids and durable dispatch paths. With a
+`workflow()` or `hydrateWorkflow` root and shared storage with `swap`, call
+`harness.wake()` after the prior holder's lease expires. The replacement
+reuses the stored workflow revision and replays completed item outputs.
+With a kept ACP agent, it also collects the same prompt. Preserve task ids
+and use provider-backed `once` keys for writes that may need recovery.
+Surface unknown outcomes for review before another attempt.
+
 ```typescript
 import { AgentHarness } from '@noetic-tools/core';
 import { createFileStorage, createLocalSubprocessAdapter } from '@noetic-tools/platform-node';

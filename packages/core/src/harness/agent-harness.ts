@@ -1940,7 +1940,9 @@ export class AgentHarness<
       restore = await this.prepareRun(root, ctx);
     });
     try {
-      return await this.executeClosingChannels(root, input, ctx);
+      return await this.executeClosingChannels(root, input, {
+        ctx,
+      });
     } finally {
       restore?.();
     }
@@ -2050,14 +2052,11 @@ export class AgentHarness<
     if (unknownParam) {
       throw unknownParam;
     }
-    return this.initAndRun(graph, '', ctx);
-  }
-
-  /** Run all layer `init` hooks before the first step executes. Per spec 11,
-   *  init MUST complete before any recall fires so layer state is populated. */
-  private async initAndRun<I, O>(s: Step<ContextData, I, O>, input: I, ctx: Context): Promise<O> {
     await this.dropRerunsOnFailure(ctx, () => this.ensureLayersInit(ctx));
-    return this.executeClosingChannels(s, input, ctx);
+    return this.executeClosingChannels(graph, '', {
+      ctx,
+      storedTurn: this.storedSessions.store !== undefined,
+    });
   }
 
   /**
@@ -2071,7 +2070,13 @@ export class AgentHarness<
   private async executeClosingChannels<I, O>(
     s: Step<ContextData, I, O>,
     input: I,
-    ctx: Context,
+    {
+      ctx,
+      storedTurn,
+    }: {
+      ctx: Context;
+      storedTurn?: boolean;
+    },
   ): Promise<O> {
     if (ctx.parent !== null) {
       return execute(s, input, ctx);
@@ -2091,7 +2096,9 @@ export class AgentHarness<
       // any closure from a previous completion so its channels work again.
       this.channelStore.openExecution(ctx.id);
       this.#connections.grantReruns(ctx);
-      entry.ready = this.beginDurableRun(ctx).then(() => this.reconcileConnections(ctx));
+      entry.ready = this.beginDurableRun(ctx, storedTurn).then(() =>
+        this.reconcileConnections(ctx),
+      );
     }
     try {
       await entry.ready;
@@ -2113,7 +2120,11 @@ export class AgentHarness<
           this.#connections.orphanRun(ctx.id);
         } else {
           await this.#connections.releaseRun(ctx.id);
-          await this.endDurableRun(ctx);
+          // A turn's ledger is still needed if the host goes away before the
+          // thread record commits the answer. ThreadRecord.end clears it.
+          if (!storedTurn) {
+            await this.endDurableRun(ctx);
+          }
         }
         // The turn's own connections end with it; a resume attaches them again.
         await this.#connections.release(ctx.id);
@@ -2154,15 +2165,13 @@ export class AgentHarness<
   }
 
   /**
-   * Fix the point a resume of this run starts from, and queue it for saving — so even
-   * a run whose first step dies leaves a snapshot to restore. The save is not awaited:
-   * the steps' own checkpoints queue behind it.
+   * Save the baseline before a leased turn can reach a provider. A turn with
+   * no baseline and no completed ledger entry could otherwise restore as a
+   * fresh execution and lose its pending intents.
    *
-   * When the context's last run never finished, the run repeats it, and it does so
-   * from storage — the stored baseline and ledger — exactly as a new harness resuming
-   * the execution would, not from what the failed attempt left in memory.
+   * An unfinished run starts again from storage, including its ledger.
    */
-  private async beginDurableRun(ctx: Context): Promise<void> {
+  private async beginDurableRun(ctx: Context, storedTurn?: boolean): Promise<void> {
     if (!this.checkpointStore || !(ctx instanceof ContextImpl)) {
       return;
     }
@@ -2170,7 +2179,16 @@ export class AgentHarness<
       await this.rebuildFromStorage(ctx);
     }
     ctx.beginRun();
-    void this.saveCheckpoint(ctx);
+    const saved = this.saveCheckpoint(ctx);
+    if (storedTurn && this.storedSessions.leaseOptions && !(await saved)) {
+      await ctx.ledger?.verifyHeld();
+      throw new NoeticErrorImpl({
+        kind: 'ledger_write_failed',
+        executionId: ctx.id,
+        path: 'snapshot',
+        cause: new Error('The turn baseline could not be saved.'),
+      });
+    }
   }
 
   /**

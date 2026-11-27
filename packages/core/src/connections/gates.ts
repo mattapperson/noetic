@@ -29,7 +29,7 @@ import type {
   SteeringDecision,
 } from '@noetic-tools/types';
 import { SteeringAction } from '@noetic-tools/types';
-import { PARK_REASON } from '../runtime/durable/parking';
+import { PARK_REASON, TURN_CUT_ABORT } from '../runtime/durable/parking';
 import { attachBlobs, checkBlobs } from './blobs';
 import { deniedError, failedError, inputRequiredError } from './errors';
 import { validateJsonSchema } from './json-schema';
@@ -176,6 +176,9 @@ async function awaitTask(
   request.signal.addEventListener('abort', onParentAbort, {
     once: true,
   });
+  if (request.signal.aborted) {
+    onParentAbort();
+  }
   let unanswered: ConnectionTaskStatus | undefined;
   const answering = new Set<string>();
   const answer = async (status: ConnectionTaskStatus): Promise<void> => {
@@ -215,7 +218,12 @@ async function awaitTask(
       throw inputRequiredError(gc.name, unanswered.request);
     }
     // A parked turn comes back for its task (spec 23 § Parked turns): leave it running.
-    if (request.signal.aborted && request.ctx?.abortReason !== PARK_REASON) {
+    if (
+      request.signal.aborted &&
+      request.ctx?.abortReason !== PARK_REASON &&
+      request.ctx?.abortReason !== TURN_CUT_ABORT &&
+      !request.ctx?.abortReason?.startsWith('lease_lost: ')
+    ) {
       await gc.connection.tasks.cancel(request.taskId).catch(() => undefined);
     }
     throw e;
@@ -235,6 +243,8 @@ async function send(
     readonly policyAllows: boolean;
   },
 ): Promise<CallOutcome> {
+  await request.opts.beforeSend?.();
+  request.opts.signal.throwIfAborted();
   const result = await gc.connection.call(request.op, request.filled, {
     signal: request.opts.signal,
     idempotencyKey: request.opts.idempotencyKey,
@@ -244,6 +254,9 @@ async function send(
         }
       : {}),
   });
+  if (result.status === 'error' && result.error.code !== 'unavailable') {
+    await request.opts.onRefused?.();
+  }
   if (result.status === 'error' && result.error.code === 'guarded' && !request.confirmed) {
     if (!request.policyAllows) {
       await approve(gc, {
@@ -259,6 +272,7 @@ async function send(
   if (result.status !== 'task') {
     return result;
   }
+  await request.opts.onTaskStarted?.(result.taskId);
   return awaitTask(gc, {
     ...request,
     taskId: result.taskId,

@@ -11,12 +11,21 @@
  */
 
 import type { StorageAdapter } from '@noetic-tools/context';
-import type { Context, ContextData, Tool } from '@noetic-tools/types';
-import { frameworkCast } from '@noetic-tools/types';
+import type {
+  AcpContentBlock,
+  Context,
+  ContextData,
+  SteeringDecision,
+  Tool,
+} from '@noetic-tools/types';
+import { frameworkCast, NoeticConfigError, NoeticErrorImpl } from '@noetic-tools/types';
 import { z } from 'zod';
 
 import { stepPathOf } from '../connections/durability';
 import { ContextImpl } from '../runtime/context-impl';
+import { TURN_CUT_ABORT } from '../runtime/durable/parking';
+import { StepIntent } from '../runtime/durable/step-intent';
+import type { StepLedger } from '../runtime/durable/step-ledger';
 import { hashStepInput } from '../runtime/durable/step-ledger';
 import type { ToolCallResult } from '../runtime/tool-call';
 import { pendingEntryKey, runRootOf } from './connection-steps';
@@ -26,6 +35,14 @@ import { pendingEntryKey, runRootOf } from './connection-steps';
 const AcpSessionRecordSchema = z.object({
   sessionId: z.string(),
   agentId: z.string(),
+  /** Written before the first prompt. Older records precede this guarantee. */
+  sent: z.literal(true).optional(),
+  promptId: z.string().optional(),
+  guidance: z.string().optional(),
+  bridgePath: z.string().optional(),
+  stableCalls: z.literal(true).optional(),
+  steering: z.number().int().nonnegative().optional(),
+  promptHash: z.string().optional(),
   /** How to reach the agent if it outlived the host that opened the session. */
   reattach: z.record(z.string(), z.unknown()).optional(),
   /**
@@ -49,9 +66,36 @@ export interface AcpSessionRecords {
   load(): Promise<AcpSessionRecord | undefined>;
   write(record: AcpSessionRecord): Promise<void>;
   clear(): Promise<void>;
+  decide(
+    promptId: string,
+    run: () => Promise<SteeringDecision | undefined>,
+  ): Promise<SteeringDecision | undefined>;
 }
 
+const SteeringRecord = z.object({
+  decided: z.literal(true),
+  decision: z
+    .object({
+      action: z.enum([
+        'allow',
+        'deny',
+        'guide',
+        'hold',
+      ]),
+      guidance: z.string().optional(),
+      dueAt: z.number().optional(),
+      onDue: z
+        .enum([
+          'deny',
+          'keep',
+        ])
+        .optional(),
+    })
+    .optional(),
+});
+
 const BridgedOutputSchema = z.object({
+  agentCallId: z.string().optional(),
   output: z.string(),
   result: z.unknown().optional(),
   error: z.boolean().optional(),
@@ -96,101 +140,226 @@ function storageOf(ctx: Context<ContextData>): StorageAdapter | undefined {
   return frameworkCast<HarnessWithStorage>(ctx.harness).config?.storage;
 }
 
-function warn(action: string, key: string, error: unknown): void {
-  console.warn(
-    `acp step: failed to ${action} session record "${key}":`,
-    error instanceof Error ? error.message : String(error),
-  );
-}
-
 //#endregion
 
 //#region Public API
+
+/** Check the previously dispatched prompt before opening or attaching to a session. */
+export async function acpRecovery({
+  ctx,
+  stepId,
+  agentId,
+  ledgerKey,
+  subprocess,
+  prompt,
+}: {
+  ctx: Context<ContextData>;
+  stepId: string;
+  agentId: string;
+  ledgerKey: string | undefined;
+  subprocess: string | undefined;
+  prompt: {
+    text: string;
+    blocks: ReadonlyArray<AcpContentBlock> | undefined;
+  };
+}) {
+  const sessions = acpSessionRecords(ctx, ledgerKey);
+  const recorded = await sessions?.load();
+  const impl = ctx instanceof ContextImpl ? ctx : undefined;
+  const position = impl?.currentPath();
+  const promptHash = hashStepInput(prompt);
+  if (
+    recorded &&
+    (recorded.agentId !== agentId ||
+      (recorded.promptHash !== undefined && recorded.promptHash !== promptHash))
+  ) {
+    throw new NoeticErrorImpl({
+      kind: 'acp_outcome_unknown',
+      stepId,
+      sessionId: recorded.sessionId,
+    });
+  }
+  if (
+    recorded?.reattach &&
+    recorded.subprocess !== undefined &&
+    recorded.subprocess !== subprocess
+  ) {
+    throw movedAgent(
+      stepId,
+      recorded.subprocess,
+      subprocess ?? ctx.adapters.subprocess.defaultName,
+    );
+  }
+  const bridgePath =
+    recorded?.bridgePath ??
+    (!recorded && ledgerKey !== undefined && ledgerKey !== position
+      ? 'acp-tools:' + hashStepInput(ledgerKey)
+      : position);
+  return {
+    sessions,
+    recorded,
+    ledger: impl?.ledger,
+    position,
+    bridgePath,
+    promptHash,
+  };
+}
+
+export function wasCut(ctx: Context<ContextData>): boolean {
+  return ctx.abortReason === TURN_CUT_ABORT;
+}
 
 /**
  * The session record of the ACP step running on `ctx`, or undefined when the run
  * is not durable: no ledger, no storage, or no place in the run.
  */
-export function acpSessionRecords(ctx: Context<ContextData>): AcpSessionRecords | undefined {
+export function acpSessionRecords(
+  ctx: Context<ContextData>,
+  path: string | undefined,
+): AcpSessionRecords | undefined {
   const storage = storageOf(ctx);
-  const path = stepPathOf(ctx);
   const ledger = ctx instanceof ContextImpl ? ctx.ledger : undefined;
   if (!storage || !ledger || path === undefined) {
     return undefined;
   }
   // With the run's pending entries, so clearing the run clears it.
-  const key = pendingEntryKey(runRootOf(ctx).id, `${path}/acp-session`);
+  const executionId = runRootOf(ctx).id;
+  const positional = stepPathOf(ctx);
+  const intent = new StepIntent(
+    storage,
+    pendingEntryKey(executionId, `${path}/acp-session`),
+    ledger,
+  );
   return {
     async load() {
-      const parsed = AcpSessionRecordSchema.safeParse(await storage.get<unknown>(key));
+      const prior = await intent.read();
+      if (prior === null && positional !== undefined && positional !== path) {
+        const local = new StepIntent(
+          storage,
+          pendingEntryKey(executionId, `${positional}/acp-session`),
+        );
+        if (
+          (await local.read()) !== null ||
+          (ledger.mayHavePending && (await hasOtherSession(storage, executionId, positional)))
+        ) {
+          throw new NoeticErrorImpl({
+            kind: 'acp_outcome_unknown',
+            stepId: path,
+          });
+        }
+      }
+      const parsed = AcpSessionRecordSchema.safeParse(prior);
+      if (prior !== null && !parsed.success) {
+        throw new NoeticErrorImpl({
+          kind: 'acp_outcome_unknown',
+          stepId: path,
+        });
+      }
       return parsed.success ? parsed.data : undefined;
     },
-    async write(record) {
-      if (!ledger.isHeld) {
-        return;
+    async decide(promptId, run) {
+      const decision = new StepIntent(
+        storage,
+        pendingEntryKey(executionId, `${path}/steering:${promptId}`),
+        ledger,
+      );
+      const stored = await decision.read();
+      if (stored !== null) {
+        const parsed = SteeringRecord.safeParse(stored);
+        if (!parsed.success) {
+          throw new NoeticErrorImpl({
+            kind: 'acp_outcome_unknown',
+            stepId: path,
+          });
+        }
+        return parsed.data.decision;
       }
-      await storage.set(key, record).catch((error: unknown) => warn('write', key, error));
+      await decision.write({
+        deciding: true,
+      });
+      const result = await run();
+      await decision.write({
+        decided: true,
+        decision: result,
+      });
+      return result;
     },
     async clear() {
-      if (!ledger.isHeld) {
-        return;
-      }
-      await storage.delete(key).catch((error: unknown) => warn('clear', key, error));
+      await intent.clear().catch(() => undefined);
+    },
+    async write(record) {
+      await intent.write(record);
     },
   };
 }
 
-/**
- * Hands out the record of each bridged call of one step run. A call is known by
- * its tool, its arguments, and its place among the calls with that tool and those
- * arguments: a resumed agent's ids are new, but what it asks for is not.
- */
+/** Match a redelivered bridge request to the original call when the keeper reconnects. */
 export class BridgedCallRecords {
   private readonly seen = new Map<string, number>();
-  private reloaded = false;
+  private mode: 'fresh' | 'resume' | 'legacy' = 'fresh';
+  private path?: string;
 
-  /**
-   * The agent's session was reloaded: it has its own record of the calls it
-   * finished, and was told not to redo them. A call it makes now is a new call,
-   * even with a tool and arguments it used before, so it must not be answered
-   * from a record. Each call's order starts after the ones already recorded.
-   *
-   * An agent that starts over in a new session makes its calls again from the
-   * first, and those are answered from the record.
-   */
-  sessionReloaded(): void {
-    this.reloaded = true;
+  bind(path: string | undefined, mode: 'fresh' | 'resume' | 'legacy'): void {
+    this.mode = mode;
+    this.path = path;
   }
 
-  recordFor(opts: {
+  async recordFor(opts: {
     ctx: Context<ContextData>;
     stepId: string;
     tool: Tool | undefined;
     wireName: string;
+    agentCallId?: string;
     args: unknown;
-  }): BridgedCallRecord {
-    const { ctx, stepId, tool, wireName } = opts;
+  }): Promise<BridgedCallRecord> {
+    const { ctx, stepId, tool, wireName, agentCallId } = opts;
     const inputHash = hashStepInput({
       name: wireName,
       arguments: opts.args,
     });
-    const step = stepPathOf(ctx) ?? stepId;
+    const step = this.path ?? stepPathOf(ctx) ?? stepId;
     const call = `${wireName}:${inputHash ?? 'unhashed'}`;
     const ledger = ctx instanceof ContextImpl ? ctx.ledger : undefined;
     const pathAt = (n: number): string => `${step}/bridged:${call}#${n}`;
     const key = `${step}\u0000${call}`;
-    let order = this.seen.get(key);
-    if (order === undefined) {
-      order = 0;
-      // Past what a reloaded agent already finished: those are not coming again.
-      while (this.reloaded && ledger?.has(pathAt(order))) {
-        order += 1;
-      }
+    let order = this.seen.get(key) ?? 0;
+    const prior =
+      this.mode !== 'fresh' && ledger && tool?.durable !== false
+        ? this.savedPath({
+            ledger,
+            step,
+            stepId,
+            agentCallId,
+            inputHash,
+          })
+        : undefined;
+    while (
+      prior === undefined &&
+      this.mode !== 'fresh' &&
+      tool?.durable !== false &&
+      ledger?.has(pathAt(order))
+    ) {
+      order += 1;
     }
-    this.seen.set(key, order + 1);
-    const path = pathAt(order);
+    const stable =
+      agentCallId === undefined ? undefined : `${step}/bridged:id:${hashStepInput(agentCallId)}`;
+    if (prior === undefined && stable === undefined) {
+      this.seen.set(key, order + 1);
+    }
+    const path = prior ?? stable ?? pathAt(order);
     // `durable: false` records nothing; unhashable arguments cannot be matched.
     const records = ledger !== undefined && tool?.durable !== false && inputHash !== undefined;
+    if (records && !prior) {
+      await this.bindInput({
+        ctx,
+        ledger,
+        path,
+        anonymous: pathAt(order),
+        stable: stable !== undefined,
+        inputHash,
+        stepId,
+      });
+    }
     return {
       id: `acp:${path}`,
       take: () => {
@@ -218,6 +387,11 @@ export class BridgedCallRecords {
           kind: BRIDGED_KIND,
           inputHash,
           output: {
+            ...(agentCallId === undefined
+              ? {}
+              : {
+                  agentCallId,
+                }),
             output: result.output,
             ...(result.result === undefined
               ? {}
@@ -235,6 +409,145 @@ export class BridgedCallRecords {
       },
     };
   }
+
+  private async bindInput({
+    ctx,
+    ledger,
+    path,
+    anonymous,
+    stable,
+    inputHash,
+    stepId,
+  }: {
+    ctx: Context<ContextData>;
+    ledger: StepLedger;
+    path: string;
+    anonymous: string;
+    stable: boolean;
+    inputHash: string;
+    stepId: string;
+  }): Promise<void> {
+    const storage = storageOf(ctx);
+    if (!storage) {
+      return;
+    }
+    const intent = (path: string) =>
+      new StepIntent(storage, pendingEntryKey(runRootOf(ctx).id, `${path}/tool`), ledger);
+    const identity = intent(path);
+    const saved = await identity.read();
+    if (!stable && this.mode !== 'fresh') {
+      const prefix = pendingEntryKey(
+        runRootOf(ctx).id,
+        `${path.slice(0, path.lastIndexOf('/'))}/bridged:id:`,
+      );
+      for (const key of await storage.list(prefix)) {
+        if (!key.endsWith('/tool')) {
+          continue;
+        }
+        const other = await new StepIntent(storage, key).read();
+        if (other && typeof other === 'object' && Reflect.get(other, 'inputHash') === inputHash) {
+          throw new NoeticErrorImpl({
+            kind: 'acp_outcome_unknown',
+            stepId,
+          });
+        }
+      }
+    }
+    if (
+      saved === null &&
+      (this.mode === 'fresh' || !stable || (await intent(anonymous).read()) === null)
+    ) {
+      await identity.write({
+        inputHash,
+      });
+      return;
+    }
+    if (
+      stable &&
+      typeof saved === 'object' &&
+      saved !== null &&
+      Reflect.get(saved, 'inputHash') === inputHash
+    ) {
+      return;
+    }
+    throw new NoeticErrorImpl({
+      kind: 'acp_outcome_unknown',
+      stepId,
+    });
+  }
+
+  private savedPath({
+    ledger,
+    step,
+    stepId,
+    agentCallId,
+    inputHash,
+  }: {
+    ledger: StepLedger;
+    step: string;
+    stepId: string;
+    agentCallId?: string;
+    inputHash?: string;
+  }): string | undefined {
+    const prefix = step + '/bridged:';
+    let unmatched = false;
+    for (const entry of ledger.savedEntries()) {
+      if (
+        entry.kind !== BRIDGED_KIND ||
+        !entry.path.startsWith(prefix) ||
+        entry.path.slice(prefix.length).includes('/')
+      ) {
+        continue;
+      }
+      const saved = BridgedOutputSchema.safeParse(entry.output);
+      const id = saved.success ? saved.data.agentCallId : undefined;
+      if (agentCallId !== undefined && id === agentCallId) {
+        if (entry.inputHash !== inputHash) {
+          throw new NoeticErrorImpl({
+            kind: 'acp_outcome_unknown',
+            stepId,
+          });
+        }
+        return entry.path;
+      }
+      unmatched ||=
+        entry.inputHash === inputHash && (agentCallId === undefined || id === undefined);
+    }
+    if (unmatched || this.mode === 'legacy') {
+      throw new NoeticErrorImpl({
+        kind: 'acp_outcome_unknown',
+        stepId,
+      });
+    }
+    return undefined;
+  }
+}
+
+function movedAgent(stepId: string, started: string, now: string): NoeticConfigError {
+  return new NoeticConfigError({
+    code: 'ACP_SESSION_ADAPTER_CONFLICT',
+    message: `step.acpAgent(${JSON.stringify(stepId)}) resumes an agent started through the subprocess adapter '${started}', but now runs through '${now}'.`,
+    hint: `Resume with the step, its agent and \`environment.subprocess\` resolving to '${started}', as in the run that started the agent.`,
+  });
+}
+
+/** A keyed step cannot prove whether a positional intent from another lane is its own. */
+async function hasOtherSession(
+  storage: StorageAdapter,
+  executionId: string,
+  position: string,
+): Promise<boolean> {
+  const leaf = (path: string) => path.slice(path.lastIndexOf('/') + 1).replace(/#\d+$/, '');
+  const prefix = pendingEntryKey(executionId, '/');
+  const suffix = '/acp-session';
+  for (const key of await storage.list(prefix)) {
+    if (key.endsWith(suffix) && leaf(key.slice(0, -suffix.length)) === leaf(position)) {
+      if ((await new StepIntent(storage, key).read()) !== null) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 //#endregion

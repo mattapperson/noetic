@@ -4,8 +4,9 @@
 import { describe, expect, it } from 'bun:test';
 import type { StorageAdapter } from '@noetic-tools/context';
 import type { Context, ContextData } from '@noetic-tools/types';
-import { isNoeticConfigError } from '@noetic-tools/types';
-import { inParallel } from '../../src/builders/control-flow-builders';
+import { isNoeticConfigError, NoeticErrorImpl, SubprocessLaunchError } from '@noetic-tools/types';
+import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
+import { conditional, inParallel } from '../../src/builders/control-flow-builders';
 import { schedule } from '../../src/builders/every';
 import { loop } from '../../src/builders/loop-builder';
 import { runCode } from '../../src/builders/step-builders';
@@ -649,6 +650,39 @@ describe('step ledger retention config', () => {
     expect((await store.load('exec')).entries.size).toBe(3);
   });
 
+  it('keeps an effect with a keyed receipt and its parent after replay', async () => {
+    const store = createStepLedgerStore({
+      storage: createInMemoryStorage(),
+    });
+    const executionId = 'batch';
+    const first = new StepLedger({
+      executionId,
+      store,
+    });
+    first.runAs('v1');
+    first.noteEffect('/worker#0/write#0');
+    await first.record(entryOfBytes('key:write', 4), '/worker#0/write#0');
+    const recovered = await store.load(executionId);
+    expect(recovered.entries.get('key:write')?.effect).toBe(true);
+
+    const second = new StepLedger({
+      executionId,
+      store,
+      recovered,
+    });
+    second.take(
+      'key:write',
+      {
+        id: 'key:write',
+        kind: 'runCode',
+        inputHash: undefined,
+      },
+      '/other#0/write#0',
+    );
+    await second.record(entryOfBytes('/other#0', 4));
+    expect((await store.load(executionId)).entries.get('/other#0')?.effect).toBe(true);
+  });
+
   it('never reuses a sequence number after a resume, so no live entry is overwritten', async () => {
     /* `nextSeq` has to come from storage: deriving it from the recovered entry COUNT
      * would restart inside the live window whenever pruning left a gap, and the first
@@ -1139,6 +1173,205 @@ describe('step replay controls', () => {
     } finally {
       console.warn = originalWarn;
     }
+  });
+
+  it('applies execution settings on a conditional and prefers them over legacy keys', async () => {
+    const harness = durableHarness(createInMemoryStorage());
+    const ctx = harness.createContext();
+    let attempts = 0;
+    const choice = conditional<ContextData, string, string>({
+      id: 'choice',
+      durable: false,
+      replayKey: () => 'legacy',
+      execution: {
+        durable: true,
+        replayKey: (input) => input,
+        retry: {
+          maxAttempts: 2,
+          backoff: 'fixed',
+          initialDelay: 0,
+        },
+      },
+      route: () => {
+        if (++attempts === 1) {
+          throw new Error('try again');
+        }
+        return null;
+      },
+    });
+    expect(resolveLedgerKey(choice, 'batch', ctx)).toBe('key:batch');
+    expect(await harness.run(choice, 'batch', ctx)).toBe('batch');
+    expect(attempts).toBe(2);
+  });
+
+  it('stops an in-place retry after the parent has dispatched a child', async () => {
+    const harness = durableHarness(createInMemoryStorage());
+    let effects = 0;
+    const child = runCode({
+      id: 'write',
+      execute: async () => ++effects,
+    });
+    const parent = runCode({
+      id: 'parent',
+      execution: {
+        retry: {
+          maxAttempts: 3,
+          backoff: 'fixed',
+          initialDelay: 0,
+        },
+      },
+      async execute(_input, ctx) {
+        await ctx.harness.run(child, undefined, ctx);
+        throw new Error('after write');
+      },
+    });
+    await expect(harness.run(parent, '', harness.createContext())).rejects.toThrow('after write');
+    expect(effects).toBe(1);
+  });
+
+  it('retries a rejected runCode launch within the body attempt budget', async () => {
+    const harness = durableHarness(createInMemoryStorage());
+    const adapter = createInMemorySubprocessAdapter();
+    let launches = 0;
+    let bodies = 0;
+    const body = runCode({
+      id: 'launch',
+      execution: {
+        retry: {
+          maxAttempts: 2,
+          backoff: 'fixed',
+          initialDelay: 0,
+        },
+      },
+      subprocess: {
+        ...adapter,
+        async spawn(request) {
+          if (++launches === 1) {
+            throw new SubprocessLaunchError('launch refused');
+          }
+          return adapter.spawn(request);
+        },
+      },
+      async execute() {
+        bodies++;
+        throw new Error('body failed');
+      },
+    });
+    await expect(harness.run(body, '', harness.createContext())).rejects.toThrow('body failed');
+    expect(launches).toBe(2);
+    expect(bodies).toBe(1);
+  });
+
+  it('leaves an ambiguous launch rejection alone', async () => {
+    const harness = durableHarness(createInMemoryStorage());
+    const adapter = createInMemorySubprocessAdapter();
+    let launches = 0;
+    const body = runCode({
+      id: 'lost-launch',
+      execution: {
+        retry: {
+          maxAttempts: 2,
+          backoff: 'fixed',
+          initialDelay: 0,
+        },
+      },
+      subprocess: {
+        ...adapter,
+        async spawn() {
+          launches++;
+          throw new Error('launch acknowledgment lost');
+        },
+      },
+      async execute() {},
+    });
+    await expect(harness.run(body, '', harness.createContext())).rejects.toThrow(
+      'launch acknowledgment lost',
+    );
+    expect(launches).toBe(1);
+  });
+
+  it('keeps an ambiguous launch intent after a replacement redelivers the turn', async () => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    const adapter = createInMemorySubprocessAdapter();
+    let effects = 0;
+    const graph = runCode<ContextData, string, string>({
+      id: 'write',
+      subprocess: {
+        ...adapter,
+        async spawn(request) {
+          if (request.kind === 'step') {
+            await request._localExecutor?.();
+          }
+          throw new Error('launch acknowledgment lost');
+        },
+      },
+      async execute() {
+        effects++;
+        return 'written';
+      },
+    });
+    const boot = () =>
+      new AgentHarness({
+        name: 'launch',
+        params: {},
+        agentGraph: graph,
+        environment: {
+          storage: {
+            adapter: storage,
+          },
+        },
+      });
+    const delivery = {
+      threadId: 't',
+      messageId: 'same',
+    };
+    const first = boot();
+    await first.execute('write', delivery);
+    const unknown = {
+      noeticError: {
+        kind: 'subprocess_outcome_unknown',
+      },
+    };
+    await expect(first.getAgentResponse(delivery)).rejects.toMatchObject(unknown);
+    await first.close();
+    const second = boot();
+    try {
+      await second.execute('write', delivery);
+      await expect(second.getAgentResponse(delivery)).rejects.toMatchObject(unknown);
+      expect(effects).toBe(1);
+    } finally {
+      await second.close();
+    }
+  });
+
+  it('lets unknown outcomes through even when a retry is configured', async () => {
+    const harness = durableHarness(createInMemoryStorage());
+    let attempts = 0;
+    const choice = conditional({
+      id: 'lost',
+      execution: {
+        retry: {
+          maxAttempts: 3,
+          backoff: 'fixed',
+          initialDelay: 0,
+        },
+      },
+      route: () => {
+        attempts++;
+        throw new NoeticErrorImpl({
+          kind: 'acp_outcome_unknown',
+          stepId: 'prompt',
+        });
+      },
+    });
+    await expect(harness.run(choice, 'input', harness.createContext())).rejects.toMatchObject({
+      noeticError: {
+        kind: 'acp_outcome_unknown',
+      },
+    });
+    expect(attempts).toBe(1);
   });
 
   it('resolves the ledger key: path by default, key: for replayKey, none for opt-outs', () => {

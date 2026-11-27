@@ -57,6 +57,7 @@ export function withContext<TContext = ContextData, I = unknown, O = unknown>(
     id: opts.id,
     child: toStep(opts.child),
     context: layers,
+    execution: opts.execution,
     durable: opts.durable,
     replayKey: opts.replayKey,
   };

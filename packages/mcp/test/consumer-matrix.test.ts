@@ -382,7 +382,9 @@ function toolEventOf(event: unknown): string | undefined {
   return normalize(
     JSON.stringify({
       kind,
-      ...parsed.data.data,
+      ...Object.fromEntries(
+        Object.entries(parsed.data.data).sort(([a], [b]) => a.localeCompare(b)),
+      ),
     }),
   );
 }

@@ -5,19 +5,8 @@
  */
 
 import type { ContextLayer, LayerStateStore } from '@noetic-tools/context';
-import type {
-  Context,
-  ExecuteStepFn,
-  Step,
-  StepRunCode,
-  StepSpawn,
-  StepSubprocessRequest,
-  StorageAdapter,
-  SubprocessAdapter,
-} from '@noetic-tools/types';
+import type { Context, ExecuteStepFn, Step, StorageAdapter } from '@noetic-tools/types';
 import { frameworkCast, NoeticErrorImpl } from '@noetic-tools/types';
-import { ChildAdapterSource, spawnLinked } from '../runtime/durable/child-links';
-import { DetachedHandleImpl } from '../util/detached-handle';
 import { executeAcpAgent } from './execute-acp-agent';
 import { executeCall } from './execute-call';
 import { executeCallModel } from './execute-call-model';
@@ -35,6 +24,7 @@ import { executeSpawn } from './execute-spawn';
 import { executeVerify } from './execute-verify';
 import { executeWait } from './execute-wait';
 import { executeWithContext } from './execute-with-context';
+import { dispatchViaAdapter } from './step-subprocess';
 
 //#region Types
 
@@ -46,6 +36,8 @@ export interface StepKindScope<TContext> {
   baseCtx: Context;
   /** The ledger key `execute()` resolved for this dispatch. */
   ledgerKey: string | undefined;
+  /** Release a handler's recovery resources once its result has been recorded, or it failed. */
+  onRecorded(cleanup: (stored: boolean) => Promise<void>): void;
   /** Re-enters `execute()` for nested steps. */
   executeStep: ExecuteStepFn;
 }
@@ -88,71 +80,6 @@ function buildSpawnOpts<TContext>(ctx: Context<TContext>): {
   };
 }
 
-/**
- * Resolve the subprocess adapter that should handle dispatch for this step.
- * Precedence is `step.subprocess ?? ctx.harness.subprocess`. Per-call
- * `detachedSpawn` overrides layer above this in the harness itself.
- */
-function resolveStepAdapter<TContext, I, O>(
-  step: Step<TContext, I, O>,
-  ctx: Context<TContext>,
-): SubprocessAdapter {
-  if ((step.kind === 'runCode' || step.kind === 'spawn') && step.subprocess) {
-    return step.subprocess;
-  }
-  return ctx.harness.subprocess;
-}
-
-/**
- * Dispatch a run/spawn step through the resolved subprocess adapter.
- *
- * The `_localExecutor` closure carries the in-process fallback path — the
- * in-memory adapter invokes it directly, preserving the pre-refactor
- * dispatch semantics including parent-context inheritance, layer lifecycle,
- * and synchronous error propagation. Out-of-process adapters ignore
- * `_localExecutor` and run the step in a child runtime.
- *
- * `executionId` names the context the step body runs in: `ctx.id` for a
- * `runCode`, the pre-allocated child id for a `spawn` (whose request then
- * also names `ctx` as the parent).
- */
-async function dispatchViaAdapter<TContext, I, O>(
-  step: StepRunCode<TContext, I, O> | StepSpawn<TContext, I, O>,
-  input: I,
-  ctx: Context<TContext>,
-  executionId: string,
-  executor: () => Promise<O>,
-): Promise<O> {
-  const adapter = resolveStepAdapter(step, ctx);
-  const request: StepSubprocessRequest = {
-    kind: 'step',
-    stepId: step.id,
-    serializedInput: input,
-    executionId,
-    parentExecutionId: executionId === ctx.id ? undefined : ctx.id,
-    overrides: {
-      threadId: ctx.threadId,
-      resourceId: ctx.resourceId,
-    },
-    _localExecutor: () => executor(),
-  };
-  const handle = new DetachedHandleImpl<O>({
-    id: executionId,
-    stepId: step.id,
-    spawned:
-      executionId === ctx.id
-        ? adapter.spawn(request)
-        : spawnLinked(ctx, adapter, {
-            childId: executionId,
-            stepId: step.id,
-            from:
-              step.subprocess === undefined ? ChildAdapterSource.Harness : ChildAdapterSource.Step,
-            spawn: () => adapter.spawn(request),
-          }),
-  });
-  return handle.await();
-}
-
 //#endregion
 
 //#region Public API
@@ -188,16 +115,20 @@ export async function dispatchStepKind<TContext, I, O>(
   input: I,
   scope: StepKindScope<TContext>,
 ): Promise<O> {
-  const { stepCtx, baseCtx, ledgerKey, executeStep } = scope;
+  const { stepCtx, baseCtx, executeStep } = scope;
   switch (step.kind) {
     case 'runCode':
-      return dispatchViaAdapter(step, input, stepCtx, stepCtx.id, () =>
-        executeRunCode(step, input, stepCtx),
-      );
+      return dispatchViaAdapter({
+        step,
+        input,
+        scope,
+        executionId: stepCtx.id,
+        executor: (attempts) => executeRunCode(step, input, stepCtx, attempts),
+      });
     case 'callModel':
       return executeCallModel(step, input, stepCtx, baseCtx.layers);
     case 'acp-agent':
-      return executeAcpAgent(step, input, stepCtx, baseCtx.layers);
+      return executeAcpAgent(step, input, scope);
     case 'invokeTool':
       return executeInvokeTool(step, input, stepCtx, baseCtx.harness, baseCtx.layers);
     case 'decide':
@@ -214,12 +145,17 @@ export async function dispatchStepKind<TContext, I, O>(
     case 'spawn': {
       // Allocated here so the adapter request names the child it runs.
       const childId = crypto.randomUUID();
-      return dispatchViaAdapter(step, input, stepCtx, childId, () =>
-        executeSpawn(step, input, stepCtx, executeStep, {
-          ...buildSpawnOpts(stepCtx),
-          childId,
-        }),
-      );
+      return dispatchViaAdapter({
+        step,
+        input,
+        scope,
+        executionId: childId,
+        executor: () =>
+          executeSpawn(step, input, stepCtx, executeStep, {
+            ...buildSpawnOpts(stepCtx),
+            childId,
+          }),
+      });
     }
     case 'withContext':
       return executeWithContext(step, input, stepCtx, executeStep, {
@@ -231,13 +167,9 @@ export async function dispatchStepKind<TContext, I, O>(
     case 'schedule':
       return executeSchedule(step, input, stepCtx, executeStep);
     case 'call':
-      return executeCall(step, input, stepCtx, {
-        ledgerKey,
-      });
+      return executeCall(step, input, stepCtx, scope);
     case 'wait':
-      return executeWait(step, input, stepCtx, executeStep, {
-        ledgerKey,
-      });
+      return executeWait(step, input, stepCtx, executeStep, scope);
     case 'verify':
       return executeVerify(step, input, stepCtx, executeStep);
     case 'sequence':

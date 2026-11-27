@@ -453,7 +453,7 @@ describe('a turn cut by a failed durable write', () => {
 describe('a turn whose checkpoint cannot be written either', () => {
   it('still counts its cuts across resumes under new executions, and gives up', async () => {
     // Every execution key is refused: no snapshot lands, so each resume starts a
-    // new execution of the same messages.
+    // new execution of the same messages without dispatching a model call.
     const storage = flakyStorage('execution:');
     const clock: Clock = {
       t: 0,
@@ -485,7 +485,7 @@ describe('a turn whose checkpoint cannot be written either', () => {
     expect(stored?.turn?.stopped).toBeDefined();
     clock.t += 1e5;
     expect(await harness.wake()).toEqual([]);
-    expect(model.calls).toBe(3);
+    expect(model.calls).toBe(0);
   });
 });
 

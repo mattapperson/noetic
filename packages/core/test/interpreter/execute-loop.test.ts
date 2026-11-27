@@ -281,6 +281,30 @@ describe('executeLoop', () => {
     expect(result).toBe(1);
   });
 
+  it('lets an unknown outcome from the predicate end the turn', async () => {
+    const failure = new NoeticErrorImpl({
+      kind: 'acp_outcome_unknown',
+      stepId: 'write',
+    });
+    const loopStep = loop<ContextData, number, number>({
+      id: 'check-write',
+      steps: [
+        {
+          kind: 'runCode',
+          id: 'inc',
+          execute: async (input: number) => input + 1,
+        },
+      ],
+      until: () => {
+        throw failure;
+      },
+    });
+    const ctx = new ContextImpl({
+      harness: makeMockHarness(),
+    });
+    await expect(executeLoop(loopStep, 0, ctx, simpleExecute)).rejects.toBe(failure);
+  });
+
   it('snapshot population is correct', async () => {
     let capturedSnapshot: Snapshot | null = null;
     const loopStep = loop<ContextData, string, string>({

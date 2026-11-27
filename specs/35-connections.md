@@ -859,12 +859,19 @@ step, making its calls in the same order, gets the same ones. Operations a profi
 lasting effects such as posting a message or installing an app — must return
 their original outcome for a repeated key instead of acting again.
 
-**Pending entries.** A `call` or `wait` writes a pending ledger entry before
-it reaches a server — its key, the connection's identity, and once known the
-task, the lease, the start cursor and the deadline. On resume against the same
-identity, a step with a pending entry and no result picks up where it was:
-re-sending with the same key, waiting on the same task, or listening again from
-the recorded cursor until the recorded deadline.
+**Pending entries.** A `call` saves an intent after approval and input checks
+and before dispatch. It records the operation, arguments hash, identity and
+idempotency key, and saves a task id as soon as the provider returns one.
+The step keeps that intent until the completion ledger records its output.
+A replacement replays a recorded output, awaits a known task on the same
+surface, or retries a read under the connection's resume policy. A write
+marked `once` can use the original key if the operation, arguments and
+connection instance still match. The provider must return the original
+outcome for that key. Other unresolved writes, including writes whose provider
+gave no usable response, raise `connection_outcome_unknown`. A leased turn
+can cut and wake after a lost response when the pending record gives it a
+safe way to recover the outcome. A `wait` records its cursor and deadline
+before it listens and resumes from that cursor.
 
 **A call that waits on a long operation.** Once the operation has an id on
 record, the call does not depend on the connection instance either: any instance

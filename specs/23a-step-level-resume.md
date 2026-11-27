@@ -78,21 +78,22 @@ The hash is what keeps a resumed context from answering the wrong question: a ne
 
 ### `replayKey` and `durable: false`
 
-Two per-step fields, on every step kind (`StepReplay` in `packages/types/src/types/step.ts`):
+Every step accepts an `execution` setting with optional `durable`,
+`replayKey`, and `retry` fields. The retry policy counts attempts and controls
+backoff for ordinary dispatch failures. It propagates cancellation and
+turn-ending recovery errors. A failed dispatch that already started a child stops without an in-place retry.
+Recovery can replay the child by its existing ledger identity.
 
-```typescript
-interface StepReplay<TContext, I> {
-  durable?: boolean;                                    // default true
-  replayKey?(input: I, ctx: Context<TContext>): string;
-}
-```
+The legacy top-level durability and replay key fields and the `runCode`
+retry field remain valid for existing steps. A nested field takes precedence
+over its top-level counterpart.
 
 - **`replayKey`** replaces the path with a content key. The ledger records and looks the step up under `key:<replayKey(input, ctx)>`, so a leaf call finds its output wherever it runs — the fix for concurrent workers pulling timing-dependent batches from a shared queue. Keys are scoped to the execution, not to a parent: two dispatches that compute the same key share one entry, so the key must encode everything that makes the call distinct.
 - **`durable: false`** keeps the step out of the ledger: no entry is replayed, none is recorded, and the step runs again on every resume. The opt-out is per step and does not propagate — children of a non-durable parent resolve their own keys. Its effects re-run with it, including channel sends and `ctx.state` writes, which the checkpoint already restored.
 
 `execute()` resolves the key once per dispatch (`resolveLedgerKey`): none when `durable === false` or the kind is `schedule`; `key:<replayKey>` when a `replayKey` is set; the path otherwise. A `replayKey` that throws costs that dispatch its durability, never its run: the interpreter warns and executes the step without replay or recording.
 
-JSON workflow nodes carry both: `durable` as a boolean, and `replayKey` in a declarative form (`true`, or `{ from: [...] }`) that the hydrator builds into the function (`26-json-workflow-runtime` § Replay keys).
+JSON workflow nodes accept the same `execution` setting. The hydrator turns the declarative `replayKey` (`true` or `{ from: [...] }`) into a function (`26-json-workflow-runtime` § Replay keys).
 
 ## Recording and replay
 
@@ -197,7 +198,7 @@ Session totals add each turn's increase in usage rather than its context's total
 
 - Every turn reads the thread's history from the record. `seedSessionHistory` writes to it.
 - Before a turn runs, the record names the turn's execution and the ids of the messages it delivers, and adds the execution to `executions`: every execution the thread began, which `forget` and the thread's trail read (`23-durable-execution` § Forgetting).
-- When a turn finishes, the record stores the new history, clears the turn, and the turn's checkpoint and ledger are discarded.
+- A leased turn saves its baseline before any step can dispatch. When a turn finishes, the thread atomically stores the history and delivery receipt and clears the active turn. Its checkpoint and ledger are discarded only after that commit. A lost commit acknowledgement is checked against the stored receipt.
 - A turn that begins on a JSON workflow stores the workflow's source under `execution:<id>:flow`, and its record names the version and the source's hash (`23-durable-execution` § Stored flows).
 - When a turn is cut off, its record stays. If the same message ids arrive again — a host with at-least-once delivery re-sends what it never saw answered — the turn resumes on its recorded execution: finished steps replay and the turn continues. A turn whose record names another version than the harness's, and that stored its flow, runs that flow rebuilt, so every entry's path and input hash (§ Identity) are the ones recorded. Different messages abandon the cut-off turn: its checkpoint is cleared and they start a fresh turn.
 
@@ -286,8 +287,10 @@ The ledger lives under its own keys, outside `CheckpointSnapshot`. The baseline 
 `call` and `wait` steps (`35-connections`) write a **pending entry** before
 they reach a server: the call's idempotency key, the connection's identity,
 and once known the task, the lease, the start cursor and the deadline. Against
-the same identity, a step with a pending entry and no result picks up where it
-was on resume. Against a replaced connection, recorded results describe a
+the same identity, a pending read can retry, a known task can be awaited,
+and a `once` write can recover its original outcome with the same key.
+An unresolved write without a safe way to recover raises
+`connection_outcome_unknown`. Against a replaced connection, recorded results describe a
 world that is gone, so the connection's determinism decides: discard the
 ledger from the first step that used it and run live from there (after a reset
 when called for), or stop with `connection_resume_refused`

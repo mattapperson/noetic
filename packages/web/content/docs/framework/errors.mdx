@@ -45,6 +45,10 @@ Noetic wraps every framework-level failure in a structured `NoeticError` discrim
 | `connection_ref_invalid` | `connection`, `reason` | A ref was not issued by this harness, belongs to a different connection than the call's target, was used from another thread, or is stale. |
 | `connection_secret_refused` | `connection`, `op` | A `secret()` was used outside a field the operation marks `sensitive`, or by the model. |
 | `connection_input_required` | `connection`, `request` | A long-running operation asked a question nobody could answer. |
+| `acp_link_lost` | `stepId`, `cause` | A recoverable link dropped. A leased turn cuts and wakes to collect the original prompt. |
+| `acp_outcome_unknown` | `stepId`, optional `sessionId` | The original prompt may have run and its answer cannot be recovered. |
+| `subprocess_outcome_unknown` | `stepId`, optional `cause` | The subprocess may have run and the step has no recorded result. |
+| `connection_outcome_unknown` | `connection`, `op`, `key`, optional `retry` | The provider may have applied the write. A known task or a safe same-key retry can cut and wake the turn. |
 | `connection_resume_refused` | `connection`, `reason` | A resumed run's connection was replaced and cannot safely be driven again. |
 | `decision_refused` | `threadId`, `action`, `reason` | A decision passed to `harness.execute()` does not fit what the thread is waiting on: no turn is stuck, it carries both an `action` and an `output`, or its action is the wrong kind for the decision. |
 | `hold_refused` | `callId`, `reason` | `harness.execute()` could not take a decision for a [held tool call](/docs/framework/steps/invoke-tool#human-in-the-loop-approval). |
@@ -74,6 +78,9 @@ type NoeticError =
   | { kind: 'connection_ref_invalid'; connection: string; reason: string }
   | { kind: 'connection_secret_refused'; connection: string; op: string }
   | { kind: 'connection_input_required'; connection: string; request: { id: string; message: string; schema?: JsonSchema } }
+  | { kind: 'acp_link_lost'; stepId: string; cause: Error }
+  | { kind: 'acp_outcome_unknown'; stepId: string; sessionId?: string }
+  | { kind: 'connection_outcome_unknown'; connection: string; op: string; key: string; retry?: 'same-key' | 'task' }
   | { kind: 'connection_resume_refused'; connection: string; reason: string }
   | { kind: 'decision_refused'; threadId: string; action: string; reason: string }
   | { kind: 'hold_refused'; callId: string; reason: string }

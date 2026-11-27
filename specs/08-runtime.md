@@ -219,6 +219,14 @@ interface SubprocessAdapter {
 }
 ```
 
+An adapter can reject with `SubprocessLaunchError` when it knows the request
+did not start. A `runCode` step can retry that launch within its attempt
+budget. A generic rejection leaves acceptance uncertain, so the runtime
+does not resubmit the launch. A durable `runCode` step dispatched by a
+custom adapter or a JSON command keeps its launch intent until the step
+ledger records its completion. An unresolved intent reports `subprocess_outcome_unknown`
+on redelivery.
+
 An adapter does each of its three jobs where it can:
 
 | Adapter | Package | `step` request | `process` request | `open` |

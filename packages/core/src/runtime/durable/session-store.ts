@@ -41,6 +41,9 @@ const SessionRecordSchema = z.object({
       executionId: z.string(),
       /** The ids of the messages the turn delivers, in order. */
       messageIds: z.array(z.string()),
+      /** The delivered items, kept even if the first checkpoint write fails. */
+      inputItems: z.array(z.unknown()).optional(),
+      resourceId: z.string().optional(),
       /**
        * Set when the turn ended in a live process without finishing: it failed or was
        * cancelled. A turn with neither this nor `parked` was cut off by its process
