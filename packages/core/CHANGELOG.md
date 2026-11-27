@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.20 (2026-11-27)
+
+* feat: say in a JSON workflow document everything a TypeScript workflow can (#185) ([d448249](https://github.com/mattapperson/noetic/commit/d448249)), closes [#185](https://github.com/mattapperson/noetic/issues/185) [#184](https://github.com/mattapperson/noetic/issues/184) [#182](https://github.com/mattapperson/noetic/issues/182) [#184](https://github.com/mattapperson/noetic/issues/184) [#184](https://github.com/mattapperson/noetic/issues/184)
+
 ## @noetic-tools/core-v5.22.0-next.19 (2026-11-26)
 
 * feat(core): store a JSON workflow with each turn and resume on it (#184) ([3a8b17a](https://github.com/mattapperson/noetic/commit/3a8b17a)), closes [#184](https://github.com/mattapperson/noetic/issues/184)
