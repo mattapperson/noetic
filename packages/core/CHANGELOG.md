@@ -1,3 +1,7 @@
+## @noetic-tools/core-v5.22.0-next.21 (2026-11-27)
+
+* Recover interrupted durable workflows (#186) ([5aba218](https://github.com/mattapperson/noetic/commit/5aba218)), closes [#186](https://github.com/mattapperson/noetic/issues/186)
+
 ## @noetic-tools/core-v5.22.0-next.20 (2026-11-27)
 
 * feat: say in a JSON workflow document everything a TypeScript workflow can (#185) ([d448249](https://github.com/mattapperson/noetic/commit/d448249)), closes [#185](https://github.com/mattapperson/noetic/issues/185) [#184](https://github.com/mattapperson/noetic/issues/184) [#182](https://github.com/mattapperson/noetic/issues/182) [#184](https://github.com/mattapperson/noetic/issues/184) [#184](https://github.com/mattapperson/noetic/issues/184)
