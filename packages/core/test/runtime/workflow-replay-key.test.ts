@@ -2,6 +2,7 @@
 // batches swap between runs each get their own batch's answer. See spec 26 § Replay keys.
 
 import { describe, expect, it } from 'bun:test';
+import assert from 'node:assert';
 import type {
   ExecuteStepFn,
   ProcessSubprocessRequest,
@@ -10,7 +11,9 @@ import type {
   SubprocessHandle,
 } from '@noetic-tools/types';
 import { frameworkCast } from '@noetic-tools/types';
+import { createInMemorySubprocessAdapter } from '../../src/adapters/in-memory-subprocess-adapter';
 import { hydrateWorkflow } from '../../src/builders/workflow-source';
+import { workflow } from '../../src/builders/workflow-step';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
 import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
@@ -75,7 +78,15 @@ function workerPool(): WorkflowDocument {
       {
         kind: 'runCode',
         id: 'grade',
-        replayKey: true,
+        execution: {
+          durable: true,
+          replayKey: true,
+          retry: {
+            maxAttempts: 2,
+            backoff: 'fixed',
+            initialDelay: 0,
+          },
+        },
         execute: 'grade',
         subprocess: 'sandbox',
       },
@@ -98,6 +109,103 @@ function workerPool(): WorkflowDocument {
 }
 
 describe('JSON replayKey', () => {
+  it.each([
+    'lost',
+    'failed',
+    'exit-code',
+  ])('handles a document command reporting %s', async (mode) => {
+    const storage = createInMemoryStorage({
+      swap: true,
+    });
+    let writes = 0;
+    const adapter: SubprocessAdapter = {
+      ...createInMemorySubprocessAdapter(),
+      async spawn(request) {
+        assert(request.kind === 'process');
+        writes++;
+        if (mode === 'lost') {
+          throw new Error('the command started but the launch reply was lost');
+        }
+        const handle: SubprocessHandle = {
+          id: 'fixture',
+          status: 'running',
+          startedAt: 'now',
+        };
+        return {
+          handle,
+          settled: Promise.resolve({
+            ...handle,
+            status: 'failed',
+            metadata: {
+              error: {
+                message: 'command exited 7',
+              },
+              exitCode: mode === 'exit-code' ? 7 : undefined,
+            },
+          }),
+        };
+      },
+    };
+    const build = () =>
+      new AgentHarness({
+        name: 'json-command',
+        params: {},
+        agentGraph: workflow({
+          id: 'flow',
+          document: {
+            version: 1,
+            root: {
+              id: 'command',
+              kind: 'runCode',
+              execute: 'write',
+              subprocess: 'sandbox',
+              execution: {
+                retry: {
+                  maxAttempts: 2,
+                  backoff: 'fixed',
+                  initialDelay: 0,
+                },
+              },
+            },
+          },
+          resolveSubprocess: () => adapter,
+        }),
+        environment: {
+          storage: {
+            adapter: storage,
+          },
+        },
+      });
+    const delivery = {
+      threadId: 't',
+      messageId: 'same',
+    };
+    const first = build();
+    const second = build();
+    const unknown = {
+      noeticError: {
+        kind: 'subprocess_outcome_unknown',
+      },
+    };
+    try {
+      await first.execute('start', delivery);
+      if (mode !== 'lost') {
+        await expect(first.getAgentResponse(delivery)).rejects.toThrow('command exited 7');
+        expect(writes).toBe(mode === 'exit-code' ? 2 : 1);
+        return;
+      }
+      await expect(first.getAgentResponse(delivery)).rejects.toMatchObject(unknown);
+      await second.execute('start', delivery);
+      await expect(second.getAgentResponse(delivery)).rejects.toMatchObject(unknown);
+      expect(writes).toBe(1);
+    } finally {
+      await Promise.all([
+        first.close(),
+        second.close(),
+      ]);
+    }
+  });
+
   it('replays each worker its own batch when batches swap between runs', async () => {
     const storage = createInMemoryStorage();
     const harness = new AgentHarness({

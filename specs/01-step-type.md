@@ -25,6 +25,10 @@ type Step<I, O> =
   | { kind: 'sequence'; id: string; steps: ReadonlyArray<Step<I, O>> }
 ```
 
+Each variant accepts `execution?: StepExecution<TContext, I>`. Its optional
+`durable`, `replayKey`, and `retry` fields govern replay and failure handling.
+See `23a-step-level-resume` § Identity.
+
 ### Arrays of steps
 
 An array of steps runs in sequence, each step's output the next one's input.

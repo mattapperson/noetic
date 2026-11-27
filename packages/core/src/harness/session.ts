@@ -241,15 +241,11 @@ async function keepHistory({
   const { record } = session;
   const { threadId } = session.runner;
   if (record) {
-    // A finished turn's answer is kept, so its messages delivered again get it back.
-    if (answer !== undefined) {
-      await record.answered(ctx, answer);
-    }
-    await record.end(
-      ctx,
-      ctx.itemLog.items,
-      session.runner.queue.peekAll().map((message) => message.id),
-    );
+    await record.end(ctx, {
+      history: ctx.itemLog.items,
+      queuedIds: session.runner.queue.peekAll().map((message) => message.id),
+      answer,
+    });
     host.cuts?.forget(threadId);
     return;
   }
@@ -277,23 +273,32 @@ async function buildTurnContext({
   // The turn is starting or resuming here: nothing needs to watch over it.
   session.turnOptions = perTurnOptions;
   host.parkWatchers?.stop(threadId);
-  const messageIds = messages.map((m) => m.id);
+  const delivered = messages.map((m) => m.id);
+  const turn = await record?.redelivered(delivered);
+  const messageIds = turn?.messageIds ?? delivered;
   session.turnMessageIds = messageIds;
   const history = record ? await record.history() : session.accumulatedItems;
   const flow = await turnFlow({
     host,
     session,
-    messageIds,
+    turn,
   });
   session.turnGraph = frameworkCast<Step<ContextData, string, string> | undefined>(flow.graph);
   const { graph } = flow;
   const views = host.connections.turnViews(perTurnOptions.connections, graph);
   // A re-delivery of a cut-off turn's messages picks that turn up where it died.
-  const resumed = await record?.resume(messageIds, {
-    state: perTurnOptions.state,
-    contextLayers: perTurnOptions.contextLayers,
-    _broadcaster: session.runner.broadcaster,
-  });
+  const resumed = await record?.resume(
+    delivered,
+    {
+      state: perTurnOptions.state,
+      contextLayers: perTurnOptions.contextLayers,
+      _broadcaster: session.runner.broadcaster,
+    },
+    items,
+  );
+  if (turn && !resumed) {
+    throw new Error(`The input for turn '${turn.executionId}' could not be recovered.`);
+  }
   const ctx =
     resumed ??
     host.createContext({
@@ -338,6 +343,7 @@ async function buildTurnContext({
       record,
       ctx,
       messageIds,
+      inputItems: items,
       flow,
       keptSteers: perTurnOptions.keptSteers,
     });
@@ -392,7 +398,7 @@ async function storeTurnFlow({
 }
 
 /**
- * The flow the turn `messageIds` deliver runs (spec 23 § Versions). A new turn
+ * The flow the delivery runs (spec 23 § Versions). A new turn
  * runs the harness's. A turn on record that began under another version runs the
  * flow it stored, rebuilt here; when it stored none, or it cannot be rebuilt, the
  * turn moves to the harness's flow, and a failed rebuild is told as
@@ -401,19 +407,22 @@ async function storeTurnFlow({
 async function turnFlow({
   host,
   session,
-  messageIds,
+  turn,
 }: {
   host: SessionHost;
   session: Session;
-  messageIds: ReadonlyArray<string>;
+  turn: StoredTurnRecord | undefined;
 }): Promise<BegunFlow> {
   const { own } = host.flows;
-  const turn = await session.record?.redelivered(messageIds);
-  if (turn?.version === undefined || turn.version === own.version || turn.flow === undefined) {
+  if (
+    turn?.version === undefined ||
+    turn.flow === undefined ||
+    (turn.version === own.version && turn.flow === own.stored?.hash)
+  ) {
     return own;
   }
   const { threadId } = session.runner;
-  const rebuilt = await host.flows.rebuild(turn.executionId, turn.version);
+  const rebuilt = await host.flows.rebuild(turn.executionId, turn.version, turn.flow);
   if (rebuilt === undefined) {
     return own;
   }
@@ -597,7 +606,7 @@ async function failTurn({
 //#region Durable turn outcomes
 
 /**
- * A turn stopped by `lease_lost` or `ledger_write_failed` is cut, not failed
+ * A turn stopped by a recoverable interruption is cut, not failed
  * (spec 23 § Cut turns): its record stays, marked, and a wake runs it again once
  * its back-off is over. Resolves false when `error` does not cut the turn, or the
  * turn has been cut as often as it may be and fails instead.
@@ -725,6 +734,7 @@ async function beginStoredTurn({
   record,
   ctx,
   messageIds,
+  inputItems,
   flow,
   keptSteers,
 }: {
@@ -733,6 +743,7 @@ async function beginStoredTurn({
   record: ThreadRecord;
   ctx: Context;
   messageIds: ReadonlyArray<string>;
+  inputItems: ReadonlyArray<Item>;
   flow: BegunFlow;
   keptSteers: KeptSteers | undefined;
 }): Promise<void> {
@@ -757,7 +768,10 @@ async function beginStoredTurn({
         stored,
         rebuild: flow.failure,
       },
-      removed.map((steer) => steer.id),
+      {
+        removed: removed.map((steer) => steer.id),
+        inputItems,
+      },
     );
   } catch (error) {
     await host.connections.release(ctx.id);

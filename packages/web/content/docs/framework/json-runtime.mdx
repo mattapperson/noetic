@@ -87,21 +87,22 @@ Point your editor or validator at the bundled file (resolve it from the package,
 
 Seventeen node kinds are available, plus the `acp-agent` kind documented in [ACP Agent Steps](/docs/framework/acp-agents). Leaf nodes (`callModel`, `invokeTool`, `runCode`, `compute`, `decide`) perform work; connection nodes (`call`, `wait`, `verify`) act on and check the document's [connections](#connections); structural nodes (`sequence`, `inParallel`, `conditional`, `routeSwitch`, `loop`, `spawn`, `withContext`, `schedule`, `subflow`) compose them into trees.
 
-Every node takes two optional replay fields (see [Replay Identity](/docs/framework/durability#replay-identity)) plus optional `emitItems` and `customItems` fields (see [Emitting items](#emitting-items)):
+Every node accepts an optional `execution` setting, plus `emitItems` and `customItems`. See [Replay Identity](/docs/framework/durability#replay-identity) and [Emitting items](#emitting-items).
 
-| Field | Type | Effect |
+| Field inside `execution` | Type | Effect |
 |---|---|---|
 | `durable` | `boolean` | `false` on cheap orchestration nodes makes a resumed run re-run them instead of replaying their recorded output. |
 | `replayKey` | `true \| { from: string[] }` | Replay the node by its input rather than its position. `true` keys on the whole input; `from` keys on those top-level properties of the input parsed as JSON (the same lookup `over` uses). Ignored when `durable` is `false`. |
+| `retry` | `{ maxAttempts, backoff, initialDelay, maxDelay? }` | Retries ordinary dispatch failures using the specified attempt limit and delay in milliseconds. |
 
 The key is the node id plus a hash of the selected input, so two different nodes never share an entry, while nodes that share an id do — write the same leaf id into several worker paths and each worker replays its own batch's answer whichever path picks it up:
 
 ```json
 {
-  "kind": "sequence", "id": "worker-a", "durable": false,
+  "kind": "sequence", "id": "worker-a", "execution": { "durable": false },
   "steps": [
-    { "kind": "invokeTool", "id": "worker-a-pick", "toolName": "pick-batch", "durable": false },
-    { "kind": "callModel", "id": "grade", "instructions": "Grade this batch.", "replayKey": true }
+    { "kind": "invokeTool", "id": "worker-a-pick", "toolName": "pick-batch", "execution": { "durable": false } },
+    { "kind": "callModel", "id": "grade", "instructions": "Grade this batch.", "execution": { "replayKey": true } }
   ]
 }
 ```
@@ -264,7 +265,7 @@ Run a serialised code body. Unlike the programmatic `runCode` (which carries a c
   "kind": "runCode",
   "id": "transform",
   "execute": "const input = require('fs').readFileSync(0, 'utf8'); process.stdout.write(input.toUpperCase());",
-  "retry": { "maxAttempts": 3, "backoff": "exponential", "initialDelay": 100 },
+  "execution": { "retry": { "maxAttempts": 3, "backoff": "exponential", "initialDelay": 100 } },
   "subprocess": "sandbox"
 }
 ```

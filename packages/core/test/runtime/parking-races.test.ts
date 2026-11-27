@@ -192,7 +192,10 @@ function storedTurn(storage: StorageAdapter): Promise<StoredTurn['turn']> {
 //#endregion
 
 describe('a parked turn that took more than one message', () => {
-  it('is resumed by wake() as the one turn it was', async () => {
+  it.each([
+    'wake',
+    'redelivery',
+  ])('resumes as the one turn it was via %s', async (mode) => {
     const storage = createInMemoryStorage({
       swap: true,
     });
@@ -236,14 +239,27 @@ describe('a parked turn that took more than one message', () => {
       m: b,
     });
     mailbox.push('second');
-    expect(await second.wake(THREAD)).toEqual([
-      't',
-    ]);
+    if (mode === 'wake') {
+      expect(await second.wake(THREAD)).toEqual([
+        't',
+      ]);
+    } else {
+      await second.execute('two', {
+        ...THREAD,
+        messageId: 'm-1',
+      });
+    }
     const response = await second.getAgentResponse(THREAD);
     expect(response.text).toBe('b-1');
     // One model call, for the one turn: not two fresh turns with nothing to say.
     expect(b.calls).toBe(1);
     expect(await storedTurn(storage)).toBeUndefined();
+    await second.execute('three', {
+      ...THREAD,
+      messageId: 'm-2',
+    });
+    expect((await second.getAgentResponse(THREAD)).text).toBe(response.text);
+    expect(b.calls).toBe(1);
     await second.close();
   });
 });

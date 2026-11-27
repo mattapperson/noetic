@@ -430,6 +430,7 @@ export class ContextImpl implements Context<ContextData> {
    */
   enterStep(frame: FrontierFrame): ContextImpl {
     const parent = this._node;
+    parent.noteChild();
     const occurrence = parent.counts.get(frame.stepId) ?? this.takeRestored(parent, frame.stepId);
     parent.counts.set(frame.stepId, occurrence + 1);
     this._counted.add(parent);
@@ -487,6 +488,16 @@ export class ContextImpl implements Context<ContextData> {
    */
   currentPath(): string {
     return this._node.path;
+  }
+
+  /** Mark a child sent through an adapter, where it may run outside this context. */
+  noteChildDispatch(): void {
+    this._node.noteChild();
+  }
+
+  /** Whether retrying this lane would dispatch a subtree again. */
+  hasChildDispatch(): boolean {
+    return this._node.hasChild;
   }
 
   /**
@@ -751,11 +762,18 @@ export class PathNode {
   /** Dispatches beneath this path, by step id; the count is the next ordinal. */
   readonly counts = new Map<string, number>();
   private text?: string;
+  hasChild = false;
 
   constructor(
     private readonly parent: PathNode | undefined,
     private readonly segment: string,
   ) {}
+
+  noteChild(): void {
+    for (let node: PathNode | undefined = this; node && !node.hasChild; node = node.parent) {
+      node.hasChild = true;
+    }
+  }
 
   /** The full path: the parent's path plus this node's segment. Built once, on first read. */
   get path(): string {

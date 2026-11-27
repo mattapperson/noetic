@@ -442,9 +442,10 @@ options the agent last advertised — no `session/new` or `session/load`. Its
 `resumeTurn()` hands the session to this host: every update of the turn in
 flight arrives again, from the first, as this turn's output (not as replay),
 then each request the agent is still waiting on is asked again and answered by
-this host's handlers, and then the turn's result — at once if the agent
-finished while no host was attached, or when it does. With no turn running it
-resolves `undefined`. A keeper that is gone, or an agent with no such session,
+this host's handlers, and then the turn's result, as soon as the agent answers. The keeper keeps the answer after
+delivery, so another host can collect it if the first one died before saving
+the step. The next prompt replaces that answer. With no prompt to collect,
+it resolves `undefined`. A keeper that is gone, or an agent with no such session,
 rejects with `AcpConnectError`.
 
 **A durable run** stores the handle with the step's session record
@@ -1008,78 +1009,38 @@ for how that replay is told apart from the new turn.
 
 ### Resuming a step
 
-An ACP step is cut off like any other: the host dies while the agent works. On a
-durable run (`23a-step-level-resume`) the step keeps two things so a resume does
-not start the agent's work over.
+On a durable run, the step saves its intent before sending a prompt. The
+record names the agent and session, the prompt, the settings fingerprint and
+the subprocess adapter. For a session owned by the step, it also keeps the
+reattach handle if there is one. A failed intent write stops dispatch.
+The record lives at `execution:<root id>:pending:<ledger key>/acp-session`.
+The step removes it after its output is in the completion ledger. Until then,
+a kept agent can hand a replacement host the prompt's updates and result.
 
-**The agent's session.** When the step opens a session it stores the session id,
-its fingerprint (§ Instructions), the name of the subprocess adapter the step
-resolved to (§ The subprocess adapter) — and, when the agent can outlive its
-host, its reattach handle — with the run's
-pending entries, under `execution:<root id>:pending:<step path>/acp-session`,
-and removes it when the step finishes. A resumed step that finds one, written by
-the same agent id:
+A replacement reaches the same keeper through the stored adapter name,
+attaches to the same session and collects the original prompt. A live or
+finished prompt is collected by ID without sending another one. The keeper
+refuses to accept the same ID twice. Before sending a guidance prompt, the
+host saves its ID, guidance and retry count. A replacement can send that
+prompt only when the keeper confirms it never received the ID. A legacy
+intent without a prompt ID requires a retained result. A changed adapter name fails with
+`ACP_SESSION_ADAPTER_CONFLICT`. Changed session settings fail with
+`ACP_SESSION_SETTING_CONFLICT` and the host detaches from the agent.
 
-0. with a reattach handle, reaches the agent that kept working (§ A local agent
-   outlives its host), through the adapter that started it, and attaches to
-   the live session. A handle means something only to the adapter that made
-   it, so the step must resolve to the stored adapter name. One that now
-   resolves to another — its `subprocess`, its agent's, or the harness's
-   default changed, or the harness renamed the entry — fails with
-   `ACP_SESSION_ADAPTER_CONFLICT` before it connects anywhere: the agent may
-   still be working where it was started, and starting its work again
-   elsewhere could do it twice. The record stays, so a resume that resolves
-   to the first adapter still takes the turn. The check compares names, and
-   a name is all the record holds. A host that keeps the name and puts
-   another adapter behind it between runs is not caught: the step reattaches
-   through whatever the name now gives, and that adapter's `attach` decides
-   what the handle means to it — a keeper that is not there is
-   `gone: true`, and the step goes on as below. Keep a name on the adapter
-   that started the agents still running under it. A
-   record with no adapter name, written before names were kept, is tried
-   through the adapter the step resolves to. Its first turn collects
-   the turn the dead host left running — every update of it as this step's
-   output, the requests the agent still waits on answered by this host, then its
-   result — instead of prompting. Only when no turn was running does it prompt,
-   behind `ACP_RESUME_NOTICE`. When the agent or its session is confirmed gone
-   — an `AcpConnectError` with `gone: true`: the keeper's socket is missing or
-   refuses, the keeper runs no agent, or the agent has no such session — it
-   goes on as below. Any other failure fails the step, since the old turn may
-   already have changed things. Before it collects anything it compares the
-   session's stored fingerprint with the step's (§ Instructions): a different
-   one fails the step with `ACP_SESSION_SETTING_CONFLICT`, and the host lets
-   go of the agent (`AcpAgentConnection.detach`) rather than stopping it, so a
-   host that resumes with the settings it started with can still take the
-   turn. Letting go tells the keeper so (`release`): the agent keeps running
-   whatever exit policy this host's hello set. Every failure before the host
-   adopts the agent — the bridge, the handshake — lets go the same way. A record written before fingerprints were kept has none and is
-   accepted; a reattached session keeps its stored fingerprint for later
-   reuse, and a reloaded one is stored with the fingerprint it was reloaded
-   with.
-1. connects, and when the agent advertises `loadSession` calls `session/load`
-   with the stored id. The `session/update` notifications the agent replays
-   while it loads are its history, not this turn's work: they reach only
-   raw-event consumers, marked `replay: true` (§ Output → harness events).
-2. sends the step's prompt behind a notice that the previous turn was cut off
-   and that finished work is not to be redone (`ACP_RESUME_NOTICE`). The
-   conversation history is not prepended: the session has it.
+If the transport drops and a handle can recover the prompt, the host detaches
+and the leased turn cuts with `acp_link_lost`. Waking the turn tries the same
+session after the normal back-off. An agent or session confirmed gone, a step
+without a reattach handle, and a reused session whose answer cannot be tied
+to this dispatch can all leave `acp_outcome_unknown`. The step refuses to
+send another prompt. A transient failure to reach the keeper only retries the attachment.
 
-An agent that does not advertise `loadSession`, or that fails the load because
-it no longer has the session (JSON-RPC `-32002`, and nothing else), gets a new session and the prompt with the conversation
-history, as on a first run, and the new id replaces the stored one. Any other
-failure of the load fails the step rather than starting the work over. A failed
-load leaves nothing tracked on the connection.
-A step that names `session.load` itself keeps no record: its session is the
-caller's.
-
-**The tool calls it made.** Each call the agent makes through the tool bridge is
-recorded in the step ledger as it finishes (`38-acp-tools` § Replay), so an
-agent that makes a call again on resume, in a reloaded session or a new one,
-gets the result it got the first time and the tool does not run.
-
-What a resume cannot recover is work the agent did with its own tools and its
-`fs/*` and `terminal/*` calls: those are the agent's, and it is the agent,
-reading its reloaded session, that decides not to repeat them.
+The tool bridge records completed calls in the step ledger and uses the
+agent's original call ID to match a redelivery. If a matching receipt lacks
+enough identity to tell a redelivery from a new call, the outcome is unknown
+(`38-acp-tools` § Replay). The keeper does not establish whether an agent's own tools, files,
+terminal commands or third-party services finished their writes. A host
+must establish that outcome before retrying a lost execution that may have
+changed external state.
 
 **A kept connection holds the turn's connections.** Its agent may call a step
 entry's tools on a later turn, so a connection kept past its step

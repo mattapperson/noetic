@@ -437,6 +437,8 @@ interface WorkflowNodeBase {
   id: string;
   /** Options read from the harness `params` when the node runs. */
   fromParams?: WorkflowFromParams;
+  /** Execution settings shared by every node. */
+  execution?: z.infer<typeof StepExecutionSchema>;
   /**
    * Whether a resumed run replays this node's recorded output. Defaults to `true`;
    * `false` makes the node run again on every resume. See spec 23a § Identity.
@@ -1173,9 +1175,21 @@ const ChannelSchema: z.ZodType<WorkflowChannel> = z
   })
   .strict();
 
+const StepExecutionSchema = z
+  .object({
+    durable: z.boolean().optional(),
+    replayKey: WorkflowReplayKeySchema.optional(),
+    retry: RetryPolicySchema.optional(),
+  })
+  .strict()
+  .meta({
+    id: 'WorkflowStepExecution',
+  });
+
 const SHARED_FIELDS = {
   id: z.string().min(1),
   fromParams: fromParams([]),
+  execution: StepExecutionSchema.optional(),
   durable: z.boolean().optional(),
   replayKey: WorkflowReplayKeySchema.optional(),
   emitItems: WorkflowEmitItemsSchema.optional(),

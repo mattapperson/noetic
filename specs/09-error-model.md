@@ -189,6 +189,10 @@ Durable execution (`23-durable-execution`) adds two `NoeticError` kinds, raised 
 |---|---|---|
 | `lease_lost` | `executionId`, `term`, `reason` | Another harness holds or took the thread's turn. Raised when the lease cannot be taken, and when a renewal or a ledger write shows it is gone. `executionId` is the thread id when the turn had no execution yet. |
 | `turn_stuck` | `executionId`, `path`, `from`, `to` | A turn resumed under flow version `to` would have to redo the step at `path`, which had a lasting effect under version `from`, so it stopped (`23-durable-execution` § Versions). A turn that began on a JSON workflow runs that workflow again and does not reach this unless the workflow could not be rebuilt (§ Stored flows). The host settles it with a decision item passed to `harness.execute()`. |
+| `acp_link_lost` | `stepId`, `cause: Error` | A recoverable ACP link dropped. A leased turn cuts and wakes to collect the original prompt. |
+| `acp_outcome_unknown` | `stepId`, optional `sessionId` | A prompt may have run and its result cannot be recovered. |
+| `subprocess_outcome_unknown` | `stepId`, optional `cause` | A subprocess launch may have run and its result cannot be recovered. |
+| `connection_outcome_unknown` | `connection`, `op`, `key`, optional `retry: 'same-key' or 'task'` | A provider write may have run. The optional retry names a safe way to recover the result. |
 | `ledger_write_failed` | `executionId`, `path`, `cause: Error` | A step-ledger entry or the thread record could not be written, so the turn stopped. `path` is the ledger path, `session:<threadId>`, or `spend:<id>` for a spend record `forget` could not settle (`23-durable-execution` § Forgetting). |
 
 ## Held Call Errors

@@ -6,7 +6,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
-import type { Step } from '@noetic-tools/types';
+import type { ContextData, Step, StepWaitOutput } from '@noetic-tools/types';
 import { frameworkCast, isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
 import { inParallel } from '../../src/builders/control-flow-builders';
 import { loop } from '../../src/builders/loop-builder';
@@ -15,6 +15,7 @@ import { connection } from '../../src/connections/handle';
 import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { acpSessionsOf } from '../../src/runtime/acp-session-store';
+import { createInMemoryStorage } from '../../src/runtime/in-memory-storage';
 import { until } from '../../src/until/predicates';
 import { harnessInternal } from '../../src/util/harness-internals';
 import { makeLayer } from '../_helpers';
@@ -214,6 +215,153 @@ describe('harness ↔ connection steps', () => {
       service: 'api',
     });
     await harness.close();
+  });
+
+  test.each([
+    'wait',
+    'around',
+    'match',
+    'match-lost',
+    'late-filter',
+  ])('recovers a matched wait beyond the deadline after a cut in %s', async (cut) => {
+    const backing = createInMemoryStorage({
+      swap: true,
+    });
+    let failed = false;
+    const storage = {
+      ...backing,
+      async swap<T>(key: string, prev: T | null, next: T) {
+        if ((!failed || cut === 'match-lost') && next && typeof next === 'object') {
+          const losesMatch =
+            (cut === 'match' || cut === 'match-lost') &&
+            key.includes(':pending:') &&
+            Reflect.has(next, 'matched');
+          const losesCompletion =
+            key.includes(':ledger:') &&
+            Reflect.get(next, 'stepId') === (cut === 'around' ? 'finish-around' : 'wait');
+          if (losesMatch || losesCompletion) {
+            failed = true;
+            throw new Error('lost wait record');
+          }
+        }
+        return backing.swap!(key, prev, next);
+      },
+    };
+    const source = createInMemoryConnection({
+      instance: 'same-deployments',
+      events: {
+        ready: {
+          replay: cut === 'wait' ? 'durable' : 'live',
+        },
+      },
+    });
+    let now = 1_000;
+    let events = 0;
+    const matched = Promise.withResolvers<void>();
+    const filter = Promise.withResolvers<boolean>();
+    const wait = step.wait({
+      id: 'wait',
+      connection: 'app',
+      event: 'ready',
+      timeoutMs: cut === 'late-filter' ? 10 : 1_000,
+      filter: () => {
+        matched.resolve();
+        return cut === 'late-filter' ? filter.promise : true;
+      },
+      around: [
+        runCode({
+          id: 'emit',
+          async execute() {
+            events++;
+            source.connection.emit('ready', 'confirmed');
+          },
+        }),
+        runCode({
+          id: 'finish-around',
+          async execute() {
+            await matched.promise;
+          },
+        }),
+      ],
+    });
+    const build = () =>
+      new AgentHarness({
+        name: 'wait-recovery',
+        params: {},
+        now: () => now,
+        connections: {
+          app: source,
+        },
+        agentGraph: runCode<ContextData, string, string>({
+          id: 'flow',
+          execute: async (_input, ctx) => {
+            const result = frameworkCast<StepWaitOutput>(
+              await ctx.harness.run(wait, undefined, ctx),
+            );
+            return String(result.event.payload);
+          },
+        }),
+        environment: {
+          storage: {
+            adapter: storage,
+            lease: {
+              cut: {
+                delayMs: 0,
+              },
+            },
+            park: {
+              autoWake: false,
+            },
+          },
+        },
+      });
+    const delivery = {
+      threadId: 't',
+      messageId: 'wait',
+    };
+    const first = build();
+    const second = build();
+    try {
+      await first.execute('start', delivery);
+      if (cut === 'late-filter') {
+        await expect(first.getAgentResponse(delivery)).rejects.toThrow('saw no matching');
+        filter.resolve(true);
+        await Bun.sleep(1);
+        const keys = (await storage.list('execution:')).filter((key) => key.includes(':pending:'));
+        const entries = await Promise.all(
+          keys.map((key) => storage.get<Record<string, unknown>>(key)),
+        );
+        expect(entries.some((entry) => entry?.matched !== undefined)).toBe(false);
+        return;
+      }
+      const initial = await first.getAgentResponse(delivery);
+      expect(failed).toBe(true);
+      if (cut === 'match') {
+        expect(initial.text).toBe('confirmed');
+        expect(events).toBe(1);
+        return;
+      }
+      expect(initial.cut?.reason).toBe('ledger_write_failed');
+      now += 2_000;
+      expect(await second.wake()).toEqual([
+        't',
+      ]);
+      if (cut === 'match-lost') {
+        await expect(second.getAgentResponse(delivery)).rejects.toMatchObject({
+          noeticError: {
+            kind: 'connection_outcome_unknown',
+          },
+        });
+      } else {
+        expect((await second.getAgentResponse(delivery)).text).toBe('confirmed');
+      }
+      expect(events).toBe(1);
+    } finally {
+      await Promise.all([
+        first.close(),
+        second.close(),
+      ]);
+    }
   });
 
   test('step.call runs gate 5: the approver is asked for approve-policy ops, and steering layers refuse', async () => {

@@ -128,6 +128,14 @@ function formatMessage(error: NoeticError): string {
       return `Connection '${error.connection}' needs input nobody could give: ${error.request.message}`;
     case 'connection_resume_refused':
       return `Connection '${error.connection}' cannot be resumed: ${error.reason}`;
+    case 'connection_outcome_unknown':
+      return `Connection '${error.connection}' has an unknown outcome for '${error.op}' (key '${error.key}').`;
+    case 'subprocess_outcome_unknown':
+      return `Subprocess step '${error.stepId}' has an unknown outcome${error.cause ? `: ${error.cause.message}` : '.'}`;
+    case 'acp_outcome_unknown':
+      return `ACP step '${error.stepId}' has an unknown outcome${error.sessionId ? ` for session '${error.sessionId}'` : ''}.`;
+    case 'acp_link_lost':
+      return `ACP step '${error.stepId}' lost its link: ${error.cause.message}`;
     case 'lease_lost':
       return `Execution '${error.executionId}' lost its lease at term ${error.term}: ${error.reason}`;
     case 'ledger_write_failed':

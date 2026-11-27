@@ -213,6 +213,7 @@ export function routeSwitch(opts: SwitchPlan): StepConditional<ContextData, unkn
     minConfidence: 'minConfidence' in opts ? opts.minConfidence : undefined,
     uncertain: opts.uncertain,
     default: 'default' in opts ? opts.default : undefined,
+    execution: opts.execution,
     durable: opts.durable,
     replayKey: opts.replayKey,
   });
@@ -262,6 +263,7 @@ function buildSwitch(plan: SwitchPlan): StepConditional<ContextData, unknown, un
   ];
   return conditional<ContextData, unknown, unknown>({
     id: plan.id,
+    execution: plan.execution,
     durable: plan.durable,
     replayKey: plan.replayKey,
     route: async (input, ctx, run) => {

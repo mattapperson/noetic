@@ -167,14 +167,15 @@ Each step runs on its own *lane* of the context — a view that shares state, hi
 - Different step ids under one parent always get distinct paths (`/left#0`, `/right#0`), whichever finishes first.
 - The same step id run concurrently under one parent is numbered in dispatch order (`/worker#0`, `/worker#1`). That survives a resume only if the dispatch order does; when it depends on timing, give the step a `replayKey`.
 
-That breaks when the work a position receives depends on timing. Concurrent workers pulling batches from a shared queue may pick different batches on resume, and positional replay would hand one batch's answer to another. Steps that return nothing and mutate state are worse off: replay skips them, so their state change is lost. Every step accepts two fields for this:
+That breaks when the work a position receives depends on timing. Concurrent workers pulling batches from a shared queue may pick different batches on resume, and positional replay would hand one batch's answer to another. Steps that return nothing and mutate state are worse off: replay skips them, so their state change is lost. Every step accepts an optional `execution` setting.
 
-| Field | Default | Effect |
+| Field inside `execution` | Default | Effect |
 |---|---|---|
 | `durable` | `true` | `false` keeps the step out of the ledger entirely: never replayed, never recorded, re-run on every resume. Applies to this step only — its children keep their own setting. |
 | `replayKey` | — | `(input, ctx) => string`. Records and replays the step under `key:<replayKey>` instead of its path, so it finds its output wherever it runs. Dispatches with the same key share one entry, so include everything that makes the call distinct. |
+| `retry` | One attempt | Sets the number of attempts and the backoff for ordinary failures. Cancellation and unresolved external outcomes still stop the dispatch. A dispatch that already started a child stops without an in-place retry. |
 
-JSON workflow nodes take the same two fields; there `replayKey` is declarative — `true` or `{ "from": ["batchId"] }` — and the hydrator builds the function. See [JSON Runtime](/docs/framework/json-runtime#node-kinds).
+JSON workflow nodes take the same setting. Their replay key is declarative (`true` or `{ "from": ["batchId"] }`). Existing top-level fields remain supported, with the nested fields taking precedence. See [JSON Runtime](/docs/framework/json-runtime#node-kinds).
 
 The usual shape is "replay the expensive leaves, re-run the cheap orchestration":
 
@@ -187,7 +188,7 @@ const queue: string[] = ['batch-1', 'batch-2', 'batch-3'];
 // The paid call: keyed by content, so it replays whichever worker runs it.
 const gradeBatch = runCode<ContextData, string, string>({
   id: 'grade-batch',
-  replayKey: (batch) => `grade:${batch}`,
+  execution: { replayKey: (batch) => `grade:${batch}` },
   execute: async (batch) => `graded ${batch}`,
 });
 
@@ -345,8 +346,9 @@ const harness = new AgentHarness({
 
 - **Taking over.** A harness that finds the turn held waits for the lease to run out, up to `waitMs` (default: one `ttlMs`). A holder that died stops renewing, so a restarted host picks its turn up without retrying. If the turn is still held after the wait, `getAgentResponse()` rejects with `lease_lost`.
 - **Being replaced.** A harness that stalled past its lease and came back finds a newer writer's term on its next ledger write, stops with `lease_lost`, and does not make another paid call.
+- **The thread commits the answer before cleanup.** A leased turn saves its baseline before dispatch. The thread keeps its ledger until the history and delivery receipt land together, so a crash between the last step and the thread commit can replay the answer with the same message ids.
 - **Failed writes stop the turn.** Under a lease, a ledger entry that cannot be written raises `ledger_write_failed` instead of a warning, so a turn never runs on with work a resume could not replay.
-- **A stopped turn is cut, not failed.** Everything before a `ledger_write_failed` stop is on record, so the turn runs again from there. `getAgentResponse()` resolves with `cut: { reason, attempt, wakeAt }` (event `{name}:turn_cut`), the turn stays on record, and `getNextWakeTime()` and a routine `wake()` bring it back after a back-off: 1 s, doubling each time, at most 60 s. After 3 cuts the next one fails the turn as before. Tune it with `lease: { cut: { attempts, delayMs, maxDelayMs } }`; `attempts: 0` turns it off.
+- **A stopped turn is cut, not failed.** The turn can resume after `ledger_write_failed`, a recoverable ACP link drop, or a connection response loss with a recorded task or safe same-key retry. `getAgentResponse()` resolves with `cut: { reason, attempt, wakeAt }` (event `{name}:turn_cut`), the turn stays on record, and `getNextWakeTime()` and a routine `wake()` bring it back after a back-off: 1 s, doubling each time, at most 60 s. After 3 cuts the next one fails the turn as before. Tune it with `lease: { cut: { attempts, delayMs, maxDelayMs } }`; `attempts: 0` turns it off.
 - **A replaced harness is told so.** On `lease_lost` while the other holder still runs the turn, the response is `cut` with `reason: 'lease_lost'` and `wakeAt` when that holder's lease runs out; this harness writes and counts nothing. If the other holder already finished it, the response rejects with `lease_lost` as before.
 - **Name the holder after a stable identity.** Each harness needs its own `holder`; the default is a random id. A host with a stable identity that runs once at a time, such as a Cloudflare Durable Object, passes that identity (`ctx.id.toString()`): coming back after its process died, it takes its own leases over at once rather than waiting one `ttlMs`.
 
@@ -464,9 +466,9 @@ const harness = new AgentHarness({
 });
 ```
 
-- **The version names itself.** With no `version`, the harness takes `workflow-<hash>`: a hash of every document in the graph (alone or among other steps) and of the named workflows they can refer to. An edited document or subflow is a new version. Key order does not matter. Set `version` to name it yourself; the workflow is stored and resumed the same way.
+- **The version names itself.** With no `version`, the harness takes `workflow-<hash>`: a hash of every document in the graph (alone or among other steps) and of the named workflows they can refer to. Key order does not matter. You can set `version` to name it yourself. The stored source hash still pins unfinished turns when two releases have the same version name.
 - **Each turn stores the workflow it began on.** The document, and every named workflow, go to storage with the turn when it begins, and are deleted when it ends. One copy per unfinished turn: storage in use grows with the turns in flight times the size of their documents.
-- **A resumed turn finishes on it.** A turn that was cut off, parked or re-delivered, and is picked up by a harness on an edited document, runs the document it began under. Every recorded step replays, nothing runs twice, and there is no `turn_stuck`. The next turn of the thread runs the new document.
+- **A resumed turn finishes on it.** A turn that was cut off, parked or re-delivered, and is picked up by a harness on an edited document, runs the document it began under. Completed steps with ledger entries replay their recorded outputs. Incomplete calls follow their recovery rules. The next turn of the thread runs the new document.
 - **The code is yours, today's.** The old document runs with the tools, agents, connections and layers of the harness that resumes it.
 - **No secret is stored.** A document names its secrets (`{ "$secret": "name" }`); values are resolved when a call is sent.
 

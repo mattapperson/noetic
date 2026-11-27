@@ -25,6 +25,7 @@ import type { StepLedger } from '../runtime/durable/step-ledger';
 import { REPLAY_KEY_PREFIX } from '../runtime/durable/step-ledger';
 import type { EventBroadcaster } from '../runtime/event-broadcaster';
 import { allowCustomItems, appendReplayed, beginEmitItems, emitStepItems } from './emit-items';
+import { retryStep } from './execute-run-code';
 import { dispatchStepKind, executeLocally } from './step-kind-dispatch';
 import { isMutableContext } from './typeguards';
 
@@ -96,14 +97,15 @@ export function resolveLedgerKey<TContext, I, O>(
   if (!impl?.ledger || step.id.length === 0) {
     return undefined;
   }
-  if (step.durable === false || step.kind === 'schedule') {
+  if ((step.execution?.durable ?? step.durable) === false || step.kind === 'schedule') {
     return undefined;
   }
-  if (!step.replayKey) {
+  const replay = step.execution?.replayKey ? step.execution : step;
+  if (!replay.replayKey) {
     return impl.currentPath();
   }
   try {
-    return `${REPLAY_KEY_PREFIX}${step.replayKey(input, ctx)}`;
+    return `${REPLAY_KEY_PREFIX}${replay.replayKey(input, ctx)}`;
   } catch (error) {
     console.warn(
       `execute: replayKey for step "${step.id}" threw; running it without replay or recording:`,
@@ -126,6 +128,7 @@ function replayFromLedger<TContext, I, O>(opts: {
   ledger: StepLedger | undefined;
   ledgerKey: string | undefined;
   inputHash: string | undefined;
+  positionalPath: string | undefined;
   step: Step<TContext, I, O>;
   stepCtx: Context<TContext>;
   broadcaster: EventBroadcaster | undefined;
@@ -139,17 +142,22 @@ function replayFromLedger<TContext, I, O>(opts: {
   | {
       hit: false;
     } {
-  const { ledger, ledgerKey, inputHash, step, stepCtx, broadcaster, agentName } = opts;
+  const { ledger, ledgerKey, inputHash, positionalPath, step, stepCtx, broadcaster, agentName } =
+    opts;
   if (!ledger || ledgerKey === undefined || ledger.isEmpty) {
     return {
       hit: false,
     };
   }
-  const replayed = ledger.take(ledgerKey, {
-    id: step.id,
-    kind: step.kind,
-    inputHash,
-  });
+  const replayed = ledger.take(
+    ledgerKey,
+    {
+      id: step.id,
+      kind: step.kind,
+      inputHash,
+    },
+    positionalPath,
+  );
   if (!replayed) {
     return {
       hit: false,
@@ -211,42 +219,46 @@ async function recordToLedger<TContext, I, O>(opts: {
   output: O;
   /** Body runs of a JSON workflow loop, for `$runs` on replay. */
   runs: number | undefined;
-}): Promise<void> {
+}): Promise<boolean> {
   const { ledger, ledgerKey, inputHash, lane, positionalPath, step, output, runs } = opts;
   if (!ledger || ledgerKey === undefined) {
-    return;
+    return false;
   }
   const items = lane?.appendedItems() ?? [];
   const streamed = lane?.emittedIndices() ?? [];
-  const stored = await ledger.record({
-    path: ledgerKey,
-    stepId: step.id,
-    kind: step.kind,
-    output,
-    inputHash,
-    ...(items.length > 0
-      ? {
-          items,
-        }
-      : {}),
-    ...(streamed.length > 0
-      ? {
-          streamed,
-        }
-      : {}),
-    ...(runs === undefined
-      ? {}
-      : {
-          runs,
-        }),
-    completedAt: new Date().toISOString(),
-  });
+  const stored = await ledger.record(
+    {
+      path: ledgerKey,
+      stepId: step.id,
+      kind: step.kind,
+      output,
+      inputHash,
+      ...(items.length > 0
+        ? {
+            items,
+          }
+        : {}),
+      ...(streamed.length > 0
+        ? {
+            streamed,
+          }
+        : {}),
+      ...(runs === undefined
+        ? {}
+        : {
+            runs,
+          }),
+      completedAt: new Date().toISOString(),
+    },
+    positionalPath,
+  );
   /* A positional record prunes what recorded beneath it. A `key:` record sits at no
    * position, so the rounds and child steps that recorded under this dispatch's path
    * are dropped here: the step now replays from its key, and nothing reads them. */
   if (stored && ledgerKey.startsWith(REPLAY_KEY_PREFIX) && positionalPath) {
     await ledger.dropWithin(positionalPath);
   }
+  return stored;
 }
 
 /**
@@ -402,6 +414,7 @@ async function executeStep<TContext, I, O>(
     ledger,
     ledgerKey,
     inputHash,
+    positionalPath,
     step,
     stepCtx,
     broadcaster,
@@ -432,18 +445,44 @@ async function executeStep<TContext, I, O>(
   const hookStep = frameworkCast<Step>(step);
   const hookCtx = frameworkCast<Context>(stepCtx);
   let result: O;
+  let cleanup: ((stored: boolean) => Promise<void>) | undefined;
   try {
     const before = hooks?.beforeStep;
     if (before) {
       await runStepHook(step.id, () => before(hookStep, hookCtx));
     }
     await beginEmitItems(step, input, stepCtx);
-    result = await dispatchStepKind(step, input, {
-      stepCtx,
-      baseCtx,
-      ledgerKey,
-      executeStep: (s, i, c) => execute(s, i, c),
-    });
+    const dispatch = () =>
+      dispatchStepKind(step, input, {
+        stepCtx,
+        baseCtx,
+        ledgerKey,
+        onRecorded: (release) => {
+          const prior = cleanup;
+          cleanup = prior
+            ? async (stored) => {
+                await prior(stored);
+                await release(stored);
+              }
+            : release;
+        },
+        executeStep: (s, i, c) => execute(s, i, c),
+      });
+    const retry = step.execution?.retry;
+    // runCode shares the attempt budget between launch and its local body.
+    result =
+      step.kind === 'runCode' || !retry
+        ? await dispatch()
+        : await retryStep({
+            stepId: step.id,
+            ctx: stepCtx,
+            retry,
+            run: async () => {
+              await cleanup?.(false);
+              cleanup = undefined;
+              return dispatch();
+            },
+          });
     // Inside the try, so an item the schemas refuse fails the dispatch like any other
     // error; before the ledger record, so the entry holds the items and replays them.
     await emitStepItems(step, result, stepCtx);
@@ -467,6 +506,7 @@ async function executeStep<TContext, I, O>(
       );
     }
   } catch (error) {
+    await cleanup?.(false);
     leaveParking?.();
     lane?.releaseDispatch();
     drains?.release(frameworkCast<Context>(stepCtx));
@@ -492,16 +532,21 @@ async function executeStep<TContext, I, O>(
   /* Record the completed step so a resumed run replays this output rather than
    * re-running the step. Only successes are recorded: a step that threw must run
    * again. */
-  await recordToLedger({
-    ledger,
-    ledgerKey,
-    inputHash,
-    lane,
-    positionalPath,
-    step,
-    output: result,
-    runs: step.kind === 'loop' ? loopRuns(baseCtx, step) : undefined,
-  });
+  let stored = false;
+  try {
+    stored = await recordToLedger({
+      ledger,
+      ledgerKey,
+      inputHash,
+      lane,
+      positionalPath,
+      step,
+      output: result,
+      runs: step.kind === 'loop' ? loopRuns(baseCtx, step) : undefined,
+    });
+  } finally {
+    await cleanup?.(stored);
+  }
 
   /* Durability boundary (spec 23): snapshot after each completed step, so a crash
    * lands on a checkpoint that includes the item-log and layer-state mutations this

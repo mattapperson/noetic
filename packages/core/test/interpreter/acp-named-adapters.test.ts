@@ -164,7 +164,10 @@ function recordingAgent(
         },
         ...(connect.reattach
           ? {
-              resumeTurn: async () => done,
+              resumeTurn: async ({ promptId }) => ({
+                ...done,
+                promptId,
+              }),
             }
           : {}),
         async cancel() {},

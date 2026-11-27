@@ -86,18 +86,32 @@ export function watchTransport(
     once: true,
   });
 
-  // A pass-through that reports end-of-stream: `flush` fires once the agent's
-  // readable is exhausted, however it ended.
-  const readable = transport.readable.pipeThrough(
-    new TransformStream<Uint8Array, Uint8Array>({
-      flush() {
-        die('closed its output stream');
-      },
-    }),
-  );
+  if (signal?.aborted) {
+    onAbort();
+  }
+
+  // Report both an orderly EOF and a failed runner socket to pending requests.
+  const reader = transport.readable.getReader();
+  const watched = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          die('closed its output stream');
+          controller.close();
+        } else {
+          controller.enqueue(chunk.value);
+        }
+      } catch {
+        die('lost its output stream');
+        controller.close();
+      }
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
 
   return {
-    readable,
+    readable: watched,
     death,
     shutdown(reason = 'connection was closed') {
       die(reason);

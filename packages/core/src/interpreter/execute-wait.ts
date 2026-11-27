@@ -33,6 +33,7 @@ import { isStepList } from './step-walk';
 export interface ExecuteWaitOptions {
   /** The step's ledger key, from which its pending entry derives. */
   ledgerKey?: string;
+  onRecorded?(cleanup: (stored: boolean) => Promise<void>): void;
 }
 
 /** How listening ended. */
@@ -108,6 +109,7 @@ async function passesFilter<TContext, I>(
 /** Consumes the stream until an event the filter accepts arrives, or the stream ends. */
 async function listenForMatch<TContext, I>(
   listen: ListenContext<TContext, I>,
+  save: (event: ConnectionEvent) => boolean,
 ): Promise<ListenOutcome> {
   const { step, stream } = listen;
   // The registry's stream emits `connection_event` and `stream_changed` (once each).
@@ -126,6 +128,9 @@ async function listenForMatch<TContext, I>(
       continue;
     }
     if (step.filter && !(await passesFilter(step.filter, event, listen))) {
+      continue;
+    }
+    if (!save(event)) {
       continue;
     }
     return {
@@ -148,6 +153,7 @@ function nowOf(ctx: Context): number {
 function deadlineTimer(
   remainingMs: number,
   signal: AbortSignal,
+  stop: () => void,
 ): {
   promise: Promise<undefined>;
   clear: () => void;
@@ -155,8 +161,14 @@ function deadlineTimer(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
   const promise = new Promise<undefined>((resolve) => {
-    timer = setTimeout(() => resolve(undefined), Math.max(0, remainingMs));
-    onAbort = () => resolve(undefined);
+    onAbort = () => {
+      stop();
+      resolve(undefined);
+    };
+    timer = setTimeout(onAbort, Math.max(0, remainingMs));
+    if (signal.aborted) {
+      onAbort();
+    }
     signal.addEventListener('abort', onAbort, {
       once: true,
     });
@@ -192,12 +204,18 @@ function timeoutError<TContext, I>(step: StepWait<TContext, I, unknown>): Noetic
 }
 
 /** Waits for the listener or the deadline, whichever comes first; `undefined` means the deadline. */
-async function awaitOutcome(
-  matched: Promise<ListenOutcome>,
-  remainingMs: number,
-  signal: AbortSignal,
-): Promise<ListenOutcome | undefined> {
-  const timer = deadlineTimer(remainingMs, signal);
+async function awaitOutcome({
+  matched,
+  remainingMs,
+  signal,
+  stop,
+}: {
+  matched: Promise<ListenOutcome>;
+  remainingMs: number;
+  signal: AbortSignal;
+  stop: () => void;
+}): Promise<ListenOutcome | undefined> {
+  const timer = deadlineTimer(remainingMs, signal, stop);
   try {
     return await Promise.race([
       matched,
@@ -208,15 +226,15 @@ async function awaitOutcome(
   }
 }
 
-/** Records the pending entry once the server confirms the subscription; resolves the deadline. */
+/** Records the pending entry once the server confirms the subscription. */
 async function recordListening<TContext, I>(
   listen: ListenContext<TContext, I>,
   prior: PendingEntry | undefined,
-): Promise<number> {
+): Promise<PendingEntry> {
   const { step, connection, stream } = listen;
   const { cursor } = await stream.ready;
   const deadline = prior?.deadline ?? nowOf(frameworkCast<Context>(listen.ctx)) + step.timeoutMs;
-  await connection.pending?.write({
+  const entry: PendingEntry = {
     stepId: step.id,
     kind: 'wait',
     connection: connection.resolved.name,
@@ -225,18 +243,15 @@ async function recordListening<TContext, I>(
     cursor: prior?.cursor ?? cursor,
     deadline,
     event: step.event,
-    ...(replaysFromCursor(listen)
-      ? {
-          durable: true,
-        }
-      : {}),
+    durable: replaysFromCursor(listen),
     ...(connection.resolved.lease
       ? {
           leaseId: connection.resolved.lease.id,
         }
       : {}),
-  });
-  return deadline;
+  };
+  await connection.pending?.write(entry);
+  return entry;
 }
 
 /** Listens, runs `around`, then waits for the outcome and turns it into the step's output. */
@@ -248,32 +263,55 @@ async function waitOnStream<TContext, I>(opts: {
 }): Promise<StepWaitOutput> {
   const { listen, prior, executeStep, runSignal } = opts;
   const { step, input, ctx } = listen;
-  const deadline = await recordListening(listen, prior);
-  const matched = listenForMatch(listen);
+  const entry = await recordListening(listen, prior);
+  const deadline = entry.deadline ?? nowOf(frameworkCast<Context>(ctx));
+  let saved: Promise<void> | undefined;
+  let accepting = true;
+  const baseCtx = frameworkCast<Context>(ctx);
+  const matched = listenForMatch(listen, (event) => {
+    if (!accepting || runSignal.aborted || nowOf(baseCtx) > deadline) {
+      return false;
+    }
+    saved = listen.connection.pending?.write({
+      ...entry,
+      matched: event,
+    });
+    void saved?.catch(() => undefined);
+    return true;
+  });
   // A listener that fails while `around` runs is reported after it.
   matched.catch(() => undefined);
-  const around =
-    step.around === undefined
-      ? undefined
-      : await runAround(aroundSteps(step), input, ctx, executeStep);
-  const baseCtx = frameworkCast<Context>(ctx);
-  const stopWaiting = markWaiting(listen, deadline);
-  let outcome: ListenOutcome | undefined;
   try {
-    outcome = await awaitOutcome(matched, deadline - nowOf(baseCtx), runSignal);
+    const around =
+      step.around === undefined
+        ? undefined
+        : await runAround(aroundSteps(step), input, ctx, executeStep);
+    const stopWaiting = markWaiting(listen, deadline);
+    try {
+      const outcome = await awaitOutcome({
+        matched,
+        remainingMs: deadline - nowOf(baseCtx),
+        signal: runSignal,
+        stop: () => {
+          accepting = false;
+        },
+      });
+      return {
+        event: matchedEvent(listen, outcome, runSignal),
+        ...(step.around === undefined
+          ? {}
+          : {
+              around,
+            }),
+      };
+    } finally {
+      stopWaiting();
+    }
   } finally {
-    stopWaiting();
+    accepting = false;
+    // A cut in `around` must leave any already accepted event for the next owner.
+    await saved;
   }
-  const event = matchedEvent(listen, outcome, runSignal);
-  await listen.connection.pending?.clear();
-  return {
-    event,
-    ...(step.around === undefined
-      ? {}
-      : {
-          around,
-        }),
-  };
 }
 
 /** True when the event this wait listens for replays from a cursor. */
@@ -362,7 +400,42 @@ export async function executeWait<TContext, I, O>(
     ledgerKey: options.ledgerKey,
   });
   const runSignal = signalOf(baseCtx);
-  const prior = await reconcilePending(connection, runSignal, baseCtx);
+  const prior = await reconcilePending(connection, runSignal, {
+    ctx: baseCtx,
+    check: (entry) => {
+      if (entry?.durable === false && !entry.matched) {
+        throw new NoeticErrorImpl({
+          kind: 'connection_outcome_unknown',
+          connection: connection.resolved.name,
+          op: step.event,
+          key: entry.key,
+        });
+      }
+    },
+  });
+  options.onRecorded?.(async (stored) => {
+    if (stored) {
+      await connection.pending?.clear().catch(() => undefined);
+    }
+  });
+  if (
+    prior?.matched &&
+    prior.event === step.event &&
+    prior.connection === connection.resolved.name
+  ) {
+    const around =
+      step.around === undefined
+        ? undefined
+        : await runAround(aroundSteps(erased), input, ctx, executeStep);
+    return frameworkCast<O>({
+      event: prior.matched,
+      ...(step.around === undefined
+        ? {}
+        : {
+            around,
+          }),
+    });
+  }
   const listening = new AbortController();
   const stopListening = (): void => listening.abort();
   runSignal.addEventListener('abort', stopListening, {

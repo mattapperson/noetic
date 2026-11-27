@@ -1169,7 +1169,7 @@ describe('executeAcpAgent — stop reasons and errors', () => {
     expect(result).toBe('partial');
   });
 
-  it("throws kind 'step_failed' and closes the connection when the turn throws", async () => {
+  it('reports an unknown outcome and closes the connection when the agent crashes after dispatch', async () => {
     const { ctx } = harnessCtx();
     let closes = 0;
     const acpStep = step.acpAgent({
@@ -1188,7 +1188,7 @@ describe('executeAcpAgent — stop reasons and errors', () => {
       throw new Error('expected throw');
     } catch (e) {
       assert(isNoeticError(e));
-      expect(e.noeticError.kind).toBe('step_failed');
+      expect(e.noeticError.kind).toBe('acp_outcome_unknown');
     }
     expect(closes).toBe(1);
   });

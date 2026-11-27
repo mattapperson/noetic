@@ -133,22 +133,14 @@ beneath the step's entry:
 ```
 
 `<n>` is the call's place among the step's calls with that tool and those
-arguments, so two equal calls keep two records. The agent's own id for a call is
-not part of the key: an agent that makes the call again after a resume
-(`27-acp-agent-steps` § Resuming a step) uses a new id, but asks for the same
-thing. Which calls are answered from a record depends on what the agent knows:
-
-- **A new session** (the agent could not reload, or lost the session). The agent
-  starts over and makes its calls again from the first. A call that matches a
-  record is answered with the recorded result: the tool does not run, and the
-  call and its result still land in the item log. A call with other arguments
-  runs.
-- **A reloaded session.** The agent has its own account of the calls it
-  finished and is told not to redo them. A call it makes now is a new call, even
-  with a tool and arguments it used before, so it runs: each call's order starts
-  after the ones already recorded. Answering it from a record would hand a
-  counter, a clock or an append its old result. The step's own entry prunes these records when
-it lands.
+arguments, so two equal calls keep two records. The receipt also records the
+agent's call ID when it supplies one. The ID also identifies any pending
+approval or tool intent, so calls with equal arguments keep distinct approvals
+even when they arrive in a different order. After reattachment, a request
+with the same ID and input gets the saved result. A different ID permits a new call,
+even when the tool and arguments match. If a matching receipt exists and
+either side lacks a call ID, the step reports `acp_outcome_unknown`. The
+step's own entry prunes these records when it lands.
 
 A tool's `durable` setting means what it means in `callModel`
 (`23a-step-level-resume` § Tool calls in a round): unset records the call,

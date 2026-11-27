@@ -77,7 +77,7 @@ Every preset accepts `command`, `args`, and `env` overrides, `subprocess` — th
 
 An agent on the local adapter does not die with your host. Each one runs through a small *keeper* process that holds its stdio, so if your host crashes, is killed, or gets Ctrl-C mid-turn, the agent keeps working. Its updates, the requests it is waiting on (a permission prompt, a file read), and its tool calls are held until a host reattaches.
 
-On a [durable](/docs/framework/durability) run, resuming the run reattaches. The resumed step reaches the same agent, gets its live session back (modes and config options included), and collects the turn that was running. Every update of that turn streams again as the step's output, from the first, and requests the agent is still waiting on are answered by the new host's policy and handlers. The step's result is that turn's result. It only prompts again (behind a short "you were cut off" notice) if no turn was running. If the agent is gone, the step falls back to `session/load` or a new session, as before.
+On a [durable](/docs/framework/durability) run, resuming the run reattaches. The resumed step reaches the same agent, gets its live session back (modes and config options included), and collects the turn that was running. Every update of that turn streams again as the step's output, from the first, and requests the agent is still waiting on are answered by the new host's policy and handlers. The step's result is that turn's result. The keeper also keeps the answer after delivering it, so a host that dies before saving the step leaves the answer for the next attachment. The step prompts only when the keeper confirms the session is idle. A leased turn whose recoverable link drops returns `cut.reason: 'acp_link_lost'` and wakes to collect the same prompt.
 
 ```ts
 import { AgentHarness } from '@noetic-tools/core';
@@ -495,12 +495,22 @@ Two more things to know about sharing a session:
 
 ### When the host dies mid-step
 
-On a [durable](/docs/framework/durability) run, an ACP step that was cut off does not start the agent's work over when the run resumes:
+A [durable](/docs/framework/durability) ACP step records the session and
+reattach handle before sending the prompt, then keeps them until the step
+ledger records the result. When an agent or machine is gone and the
+original prompt may have run, the step reports `acp_outcome_unknown`.
+A raw custom transport without keeper support and an interrupted
+`session.reuse` step have the same limit. Check any external state the
+agent could have changed before sending a new prompt.
 
-- **The agent keeps its session.** The step stores the agent's session id when it opens one. On resume it reloads that session (`session/load`) and sends your prompt behind a short notice that the previous turn was cut off. `claudeCode()` and `codex()` both advertise `loadSession`. An agent that cannot reload, or no longer has the session, gets a new one with the conversation history, as on a first run.
-- **Your tools do not run twice.** Every call the agent makes to a tool you gave it is recorded as it finishes. An agent that had to start over in a new session makes its calls again, and each one that matches a record gets the recorded result. An agent whose session was reloaded already knows what it finished, so a call it makes is a new call and runs. A `durable: false` tool is not recorded and runs again; a `durable: true` tool the host died inside is [held for a person](/docs/framework/steps/invoke-tool#human-in-the-loop-approval) instead of repeated.
-
-What the agent did with its own built-in tools is the agent's to remember: a reloaded session is how it knows.
+When a reattached agent redelivers a tool call with its original call ID,
+Noetic returns the saved result or keeps waiting on that call's approval.
+For an interrupted tool call without a stable ID, Noetic reports an unknown
+outcome when it cannot safely assign the earlier receipt or approval.
+The keeper also matches each original or guidance prompt by ID. It can
+accept that prompt only once. If it can prove a prompt never arrived, the
+replacement can send it. When it cannot establish the outcome, the step reports
+`acp_outcome_unknown`.
 
 A step reattaches only through the subprocess adapter that started its agent. The step stores that adapter's name with the session, and a resumed step that now resolves to another name fails with `ACP_SESSION_ADAPTER_CONFLICT` without attaching anywhere, since the agent may still be working where it was started. That covers a step or preset that names another adapter, a default that moved to another entry, and an entry you renamed. Resume with the same name to take the turn.
 

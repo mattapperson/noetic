@@ -130,7 +130,7 @@ export type MergeFn<TContext = ContextData, O = unknown, R = O> = (
  * identity is positional. These fields change that per step.
  * @public
  */
-export interface StepReplay<TContext = ContextData, I = unknown> {
+export interface StepExecution<TContext = ContextData, I = unknown> {
   /**
    * Whether the ledger records and replays this step. Defaults to `true`. With
    * `false` the step always runs again on resume, so its side effects and state
@@ -147,6 +147,17 @@ export interface StepReplay<TContext = ContextData, I = unknown> {
    * execution share one entry. A key that throws skips the ledger for that
    * dispatch with a warning; it never fails the step.
    */
+  replayKey?(input: I, ctx: Context<TContext>): string;
+  /** Retry ordinary step failures. Recovery of interrupted work follows the ledger. */
+  retry?: RetryPolicy;
+}
+
+/** @public Execution settings shared by every step. */
+export interface StepReplay<TContext = ContextData, I = unknown> {
+  execution?: StepExecution<TContext, I>;
+  /** @deprecated Use `execution.durable`. */
+  durable?: boolean;
+  /** @deprecated Use `execution.replayKey`. */
   replayKey?(input: I, ctx: Context<TContext>): string;
 }
 
@@ -522,6 +533,7 @@ export interface StepRunCode<TContext = ContextData, I = unknown, O = unknown>
    * the output.
    */
   execute: RunCodeExecute<TContext, I, O>;
+  /** @deprecated Use `execution.retry`. */
   retry?: RetryPolicy;
   /**
    * Per-step subprocess adapter override. When set, the interpreter

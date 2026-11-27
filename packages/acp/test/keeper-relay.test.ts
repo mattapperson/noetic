@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { AcpRelay, KEEPER_METHODS } from '../src/keeper/relay';
+import { AcpRelay, KEEPER_METHODS, KEEPER_PROMPT_ID } from '../src/keeper/relay';
 
 type Message = Record<string, unknown>;
 
@@ -291,6 +291,65 @@ describe('AcpRelay', () => {
     });
   });
 
+  it('keeps a delivered result and journal across multiple replacement hosts', () => {
+    const r = rig();
+    openSession(r);
+    r.host({
+      jsonrpc: '2.0',
+      id: 'prompt',
+      method: 'session/prompt',
+      params: {
+        sessionId: 's1',
+        prompt: [],
+      },
+    });
+    const prompt = r.toAgent.at(-1);
+    r.agent(update('s1', 'the original result'));
+    r.agent({
+      jsonrpc: '2.0',
+      id: prompt?.id,
+      result: {
+        stopReason: 'end_turn',
+      },
+    });
+    expect(r.toHost.at(-1)).toMatchObject({
+      id: 'prompt',
+      result: {
+        stopReason: 'end_turn',
+      },
+    });
+    for (const id of [
+      'next',
+      'replacement',
+    ]) {
+      r.relay.detach();
+      r.relay.attach();
+      const before = r.toHost.length;
+      r.host({
+        jsonrpc: '2.0',
+        id,
+        method: KEEPER_METHODS.turn,
+        params: {
+          sessionId: 's1',
+        },
+      });
+      expect(r.toHost.slice(before)).toEqual([
+        update('s1', 'the original result'),
+        {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            state: 'finished',
+            response: {
+              stopReason: 'end_turn',
+            },
+          },
+        },
+      ]);
+    }
+    expect(r.toAgent.filter((line) => line.method === 'session/prompt')).toHaveLength(1);
+  });
+
   it('keeps a turn that ended with no host, and passes on its error', () => {
     const r = rig();
     openSession(r);
@@ -343,7 +402,7 @@ describe('AcpRelay', () => {
         message: 'Authentication required',
       },
     });
-    // Taken once: the next ask finds no turn.
+    // A collected result is different from a session that never ran a prompt.
     r.host({
       jsonrpc: '2.0',
       id: 't2',
@@ -356,7 +415,89 @@ describe('AcpRelay', () => {
       id: 't2',
       result: {
         state: 'idle',
+        neverPrompted: false,
       },
+    });
+  });
+
+  it('confirms when a session has never seen a prompt', () => {
+    const r = rig();
+    openSession(r);
+    r.host({
+      jsonrpc: '2.0',
+      id: 't',
+      method: KEEPER_METHODS.turn,
+      params: {
+        sessionId: 's1',
+      },
+    });
+    expect(r.toHost.at(-1)).toMatchObject({
+      id: 't',
+      result: {
+        state: 'idle',
+        neverPrompted: true,
+      },
+    });
+  });
+
+  it('finds the requested prompt without collecting the previous answer', () => {
+    const r = rig();
+    openSession(r);
+    const start = (promptId: string) =>
+      r.host({
+        jsonrpc: '2.0',
+        id: promptId,
+        method: 'session/prompt',
+        params: {
+          sessionId: 's1',
+          prompt: [],
+          _meta: {
+            [KEEPER_PROMPT_ID]: promptId,
+          },
+        },
+      });
+    const collect = (promptId: string) =>
+      r.host({
+        jsonrpc: '2.0',
+        id: 'collect',
+        method: KEEPER_METHODS.turn,
+        params: {
+          sessionId: 's1',
+          promptId,
+        },
+      });
+    const finish = () =>
+      r.agent({
+        jsonrpc: '2.0',
+        id: r.toAgent.at(-1)?.id,
+        result: {
+          stopReason: 'end_turn',
+        },
+      });
+    start('first');
+    finish();
+    r.relay.detach();
+    r.relay.attach();
+    collect('second');
+    expect(r.toHost.at(-1)?.result).toEqual({
+      state: 'idle',
+      unseen: 'second',
+    });
+    collect('first');
+    expect(r.toHost.at(-1)?.result).toMatchObject({
+      state: 'finished',
+      promptId: 'first',
+    });
+    start('second');
+    finish();
+    start('second');
+    expect(r.toHost.at(-1)?.error).toMatchObject({
+      code: -32602,
+    });
+    expect(r.toAgent.filter((line) => line.method === 'session/prompt')).toHaveLength(2);
+    collect('first');
+    expect(r.toHost.at(-1)?.result).toEqual({
+      state: 'idle',
     });
   });
 

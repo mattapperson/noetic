@@ -13,9 +13,13 @@ import {
   extractAssistantText,
   frameworkCast,
   isAcpCapabilityError,
+  isAcpConnectError,
+  isNoeticError,
   NoeticConfigError,
   NoeticErrorImpl,
 } from '@noetic-tools/types';
+import { ContextImpl } from '../runtime/context-impl';
+import { TURN_CUT_ABORT } from '../runtime/durable/parking';
 import { isRpcError, RpcFailure } from '../util/error-message';
 import { modelOf } from './acp-activity';
 import type { AcpEventBridge } from './acp-events';
@@ -23,6 +27,7 @@ import type { AcpToolRunner } from './acp-tools';
 import { mergeBridgedItems } from './acp-tools';
 import { trackUsage } from './message-helpers';
 import { parseStructuredOutput } from './structured-output';
+import { turnEndingIn } from './turn-ending';
 import { abortSignalOf, isFunctionCall, isMutableContext } from './typeguards';
 
 //#region Turn input and result
@@ -170,6 +175,16 @@ export function stepFailure(
     });
   }
   if (baseCtx.aborted) {
+    if (baseCtx instanceof ContextImpl && baseCtx.abortReason?.startsWith('lease_lost: ')) {
+      try {
+        baseCtx.ledger?.assertHeld();
+      } catch (error) {
+        if (error instanceof NoeticErrorImpl) {
+          return error;
+        }
+        throw error;
+      }
+    }
     return new NoeticErrorImpl({
       kind: 'cancelled',
       reason: baseCtx.abortReason ?? 'context aborted',
@@ -203,7 +218,12 @@ export async function runTurn<TContext, I, O>(params: {
   step: StepAcpAgent<TContext, I, O>;
   baseCtx: Context<ContextData>;
   session: AcpSession;
-  discard(): Promise<void>;
+  beforePrompt(): Promise<void>;
+  beforeCollect(): Promise<void> | undefined;
+  collectId?: string;
+  promptId?: string;
+  recovery?: 'reattach' | 'unavailable';
+  collectRequired: boolean;
   bridge: AcpEventBridge;
   tools: AcpToolRunner | undefined;
   turnError: TurnError;
@@ -229,39 +249,74 @@ export async function runTurn<TContext, I, O>(params: {
     bridge.offerChildStops(cancelChild);
   }
   let result: AcpTurnResult;
+  let sent = false;
   try {
     // Per-turn signal, so a session reused across turns is cancelled by the
     // context running the CURRENT turn rather than the one that opened it.
     const signal = abortSignalOf(baseCtx);
+    if (params.collect) {
+      await params.beforeCollect();
+    }
+    sent = params.collect === true;
     const collected =
       params.collect && session.resumeTurn
         ? await session.resumeTurn({
             signal,
+            promptId: params.collectId,
           })
         : undefined;
     if (collected) {
+      if (params.collectId !== undefined && collected.promptId !== params.collectId) {
+        throw new NoeticErrorImpl({
+          kind: 'acp_outcome_unknown',
+          stepId: step.id,
+          sessionId: session.sessionId,
+        });
+      }
       result = collected;
     } else {
+      if (params.collectRequired && params.collect) {
+        throw new NoeticErrorImpl({
+          kind: 'acp_outcome_unknown',
+          stepId: step.id,
+          sessionId: session.sessionId,
+        });
+      }
+      sent = false;
+      await params.beforePrompt();
       if (!signal?.aborted) {
         params.onPrompt?.(params.content);
       }
+      sent = true;
       result = await session.prompt({
         content: params.content,
+        promptId: params.promptId,
         signal,
       });
     }
   } catch (e) {
     bridge.withdrawChildStops();
-    await settle(tools);
-    // What the turn's calls did still reaches the stream, settled to their owners.
-    tools?.takeFinished();
-    // Close the turn on the event surface before rethrowing. A consumer driving
-    // a UI off `getFullStream()` saw `response.created` and would otherwise
-    // wait forever for a completion that never comes — the stream just stops.
-    // The stream carries the same Noetic error `execute()` throws.
-    const failure = stepFailure(step, turnError.error ?? e, baseCtx);
+    const failure = sent
+      ? promptFailure({
+          step,
+          ctx: baseCtx,
+          session,
+          cause: turnError.error ?? e,
+          recovery: params.recovery,
+        })
+      : stepFailure(step, turnError.error ?? e, baseCtx);
+    if (
+      baseCtx.abortReason === TURN_CUT_ABORT ||
+      (isNoeticError(failure) && failure.noeticError.kind === 'acp_link_lost')
+    ) {
+      // Calls still waiting on the old host must not block a new attachment.
+      tools?.unbind();
+      baseCtx.abort(TURN_CUT_ABORT);
+    } else {
+      await settle(tools);
+      tools?.takeFinished();
+    }
     bridge.abort(failure);
-    await params.discard();
     throw failure;
   }
   // The agent answered: its turn is over, whatever its bridged calls still do.
@@ -269,9 +324,13 @@ export async function runTurn<TContext, I, O>(params: {
   await settle(tools);
   if (turnError.error !== undefined) {
     tools?.takeFinished();
-    const failure = stepFailure(step, turnError.error, baseCtx);
+    const failure = promptFailure({
+      step,
+      ctx: baseCtx,
+      session,
+      cause: turnError.error,
+    });
     bridge.abort(failure);
-    await params.discard();
     throw failure;
   }
   if (tools) {
@@ -283,6 +342,44 @@ export async function runTurn<TContext, I, O>(params: {
   }
   bridge.finalize(result);
   return result;
+}
+
+/** A failure after dispatch leaves the agent's effects in doubt. */
+function promptFailure({
+  step,
+  ctx,
+  session,
+  cause,
+  recovery,
+}: {
+  step: {
+    id: string;
+  };
+  ctx: Context<ContextData>;
+  session: AcpSession;
+  cause: unknown;
+  recovery?: 'reattach' | 'unavailable';
+}): NoeticErrorImpl | NoeticConfigError {
+  const failure = stepFailure(step, cause, ctx);
+  const ending = turnEndingIn(failure);
+  if (ending) {
+    return ending;
+  }
+  if (!isNoeticError(failure) || failure.noeticError.kind === 'cancelled' || ctx.aborted) {
+    return failure;
+  }
+  if (recovery === 'reattach' && isAcpConnectError(cause) && !cause.gone) {
+    return new NoeticErrorImpl({
+      kind: 'acp_link_lost',
+      stepId: step.id,
+      cause,
+    });
+  }
+  return new NoeticErrorImpl({
+    kind: 'acp_outcome_unknown',
+    stepId: step.id,
+    sessionId: session.sessionId,
+  });
 }
 
 /** Let every bridged call the turn started finish, then stop taking calls. */

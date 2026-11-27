@@ -499,6 +499,14 @@ function setReplay(hydrated: Step<ContextData, string, string>, node: WorkflowNo
   if (node.replayKey !== undefined) {
     hydrated.replayKey = workflowReplayKey(node.id, node.replayKey);
   }
+  if (node.execution !== undefined) {
+    const { durable, replayKey, retry } = node.execution;
+    hydrated.execution = {
+      durable,
+      replayKey: replayKey === undefined ? undefined : workflowReplayKey(node.id, replayKey),
+      retry,
+    };
+  }
   const replayKey = paramFor(node, 'replayKey');
   if (replayKey) {
     hydrated.replayKey = (input, execCtx) =>

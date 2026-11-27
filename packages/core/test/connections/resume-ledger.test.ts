@@ -6,13 +6,16 @@
 
 import { describe, expect, test } from 'bun:test';
 import assert from 'node:assert';
-import type { Determinism, Step } from '@noetic-tools/types';
-import { isNoeticConfigError, isNoeticError } from '@noetic-tools/types';
+import type { ContextData, Determinism, Step } from '@noetic-tools/types';
+import { isNoeticConfigError, isNoeticError, SteeringAction } from '@noetic-tools/types';
 import { loop } from '../../src/builders/loop-builder';
 import { runCode, step } from '../../src/builders/step-builders';
 import { connection } from '../../src/connections/handle';
 import type { InMemoryConnectionProvider } from '../../src/connections/in-memory-connection';
-import { createInMemoryConnection } from '../../src/connections/in-memory-connection';
+import {
+  createInMemoryConnection,
+  inMemoryRefusal,
+} from '../../src/connections/in-memory-connection';
 import type { ConnectionRuntime } from '../../src/connections/registry';
 import { AgentHarness } from '../../src/harness/agent-harness';
 import { createCheckpointStore } from '../../src/runtime/durable/checkpoint-store';
@@ -74,7 +77,7 @@ function app(
         run: () => {
           rig.calls.push(`${instance}:ui.tap`);
           if (rig.failTap) {
-            throw new Error('crashed');
+            throw inMemoryRefusal('busy', 'The operation was refused before it ran.');
           }
           return 'tapped';
         },
@@ -254,6 +257,131 @@ describe('resuming against connections', () => {
   });
 });
 
+test('a leased turn wakes to recover a once receipt with the original key', async () => {
+  const storage = createInMemoryStorage({
+    swap: true,
+  });
+  const keys: string[] = [];
+  let effect: string | undefined;
+  const provider = createInMemoryConnection({
+    instance: 'stable-provider',
+    operations: {
+      'ui.write': {
+        effects: true,
+        once: true,
+        run: (_args, { idempotencyKey }) => {
+          keys.push(idempotencyKey);
+          if (effect) {
+            return effect;
+          }
+          effect = 'receipt';
+          throw new Error('the provider wrote the effect and lost its reply');
+        },
+      },
+    },
+  });
+  const build = () =>
+    new AgentHarness({
+      name: 'once-recovery',
+      params: {},
+      agentGraph: runCode<ContextData, string, string>({
+        id: 'flow',
+        execute: async (_input, ctx) =>
+          String(
+            await ctx.harness.run(
+              step.call({
+                id: 'write',
+                connection: 'app',
+                op: 'ui.write',
+              }),
+              undefined,
+              ctx,
+            ),
+          ),
+      }),
+      connections: {
+        app: provider,
+      },
+      environment: {
+        storage: {
+          adapter: storage,
+          lease: {
+            cut: {
+              delayMs: 0,
+            },
+          },
+          park: {
+            autoWake: false,
+          },
+        },
+      },
+    });
+  const first = build();
+  const second = build();
+  const scope = {
+    threadId: 'once',
+  };
+  try {
+    await first.execute('go', {
+      ...scope,
+      messageId: 'message',
+    });
+    expect((await first.getAgentResponse(scope)).cut?.reason).toBe('connection_outcome_unknown');
+    expect(await second.wake()).toEqual([
+      'once',
+    ]);
+    expect((await second.getAgentResponse(scope)).text).toBe('receipt');
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+  } finally {
+    await Promise.all([
+      first.close(),
+      second.close(),
+    ]);
+  }
+});
+
+test('keeps a legacy write intent when the provider instance changed', async () => {
+  const storage = createInMemoryStorage();
+  let writes = 0;
+  const provider = (instance: string) =>
+    createInMemoryConnection({
+      instance,
+      determinism: determinism('free'),
+      operations: {
+        'ui.write': {
+          effects: true,
+          run: () => ++writes,
+        },
+      },
+    });
+  const first = harnessFor(storage, provider('old'));
+  const ctx = first.createContext();
+  const key = `execution:${ctx.id}:pending:/write#0`;
+  await storage.set(key, {
+    kind: 'call',
+    stepId: 'write',
+    connection: 'app',
+    key: 'prior-write',
+    identity: {
+      surface: 'in-memory',
+      instance: 'old',
+    },
+  });
+  const second = harnessFor(storage, provider('new'));
+  await first.checkpoint(ctx);
+  const call = step.call({
+    id: 'write',
+    connection: 'app',
+    op: 'ui.write',
+  });
+  const retry = await second.restore(ctx.id);
+  assert(retry);
+  expect(rootKind(await rejected(second.run(call, '', retry)))).toBe('connection_outcome_unknown');
+  expect(writes).toBe(0);
+  expect(await storage.get(key)).not.toBeNull();
+});
+
 describe('rerun allowances are scoped to the restored run', () => {
   test('a restore with rerun that never runs does not let a later plain restore drive the connection live', async () => {
     const rig = newRig();
@@ -375,6 +503,7 @@ describe('resuming a long operation', () => {
       instance: 'device',
       operations: {
         'device.install': {
+          effects: true,
           task: [
             {
               state: 'working',
@@ -389,16 +518,6 @@ describe('resuming a long operation', () => {
     });
     const storage = createInMemoryStorage();
     const harness = harnessFor(storage, provider);
-    const resolved = await registryOf(harness)?.resolve({
-      name: 'app',
-      scope: {
-        executionId: 'exec',
-        threadId: 't',
-        scopeKey: 'exec',
-        signal: new AbortController().signal,
-      },
-    });
-    assert(resolved?.awaitTask);
     const started = await provider.connection.call(
       'device.install',
       {},
@@ -408,14 +527,111 @@ describe('resuming a long operation', () => {
       },
     );
     assert(started.status === 'task');
-    const output = await resolved.awaitTask(started.taskId, 'device.install', {
-      signal: new AbortController().signal,
-      caller: 'step',
-      idempotencyKey: 'k',
+    const ctx = harness.createContext();
+    await harness.checkpoint(ctx);
+    await storage.set(`execution:${ctx.id}:pending:/install#0`, {
+      kind: 'call',
+      stepId: 'install',
+      connection: 'app',
+      key: 'k',
+      identity: provider.connection.identity,
+      taskId: started.taskId,
     });
+    const replacement = harnessFor(storage, provider);
+    const restored = await replacement.restore(ctx.id);
+    assert(restored);
+    const output = await replacement.run(
+      step.call({
+        id: 'install',
+        connection: 'app',
+        op: 'device.install',
+      }),
+      '',
+      restored,
+    );
     expect(output).toBe('installed');
     expect(provider.connection.calls).toHaveLength(1);
     expect(sent).toBe(1);
     await harness.close();
+    await replacement.close();
   });
+});
+
+test('a guarded refusal leaves no unresolved write when approval is denied', async () => {
+  const storage = createInMemoryStorage({
+    swap: true,
+  });
+  let writes = 0;
+  let approvals = 0;
+  const provider = createInMemoryConnection({
+    instance: 'stable',
+    operations: {
+      'ui.write': {
+        effects: true,
+        run(_args, { confirmed }) {
+          if (!confirmed) {
+            throw inMemoryRefusal('guarded', 'Require approval.');
+          }
+          writes++;
+          return 'written';
+        },
+      },
+    },
+  });
+  const build = (allow: boolean) =>
+    new AgentHarness({
+      name: 'guarded-write',
+      params: {},
+      agentGraph: runCode<ContextData, string, string>({
+        id: 'flow',
+        execute: async (_input, ctx) =>
+          String(
+            await ctx.harness.run(
+              step.call({
+                id: 'write',
+                connection: 'app',
+                op: 'ui.write',
+                execution: {
+                  retry: {
+                    maxAttempts: 2,
+                    backoff: 'fixed',
+                    initialDelay: 0,
+                  },
+                },
+              }),
+              undefined,
+              ctx,
+            ),
+          ),
+      }),
+      connections: {
+        app: provider,
+      },
+      approveToolCall: async () => ({
+        action: allow || ++approvals > 1 ? SteeringAction.Allow : SteeringAction.Deny,
+      }),
+      environment: {
+        storage: {
+          adapter: storage,
+        },
+      },
+    });
+  const delivery = {
+    threadId: 't',
+    messageId: 'same',
+  };
+  const first = build(false);
+  await first.execute('start', delivery);
+  expect(rootKind(await rejected(first.getAgentResponse(delivery)))).toBe('steering_denied');
+  expect(writes).toBe(0);
+  expect(approvals).toBe(1);
+  await first.close();
+  const second = build(true);
+  try {
+    await second.execute('start', delivery);
+    expect((await second.getAgentResponse(delivery)).text).toBe('written');
+    expect(writes).toBe(1);
+  } finally {
+    await second.close();
+  }
 });

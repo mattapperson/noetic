@@ -92,8 +92,8 @@ describe.skipIf(!LIVE)('live: a real bridge after its host is killed', () => {
           assert(connection.attachSession);
           const session = await connection.attachSession(first.sessionId);
           assert(session.resumeTurn);
-          // The first host finished its turn before it died.
-          expect(await session.resumeTurn({})).toBeUndefined();
+          // The keeper holds the first answer through attachment.
+          expect((await session.resumeTurn({}))?.text).toContain('echo[host1]:first');
           const second = await session.prompt({
             content: [
               {

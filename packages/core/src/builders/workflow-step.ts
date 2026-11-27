@@ -17,6 +17,7 @@ import type {
   ExecuteStepFn,
   OutputCodec,
   Step,
+  StepReplay,
   StepRunCode,
   SubprocessAdapter,
   Tool,
@@ -39,7 +40,7 @@ import { namedWorkflows, storedWorkflowSource, workflowSource } from './workflow
 export interface WorkflowOpts<
   D extends WorkflowDocumentInput = WorkflowDocumentInput,
   M extends CustomItemMap = CustomItemMap,
-> {
+> extends StepReplay<ContextData, string> {
   id: string;
   /**
    * Inline workflow document. Mutually exclusive with `ref`. Written `as const`, its
@@ -161,6 +162,9 @@ function workflowStep(opts: WorkflowOpts): StepRunCode<ContextData, string, stri
 
   return runCode({
     id: opts.id,
+    execution: opts.execution,
+    durable: opts.durable,
+    replayKey: opts.replayKey,
     customItems: workflowItems(opts),
     execute: async (input: string, ctx: Context): Promise<string> => {
       const harness = ctx.harness;

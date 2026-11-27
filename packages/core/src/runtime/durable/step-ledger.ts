@@ -34,7 +34,7 @@
 
 import type { StorageAdapter } from '@noetic-tools/context';
 import { storageGetMany } from '@noetic-tools/context';
-import { NoeticConfigError, NoeticErrorImpl } from '@noetic-tools/types';
+import { isNoeticError, NoeticConfigError, NoeticErrorImpl } from '@noetic-tools/types';
 import { z } from 'zod';
 import { isBeneath, Parking } from './parking';
 import type { LedgerFence } from './turn-lease';
@@ -560,6 +560,7 @@ export class StepLedger {
   private readonly effects = new Set<string>();
   /** Every live entry, by path: what its trail mark is made from when it is pruned. */
   private readonly entries = new Map<string, StepLedgerEntry>();
+  private restored = false;
   private readonly counts: StepLedgerStats = {
     recorded: 0,
     droppedOversize: 0,
@@ -589,6 +590,7 @@ export class StepLedger {
    * in memory — for a run retried in place, which replays what was stored.
    */
   adopt(recovered: StepLedgerWindow): void {
+    this.restored = true;
     this.replayable.clear();
     this.entries.clear();
     for (const [path, entry] of recovered.entries) {
@@ -600,6 +602,11 @@ export class StepLedger {
       this.live.set(path, seq);
     }
     this.seq = Math.max(this.seq, recovered.nextSeq);
+  }
+
+  /** A recovered run may have pending intents even when its ledger is empty. */
+  get mayHavePending(): boolean {
+    return this.restored;
   }
 
   /**
@@ -659,6 +666,37 @@ export class StepLedger {
     await this.held?.verify();
   }
 
+  /** Save an intent before dispatch. A competing write stops the caller before it can send. */
+  async writeIntent(
+    storage: StorageAdapter,
+    key: string,
+    prior: unknown,
+    intent: unknown,
+  ): Promise<void> {
+    try {
+      await this.verifyHeld();
+      if (storage.swap) {
+        if (!(await storage.swap(key, prior, intent))) {
+          await this.verifyHeld();
+          throw new Error('The pending record changed.');
+        }
+      } else {
+        await storage.set(key, intent);
+      }
+      await this.verifyHeld();
+    } catch (error) {
+      if (isNoeticError(error)) {
+        throw error;
+      }
+      throw new NoeticErrorImpl({
+        kind: 'ledger_write_failed',
+        executionId: this.executionId,
+        path: key,
+        cause: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
+  }
+
   /** False once this execution writes under a lease it no longer holds. */
   get isHeld(): boolean {
     try {
@@ -695,18 +733,18 @@ export class StepLedger {
    *
    * An entry recorded without an input hash matches on identity alone.
    */
-  take(path: string, step: StepLedgerMatch): StepLedgerEntry | undefined {
+  take(path: string, step: StepLedgerMatch, position = path): StepLedgerEntry | undefined {
     const entry = this.replayable.get(path);
     if (!entry) {
       return undefined;
     }
     if (matches(entry, step)) {
       for (const use of entry.connections ?? []) {
-        this.noteConnection(path, use);
+        this.noteConnection(position, use);
       }
       // A replayed effect is still an effect: the step above it records one too.
       if (entry.effect === true) {
-        this.effects.add(path);
+        this.effects.add(position);
       }
       return entry;
     }
@@ -772,12 +810,12 @@ export class StepLedger {
    * @throws NoeticError `lease_lost` when the write shows another harness took the turn.
    * @throws NoeticError `ledger_write_failed` when, under a lease, the write fails.
    */
-  async record(recorded: StepLedgerEntry): Promise<boolean> {
+  async record(recorded: StepLedgerEntry, position = recorded.path): Promise<boolean> {
     if (!this.store) {
       return false;
     }
     this.held?.assert();
-    const entry = this.withConnections(this.stamped(recorded));
+    const entry = this.withConnections(this.stamped(recorded, position), position);
     if (!this.retainable(entry)) {
       return false;
     }
@@ -787,6 +825,7 @@ export class StepLedger {
     const seq = this.seq;
     this.seq = seq + 1;
     try {
+      await this.held?.verify();
       await this.write(seq, entry);
     } catch (error) {
       if (this.held) {
@@ -809,7 +848,7 @@ export class StepLedger {
     this.live.set(entry.path, seq);
     this.entries.set(entry.path, entry);
     if (entry.effect) {
-      this.effects.add(entry.path);
+      this.effects.add(position);
     }
     if (replaced === undefined) {
       this.counts.recorded += 1;
@@ -823,12 +862,12 @@ export class StepLedger {
   }
 
   /** `recorded` with who wrote it, under which version, and whether it had an effect. */
-  private stamped(recorded: StepLedgerEntry): StepLedgerEntry {
+  private stamped(recorded: StepLedgerEntry, position: string): StepLedgerEntry {
     const hadEffect =
       recorded.effect === true ||
       [
         ...this.effects,
-      ].some((path) => path === recorded.path || isBeneath(path, recorded.path));
+      ].some((path) => path === recorded.path || path === position || isBeneath(path, position));
     return {
       ...recorded,
       ...(this.held
@@ -963,12 +1002,12 @@ export class StepLedger {
   }
 
   /** `entry` carrying every connection noted at its path or beneath it. */
-  private withConnections(entry: StepLedgerEntry): StepLedgerEntry {
+  private withConnections(entry: StepLedgerEntry, position: string): StepLedgerEntry {
     const uses: StepLedgerConnectionUse[] = [
       ...(entry.connections ?? []),
     ];
     for (const [path, notes] of this.connectionNotes) {
-      if (path !== entry.path && !isBeneath(path, entry.path)) {
+      if (path !== entry.path && path !== position && !isBeneath(path, position)) {
         continue;
       }
       for (const use of notes) {

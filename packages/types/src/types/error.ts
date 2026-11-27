@@ -126,6 +126,33 @@ export type NoeticError =
       reason: string;
     }
   | {
+      /** A write may have reached the provider, but there is no safe way to recover its outcome. */
+      kind: 'connection_outcome_unknown';
+      connection: string;
+      op: string;
+      key: string;
+      /** The operation promises to return the same outcome for this key. */
+      retry?: 'same-key' | 'task';
+    }
+  | {
+      /** A subprocess launch may have run, with no recorded result. */
+      kind: 'subprocess_outcome_unknown';
+      stepId: string;
+      cause?: Error;
+    }
+  | {
+      /** A sent prompt has no recoverable result. The agent may have acted. */
+      kind: 'acp_outcome_unknown';
+      stepId: string;
+      sessionId?: string;
+    }
+  | {
+      /** The host lost its ACP link; the original prompt can be collected on a later attachment. */
+      kind: 'acp_link_lost';
+      stepId: string;
+      cause: Error;
+    }
+  | {
       /** Another harness took this turn; this one stopped writing (spec 23 § One writer per turn). */
       kind: 'lease_lost';
       executionId: string;

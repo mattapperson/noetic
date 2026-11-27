@@ -157,7 +157,7 @@ export interface TurnLeaseConfig {
   /** The clock leases are timed by. Default `Date.now`. */
   now?: () => number;
   /**
-   * How a turn cut by `lease_lost` or `ledger_write_failed` is run again (spec 23
+   * How a cut turn is run again (spec 23
    * § Cut turns). Every field has a default.
    */
   cut?: TurnCutConfig;

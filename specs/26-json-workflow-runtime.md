@@ -69,7 +69,7 @@ Authoring documents by hand or reviewing LLM-generated ones, reference the schem
 
 ## WorkflowNode Union
 
-`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share six fields: an optional `fromParams` (§ Options from params), and five more: a required `id`, an optional boolean `durable` that the hydrator copies onto the built step, an optional declarative `replayKey` (§ Replay keys) that the hydrator turns into the step's `replayKey` function, an optional `emitItems` (§ Emitting items) that the hydrator turns into the step's `emitItems`, and optional `customItems` that only that node may emit (spec 34). `durable: false` keeps the node out of the step ledger, so a resumed run re-runs it instead of replaying its recorded output (`23a-step-level-resume` § Identity). The `acp-agent` node kind is specified in `27-acp-agent-steps`.
+`WorkflowNode` is a discriminated union on `kind`. Each variant maps to an existing `Step` builder. All nodes share a required `id`, optional `fromParams` (§ Options from params), optional `execution` settings for durability, replay identity and retry, optional `emitItems` (§ Emitting items), and optional `customItems` (spec 34). The hydrator compiles declarative replay keys into functions (§ Replay keys). An existing top-level durability or replay key field still applies when its equivalent is absent from `execution`. The `acp-agent` node kind is specified in `27-acp-agent-steps`.
 
 ```typescript
 type WorkflowNode =

@@ -1,13 +1,11 @@
 /**
- * Cut turns (spec 23 § Cut turns): a turn stopped by `lease_lost` or
- * `ledger_write_failed` has everything before the stop on record, so it is run
- * again by a later wake, with back-off, rather than failed. The harness keeps each
- * thread's mark here as well as in the thread record, since the storage that just
- * refused a write may refuse the mark too.
+ * Cut turns (spec 23 § Cut turns) keep their ledger and pending entries.
+ * A wake resumes after a back-off. The harness keeps the mark in memory too,
+ * in case storage refuses it.
  */
 
 import { NoeticConfigError } from '@noetic-tools/types';
-import { turnEndingIn } from '../interpreter/turn-ending';
+import { cutReasonOf } from '../interpreter/turn-ending';
 import type { TurnCutReason } from './deps/types';
 import type { TurnCutConfig } from './harness-options';
 
@@ -49,18 +47,9 @@ export const DEFAULT_CUT_DELAY_MS = 1e3;
 /** @public The longest a cut turn waits before it is due again, in ms. */
 export const DEFAULT_CUT_MAX_DELAY_MS = 6e4;
 
-const CUT_REASONS: ReadonlySet<string> = new Set<TurnCutReason>([
-  'lease_lost',
-  'ledger_write_failed',
-]);
-
 //#endregion
 
 //#region Helpers
-
-function isCutReason(kind: string | undefined): kind is TurnCutReason {
-  return kind !== undefined && CUT_REASONS.has(kind);
-}
 
 /** What names a turn's delivery: its message ids, in order. */
 function deliveryOf(turn: CutTurn): string {
@@ -108,8 +97,7 @@ export class TurnCuts {
 
   /** Why `error` cuts the turn rather than failing it, or undefined when it does not. */
   reasonOf(error: unknown): TurnCutReason | undefined {
-    const kind = turnEndingIn(error)?.noeticError.kind;
-    return isCutReason(kind) ? kind : undefined;
+    return cutReasonOf(error);
   }
 
   /** The turn's mark: the stored one or this harness's, whichever counts more cuts. */

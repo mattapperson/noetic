@@ -14,7 +14,12 @@ import type {
   ContextData,
   StepAcpAgent,
 } from '@noetic-tools/types';
-import { frameworkCast, isAcpConnectError, NoeticConfigError } from '@noetic-tools/types';
+import {
+  frameworkCast,
+  isAcpConnectError,
+  NoeticConfigError,
+  NoeticErrorImpl,
+} from '@noetic-tools/types';
 import { runtimeOf } from '../connections/model-tools';
 import type {
   AcpAdapterNames,
@@ -180,21 +185,6 @@ function sessionRequest(cwd: string, settings: SessionSettings): AcpNewSessionOp
   };
 }
 
-/** JSON-RPC "resource not found", which an agent answers a load of a session it no longer has with. */
-const RESOURCE_NOT_FOUND = -32002;
-
-/**
- * Whether a failed `session/load` says the agent no longer has the session —
- * the one failure a resumed step starts over from. Anything else may mean the
- * old turn is still there, so the step fails rather than repeat its work.
- */
-function sessionIsGone(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) {
-    return false;
-  }
-  return Reflect.get(error, 'code') === RESOURCE_NOT_FOUND;
-}
-
 /** Keeping a connection is always explicit; the default closes it with the step. */
 function keepAliveOf(policy: AcpSessionPolicy | undefined): AcpKeepAlive {
   return policy?.keepAlive ?? 'step';
@@ -224,73 +214,12 @@ export interface SessionResolution {
   keepAlive: AcpKeepAlive;
   /** True when this step opened the connection rather than reusing one. */
   fresh: boolean;
-  /** True when this step reloaded the session an earlier attempt of it opened. */
-  resumed: boolean;
   /**
    * True when it reattached to that session, still live in an agent that
    * outlived the earlier host: the first turn collects the turn that host left
    * running instead of prompting.
    */
   reattached: boolean;
-}
-
-/**
- * Open the step's session on a new connection. An earlier attempt's session is
- * reloaded when the agent can; an agent that cannot, or that no longer has the
- * session, gets a new one, and the step starts it over.
- */
-async function sessionOn(
-  connection: AcpAgentConnection,
-  opts: {
-    cwd: string;
-    /** The session the step names with `session.load`. A failure to load it is an error. */
-    loadId?: string;
-    /** The session an earlier attempt of this step opened. */
-    resumeId?: string;
-    settings: SessionSettings;
-  },
-): Promise<{
-  session: AcpSession;
-  resumed: boolean;
-}> {
-  const { cwd, loadId, resumeId, settings } = opts;
-  if (loadId) {
-    return {
-      session: await connection.loadSession({
-        sessionId: loadId,
-        cwd,
-        ...settings,
-      }),
-      resumed: false,
-    };
-  }
-  if (resumeId !== undefined && connection.agentCapabilities.loadSession === true) {
-    const session = await connection
-      .loadSession({
-        sessionId: resumeId,
-        cwd,
-        ...settings,
-      })
-      .catch((error: unknown) => {
-        if (sessionIsGone(error)) {
-          return undefined;
-        }
-        throw error;
-      });
-    if (session) {
-      return {
-        session,
-        resumed: true,
-      };
-    }
-  }
-  return {
-    session: await connection.newSession({
-      cwd,
-      ...settings,
-    }),
-    resumed: false,
-  };
 }
 
 //#endregion
@@ -316,7 +245,6 @@ export async function openSession<TContext, I, O>(opts: {
   /** The harness adapters the step uses. */
   adapters: AcpAdapterNames;
 }): Promise<SessionResolution> {
-  let resumed = false;
   let reattached = false;
   const store = sessionStore(opts.baseCtx);
   const keepAlive = keepAliveOf(opts.step.session);
@@ -349,7 +277,6 @@ export async function openSession<TContext, I, O>(opts: {
       stepId: opts.step.id,
     });
     if (kept) {
-      resumed = true;
       reattached = true;
       return {
         connection: holdingConnections(kept.connection, opts.baseCtx, keepAlive),
@@ -363,6 +290,13 @@ export async function openSession<TContext, I, O>(opts: {
         fingerprint: opts.fingerprint,
       };
     }
+    if (opts.resumeId !== undefined) {
+      throw new NoeticErrorImpl({
+        kind: 'acp_outcome_unknown',
+        stepId: opts.step.id,
+        sessionId: opts.resumeId,
+      });
+    }
     const connection = holdingConnections(
       await opts.agent.connect(connectOptions),
       opts.baseCtx,
@@ -374,14 +308,17 @@ export async function openSession<TContext, I, O>(opts: {
     // must close it first — otherwise the agent outlives the step and, because
     // its stdio keeps the event loop alive, the host never exits.
     try {
-      const opened = await sessionOn(connection, {
+      const settings = {
         cwd: opts.cwd,
-        loadId: opts.step.session?.load,
-        resumeId: opts.resumeId,
-        settings: opts.settings,
-      });
-      resumed = opened.resumed;
-      const { session } = opened;
+        ...opts.settings,
+      };
+      const loadId = opts.step.session?.load;
+      const session = loadId
+        ? await connection.loadSession({
+            sessionId: loadId,
+            ...settings,
+          })
+        : await connection.newSession(settings);
       return {
         connection,
         session,
@@ -399,6 +336,14 @@ export async function openSession<TContext, I, O>(opts: {
   });
 
   if (!fresh) {
+    if (opts.resumeId !== undefined) {
+      throw new NoeticErrorImpl({
+        kind: 'acp_outcome_unknown',
+        stepId: opts.step.id,
+        sessionId: opts.resumeId,
+      });
+    }
+
     assertSessionScopedSettingsMatch(opts.step, live, opts.cwd, opts.tools, opts.settings);
     if (live.agentId !== opts.agent.agentId) {
       throw new NoeticConfigError({
@@ -417,7 +362,6 @@ export async function openSession<TContext, I, O>(opts: {
     key,
     keepAlive,
     fresh,
-    resumed,
     reattached,
   };
 }
@@ -429,8 +373,8 @@ function whenHostExitsOf(ctx: Context<ContextData>): AcpWhenHostExits {
 
 /**
  * The live session an earlier attempt of the step left in an agent that
- * outlived its host, or undefined when there is none to reach — the agent is
- * gone, or no longer has the session — so the step reloads or starts over.
+ * outlived its host. If the agent is gone or has no such session, the caller
+ * decides whether it is safe to open a new connection.
  */
 async function reattachTo(
   agent: AcpAgent,
@@ -467,7 +411,7 @@ async function reattachTo(
   try {
     const session = await connection.attachSession?.(opts.sessionId).catch(goneOrThrow);
     if (!session?.resumeTurn) {
-      await connection.close().catch(() => undefined);
+      await letGo(connection);
       return undefined;
     }
     assertSameSettings(opts, connection);
@@ -543,7 +487,19 @@ function holdingConnections(
   }
   const release = registry.hold(rootContextId(ctx));
   const close = connection.close.bind(connection);
+  const detach = connection.detach?.bind(connection);
   return Object.assign(connection, {
+    ...(detach
+      ? {
+          async detach(): Promise<void> {
+            try {
+              await detach();
+            } finally {
+              release();
+            }
+          },
+        }
+      : {}),
     async close(): Promise<void> {
       try {
         await close();
@@ -576,10 +532,16 @@ export async function finalizeSession(
   sessionStore(baseCtx).forget(resolution.key);
 }
 
-/**
- * Release a connection this step opened, before surfacing a failure. A reused
- * one is left intact for a later step to retry against.
- */
+/** Release the attachment and leave the keeper available for recovery. */
+export async function detachSession(
+  resolution: SessionResolution,
+  ctx: Context<ContextData>,
+): Promise<void> {
+  await letGo(resolution.live.connection);
+  sessionStore(ctx).forget(resolution.key);
+}
+
+/** Close what this step opened after setup failed. Leave shared connections intact. */
 export async function discardIfFresh(
   resolution: SessionResolution,
   baseCtx: Context<ContextData>,

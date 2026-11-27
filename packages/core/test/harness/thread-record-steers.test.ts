@@ -107,13 +107,12 @@ describe('ThreadRecord steers', () => {
     await record.keepSteer(message('applied', 'between-rounds'));
     await record.keepSteer(message('late', 'between-rounds'));
 
-    await record.end(
-      ctx,
-      [],
-      [
+    await record.end(ctx, {
+      history: [],
+      queuedIds: [
         'late',
       ],
-    );
+    });
 
     expect((await record.steers()).map((steer) => steer.id)).toEqual([
       'late',
@@ -150,9 +149,11 @@ describe('ThreadRecord steers', () => {
         'input',
       ],
       NO_FLOW,
-      [
-        'gone',
-      ],
+      {
+        removed: [
+          'gone',
+        ],
+      },
     );
 
     expect((await record.steers()).map((steer) => steer.id)).toEqual([
@@ -173,9 +174,11 @@ describe('ThreadRecord steers', () => {
     const stale = makeRecord(storage);
     stale.hold(fenceAt(1));
     const error = await stale
-      .begin(ctx, [], NO_FLOW, [
-        'gone',
-      ])
+      .begin(ctx, [], NO_FLOW, {
+        removed: [
+          'gone',
+        ],
+      })
       .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(NoeticErrorImpl);

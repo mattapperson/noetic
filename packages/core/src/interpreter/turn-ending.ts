@@ -5,14 +5,19 @@
  * reads the kind to know why the turn stopped, and a retry could not help.
  */
 
-import type { NoeticError } from '@noetic-tools/types';
+import type { NoeticError, TurnCutReason } from '@noetic-tools/types';
 import { isNoeticError, NoeticErrorImpl } from '@noetic-tools/types';
+import { TURN_CUT_ABORT } from '../runtime/durable/parking';
 
 /** @internal The kinds that end a turn. */
 export const TURN_ENDING_KINDS: ReadonlySet<string> = new Set([
   'turn_stuck',
   'lease_lost',
   'ledger_write_failed',
+  'acp_link_lost',
+  'acp_outcome_unknown',
+  'connection_outcome_unknown',
+  'subprocess_outcome_unknown',
 ]);
 
 function endingIn(error: NoeticError): NoeticError | undefined {
@@ -48,4 +53,22 @@ export function turnEndingIn(error: unknown): NoeticErrorImpl | undefined {
     return undefined;
   }
   return found === error.noeticError ? error : new NoeticErrorImpl(found);
+}
+
+/** A cut is an interruption the harness can resume from its ledger. */
+export function cutReasonOf(error: unknown): TurnCutReason | undefined {
+  const failure = turnEndingIn(error)?.noeticError;
+  switch (failure?.kind) {
+    case 'lease_lost':
+    case 'ledger_write_failed':
+    case 'acp_link_lost':
+      return failure.kind;
+    case 'connection_outcome_unknown':
+      return failure.retry === undefined ? undefined : failure.kind;
+  }
+}
+
+/** Leave live external work for the next owner when its sibling cuts the turn. */
+export function recoverableAbort(error: unknown, fallback: string): string {
+  return cutReasonOf(error) ? TURN_CUT_ABORT : fallback;
 }

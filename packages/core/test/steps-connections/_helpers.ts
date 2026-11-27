@@ -31,6 +31,7 @@ export type OpHandler = (args: unknown, opts: GatedCallOptions) => unknown;
 
 export interface FakeConnectionConfig {
   ops?: Record<string, OpHandler>;
+  operations?: ConnectionManifest['operations'];
   determinism?: Determinism;
   identity?: ConnectionIdentity;
   /** Called by `reset`. */
@@ -252,12 +253,11 @@ export class FakeRegistry implements ConnectionRegistry {
   }
 
   private resolvedFor(name: string, config: FakeConnectionConfig): ResolvedConnection {
-    const manifest: ConnectionManifest = config.determinism
-      ? {
-          ...EMPTY_MANIFEST,
-          determinism: config.determinism,
-        }
-      : EMPTY_MANIFEST;
+    const manifest: ConnectionManifest = {
+      ...EMPTY_MANIFEST,
+      operations: config.operations ?? EMPTY_MANIFEST.operations,
+      determinism: config.determinism,
+    };
     const resolved: ResolvedConnection = {
       name,
       manifest,
@@ -267,6 +267,7 @@ export class FakeRegistry implements ConnectionRegistry {
           instance: `${name}-1`,
         },
       call: async (op, args, opts) => {
+        await opts.beforeSend?.();
         this.calls.push({
           connection: name,
           op,

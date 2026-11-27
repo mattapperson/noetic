@@ -93,13 +93,14 @@ export class StoredFlows {
   }
 
   /**
-   * The flow the turn on `executionId` stored as `version`, built by this
-   * harness's builder. Resolves undefined when the turn stored none, and a failure
-   * when one is stored that this harness cannot run as it was.
+   * Rebuild the source pinned by the turn's version and hash. Resolves
+   * undefined when the turn stored none, and a failure when this harness
+   * cannot run what the turn stored.
    */
   async rebuild(
     executionId: string,
     version: string,
+    hash: string,
   ): Promise<TurnFlow | FlowRebuildFailure | undefined> {
     const raw = await this.storage?.get<unknown>(flowKey(executionId));
     if (raw === null || raw === undefined) {
@@ -118,6 +119,12 @@ export class StoredFlows {
       );
     }
     const stored = parsed.data;
+    if (stored.hash !== hash) {
+      return fail(
+        FlowRebuildReason.HashMismatch,
+        `The stored flow hashes to ${stored.hash}, but the turn pinned ${hash}.`,
+      );
+    }
     const build = this.build;
     if (!build) {
       return fail(
@@ -137,11 +144,11 @@ export class StoredFlows {
         );
       }
       // A tree that runs a document the stored source does not hold is another flow.
-      const hash = flowVersionOf(graph);
-      if (hash !== stored.hash) {
+      const builtHash = flowVersionOf(graph);
+      if (builtHash !== stored.hash) {
         return fail(
           FlowRebuildReason.HashMismatch,
-          `The rebuilt flow hashes to ${hash ?? 'nothing'}, not the stored ${stored.hash}.`,
+          `The rebuilt flow hashes to ${builtHash ?? 'nothing'}, not the stored ${stored.hash}.`,
         );
       }
       this.rebuilt.set(cacheKey, graph);

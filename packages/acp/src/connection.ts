@@ -36,7 +36,7 @@ import type {
 import { AcpCapabilityError, AcpConnectError } from '@noetic-tools/types';
 import { z } from 'zod';
 import { clientCapabilitiesFor, NoeticAcpClient } from './client';
-import { KEEPER_METHODS } from './keeper/relay';
+import { KEEPER_METHODS, KEEPER_PROMPT_ID } from './keeper/relay';
 import type { WatchedTransport } from './liveness';
 import { watchTransport } from './liveness';
 import type { ToolBridge } from './tool-bridge';
@@ -145,9 +145,12 @@ const StopReasonSchema = z.enum([
 const KeeperTurnSchema = z.discriminatedUnion('state', [
   z.object({
     state: z.literal('idle'),
+    neverPrompted: z.boolean().optional(),
+    unseen: z.string().optional(),
   }),
   z.object({
     state: z.literal('finished'),
+    promptId: z.string().optional(),
     response: z.object({
       stopReason: StopReasonSchema,
       usage: z.custom<acp.Usage>((value) => isRecord(value)).nullish(),
@@ -329,6 +332,13 @@ class AcpSessionImpl implements AcpSession {
     const result = await this.collectTurn(opts.signal, async () =>
       this.agent.prompt({
         sessionId: this.sessionId,
+        ...(opts.promptId === undefined
+          ? {}
+          : {
+              _meta: {
+                [KEEPER_PROMPT_ID]: opts.promptId,
+              },
+            }),
         prompt: [
           ...opts.content,
         ],
@@ -347,11 +357,17 @@ class AcpSessionImpl implements AcpSession {
   enableResume(): void {
     this.resumeTurn = async (opts: AcpResumeTurnOptions) => {
       const ours = this.queue.then(
-        () => this.collectTurn(opts.signal, () => this.keeperTurn()),
-        () => this.collectTurn(opts.signal, () => this.keeperTurn()),
+        () => this.collectTurn(opts.signal, () => this.keeperTurn(opts.promptId)),
+        () => this.collectTurn(opts.signal, () => this.keeperTurn(opts.promptId)),
       );
       this.queue = ours.catch(() => undefined);
-      return await ours;
+      const result = await ours;
+      return (
+        result && {
+          ...result,
+          promptId: opts.promptId,
+        }
+      );
     };
   }
 
@@ -359,7 +375,7 @@ class AcpSessionImpl implements AcpSession {
   resumeTurn?: (opts: AcpResumeTurnOptions) => Promise<AcpTurnResult | undefined>;
 
   /** Ask the keeper for the turn in flight: its updates arrive, then its answer. */
-  private async keeperTurn(): Promise<acp.PromptResponse | undefined> {
+  private async keeperTurn(promptId?: string): Promise<acp.PromptResponse | undefined> {
     const request = this.agent.extMethod?.bind(this.agent);
     if (!request) {
       return undefined;
@@ -367,9 +383,23 @@ class AcpSessionImpl implements AcpSession {
     const answer = KeeperTurnSchema.parse(
       await request(KEEPER_METHODS.turn, {
         sessionId: this.sessionId,
+        promptId,
       }),
     );
-    return answer.state === 'finished' ? answer.response : undefined;
+    if (answer.state === 'finished' && (promptId === undefined || answer.promptId === promptId)) {
+      return answer.response;
+    }
+    if (
+      answer.state === 'idle' &&
+      (promptId === undefined ? answer.neverPrompted === true : answer.unseen === promptId)
+    ) {
+      return undefined;
+    }
+    throw new AcpConnectError({
+      agentId: this.agentId,
+      message: 'The keeper cannot establish whether the prompt already ran.',
+      gone: true,
+    });
   }
 
   /**
@@ -392,10 +422,23 @@ class AcpSessionImpl implements AcpSession {
     const opts = {
       signal,
     };
+    const interruption = Promise.withResolvers<never>();
     const onAbort = () => {
-      // Fire-and-forget: the specification says the agent still answers the
-      // original `session/prompt` with the `cancelled` stop reason.
-      void this.cancel();
+      const reason = opts.signal?.reason;
+      if (
+        typeof reason === 'string' &&
+        (reason === 'acp_link_lost' || reason === 'turn_cut' || reason.startsWith('lease_lost: '))
+      ) {
+        interruption.reject(
+          new AcpConnectError({
+            agentId: this.agentId,
+            message: reason,
+          }),
+        );
+        return;
+      }
+      // The original prompt answers with a cancelled stop reason.
+      void this.cancel().catch(() => undefined);
     };
     opts.signal?.addEventListener('abort', onAbort, {
       once: true,
@@ -404,6 +447,7 @@ class AcpSessionImpl implements AcpSession {
       const response = await Promise.race([
         send(),
         this.death,
+        interruption.promise,
       ]);
       if (!response) {
         return undefined;
